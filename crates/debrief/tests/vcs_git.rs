@@ -159,6 +159,23 @@ fn open_finds_root_from_subdir_file_symlink_and_relative_path() {
 }
 
 #[test]
+fn open_keeps_trailing_newline_in_root_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("ends\n");
+    if std::fs::create_dir(&root).is_err() {
+        eprintln!("skipped: filesystem refuses a newline in a directory name");
+        return;
+    }
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join("a.txt"), "a\n").unwrap();
+    commit(&root, "first");
+    let root = root.canonicalize().unwrap();
+    let v = vcs::open(&root).unwrap();
+    assert_eq!(v.root(), root);
+    assert_eq!(v.log(None, 10).unwrap().len(), 1);
+}
+
+#[test]
 fn open_outside_a_repo_errors() {
     let t = tempfile::tempdir().unwrap();
     let err = vcs::open(t.path()).err().unwrap().to_string();

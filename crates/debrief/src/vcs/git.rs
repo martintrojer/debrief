@@ -36,7 +36,9 @@ impl Git {
     /// Open the git repository containing `dir`.
     pub fn open(dir: &Path) -> Result<Self> {
         let top = git_in(dir, &["rev-parse", "--show-toplevel"])?;
-        let top = PathBuf::from(top.trim_end_matches('\n'));
+        // Strip only the one line terminator: a root name may itself end
+        // in newlines.
+        let top = PathBuf::from(top.strip_suffix('\n').unwrap_or(&top));
         let root = top
             .canonicalize()
             .with_context(|| format!("cannot open {}", top.display()))?;

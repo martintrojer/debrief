@@ -31,7 +31,8 @@ pub enum RowKind {
     /// `\ No newline at end of file` after the line `line` points at.
     /// Never a comment anchor.
     NoNewline,
-    /// A binary file's placeholder row.
+    /// A file's placeholder row instead of hunks: a binary file, a note
+    /// (too large, not a regular file), or [`NO_CONTENT`].
     Binary,
     /// Spacing between the message and files, and between files.
     Blank,
@@ -74,6 +75,10 @@ pub fn gutter_width(num_w: usize) -> usize {
     2 * num_w + 4
 }
 
+/// The placeholder row of a file with no hunks that is not binary (a
+/// mode change, a pure rename or copy, an empty file).
+pub const NO_CONTENT: &str = "(no content changes)";
+
 /// The text of `\ No newline at end of file` rows.
 pub const NO_NEWLINE: &str = "\\ No newline at end of file";
 
@@ -109,11 +114,14 @@ fn header_text(f: &FileDiff) -> String {
     if f.binary {
         s.push_str(" (binary)");
     }
+    if let Some((old, new)) = &f.mode_change {
+        s.push_str(&format!(" (mode {old} → {new})"));
+    }
     format!("── {s} ──")
 }
 
 /// Flatten a commit into rows: message lines, a blank row, then per file
-/// its header, a binary placeholder or its hunks (header, lines, and a
+/// its header, a placeholder or its hunks (header, lines, and a
 /// no-newline row where one applies), files separated by blank rows.
 pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
     let row = |kind, file, hunk, line, text: &str| Row {
@@ -150,6 +158,8 @@ pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
                 None,
                 "binary file not shown",
             ));
+        } else if f.hunks.is_empty() {
+            rows.push(row(RowKind::Binary, Some(fi), None, None, NO_CONTENT));
         }
         for (hi, h) in f.hunks.iter().enumerate() {
             rows.push(row(
@@ -622,6 +632,8 @@ mod tests {
                     new_path: Some("b".into()),
                     binary: false,
                     note: None,
+                    mode_change: None,
+                    copied: false,
                     hunks: vec![Hunk {
                         header: "@@ -1 +1 @@".into(),
                         old_start: 1,
@@ -638,6 +650,8 @@ mod tests {
                     binary: true,
                     hunks: vec![],
                     note: None,
+                    mode_change: None,
+                    copied: false,
                 },
             ],
         };
@@ -670,5 +684,30 @@ mod tests {
         assert_eq!(rows[7].text, NO_NEWLINE);
         let text: Vec<_> = rows[6..9].iter().map(diff_text).collect();
         assert_eq!(text, ["-x", NO_NEWLINE, "+y"]);
+    }
+
+    #[test]
+    fn a_file_without_hunks_gets_a_placeholder_and_its_mode_change() {
+        let diff = CommitDiff {
+            message: String::new(),
+            files: vec![FileDiff {
+                old_path: Some("run.sh".into()),
+                new_path: Some("run.sh".into()),
+                binary: false,
+                note: None,
+                mode_change: Some(("100644".into(), "100755".into())),
+                copied: false,
+                hunks: vec![],
+            }],
+        };
+        let rows = flatten(&diff);
+        let got: Vec<_> = rows.iter().map(|r| (r.kind, r.text.as_str())).collect();
+        assert_eq!(
+            got,
+            [
+                (RowKind::FileHeader, "── run.sh (mode 100644 → 100755) ──"),
+                (RowKind::Binary, NO_CONTENT),
+            ]
+        );
     }
 }

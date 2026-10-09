@@ -118,6 +118,8 @@ pub fn untracked_file(root: &Path, path: &str) -> FileDiff {
         binary: false,
         hunks: Vec::new(),
         note: None,
+        mode_change: None,
+        copied: false,
     };
     let abs = root.join(path);
     let meta = match std::fs::symlink_metadata(&abs) {

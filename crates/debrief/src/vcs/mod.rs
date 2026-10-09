@@ -56,6 +56,46 @@ pub struct FileDiff {
     /// Shown instead of hunks when set: why there is no diff text (an
     /// untracked file that is too large, or not a regular file).
     pub note: Option<String>,
+    /// `(old, new)` file modes when the mode changed (`old mode` /
+    /// `new mode` lines), e.g. `("100644", "100755")`.
+    pub mode_change: Option<(String, String)>,
+    /// A copy (`copy from` / `copy to`), not a rename.
+    pub copied: bool,
+}
+
+/// What happened to a file, as git's status letters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+}
+
+impl FileStatus {
+    /// `A`, `M`, `D`, `R` or `C`.
+    pub fn letter(self) -> char {
+        match self {
+            FileStatus::Added => 'A',
+            FileStatus::Modified => 'M',
+            FileStatus::Deleted => 'D',
+            FileStatus::Renamed => 'R',
+            FileStatus::Copied => 'C',
+        }
+    }
+}
+
+impl FileDiff {
+    pub fn status(&self) -> FileStatus {
+        match (&self.old_path, &self.new_path) {
+            (None, _) => FileStatus::Added,
+            (_, None) => FileStatus::Deleted,
+            _ if self.copied => FileStatus::Copied,
+            (Some(o), Some(n)) if o != n => FileStatus::Renamed,
+            _ => FileStatus::Modified,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

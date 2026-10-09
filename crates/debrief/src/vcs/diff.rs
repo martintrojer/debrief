@@ -45,6 +45,9 @@ struct Section {
     added: bool,
     deleted: bool,
     binary: bool,
+    copied: bool,
+    old_mode: Option<String>,
+    new_mode: Option<String>,
     hunks: Vec<Hunk>,
     old_left: u32,
     new_left: u32,
@@ -64,6 +67,9 @@ impl Section {
             added: false,
             deleted: false,
             binary: false,
+            copied: false,
+            old_mode: None,
+            new_mode: None,
             hunks: Vec::new(),
             old_left: 0,
             new_left: 0,
@@ -81,10 +87,14 @@ impl Section {
             self.added = true;
         } else if line.starts_with("deleted file mode") {
             self.deleted = true;
-        } else if let Some(p) = line
-            .strip_prefix("rename from ")
-            .or_else(|| line.strip_prefix("copy from "))
-        {
+        } else if let Some(m) = line.strip_prefix("old mode ") {
+            self.old_mode = Some(m.to_string());
+        } else if let Some(m) = line.strip_prefix("new mode ") {
+            self.new_mode = Some(m.to_string());
+        } else if let Some(p) = line.strip_prefix("copy from ") {
+            self.copied = true;
+            self.old_path = Some(decode_path(p));
+        } else if let Some(p) = line.strip_prefix("rename from ") {
             self.old_path = Some(decode_path(p));
         } else if let Some(p) = line
             .strip_prefix("rename to ")
@@ -184,6 +194,8 @@ impl Section {
             binary: self.binary,
             hunks: self.hunks,
             note: None,
+            mode_change: self.old_mode.zip(self.new_mode),
+            copied: self.copied,
         }
     }
 }

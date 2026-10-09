@@ -356,3 +356,32 @@ index 7898192261..422c2b7ab3 100644
     assert_eq!(f.hunks[0].lines.len(), 2);
     assert_eq!(f.hunks[0].lines[1].new, Some(2));
 }
+
+#[test]
+fn mode_change_and_status() {
+    use debrief::vcs::FileStatus;
+    let f = one("diff --git a/run.sh b/run.sh
+old mode 100644
+new mode 100755
+");
+    assert_eq!(
+        f.mode_change,
+        Some(("100644".to_string(), "100755".to_string()))
+    );
+    assert!(f.hunks.is_empty());
+    assert_eq!(f.status(), FileStatus::Modified);
+    let f = one("diff --git a/a b/b
+similarity index 90%
+copy from a
+copy to b
+");
+    assert_eq!(paths(&f), (Some("a"), Some("b")));
+    assert_eq!((f.status(), f.status().letter()), (FileStatus::Copied, 'C'));
+    let f = one("diff --git a/a b/b
+similarity index 100%
+rename from a
+rename to b
+");
+    assert_eq!(f.status().letter(), 'R');
+    assert_eq!(f.mode_change, None);
+}

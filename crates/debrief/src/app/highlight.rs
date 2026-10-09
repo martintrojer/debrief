@@ -85,21 +85,23 @@ fn syntax_for(path: &str, first_line: Option<&str>) -> Option<&'static SyntaxRef
     found.filter(|s| s.name != ss.find_syntax_plain_text().name)
 }
 
-/// The file's first line, when its first hunk starts there (new side
-/// first).
+/// The file's first line: the new side's line 1, else (a deleted or
+/// emptied file, or an empty new line 1) the old side's. `None` when the
+/// first hunk does not start at line 1 on either side.
 fn first_line(f: &FileDiff) -> Option<&str> {
     let h = f.hunks.first()?;
-    let side = if h.new_start <= 1 {
-        LineKind::Added
-    } else if h.old_start <= 1 {
-        LineKind::Removed
-    } else {
-        return None;
+    let line1 = |start: u32, side: LineKind| {
+        (start == 1)
+            .then(|| {
+                h.lines
+                    .iter()
+                    .find(|l| l.kind == side || l.kind == LineKind::Context)
+            })
+            .flatten()
+            .map(|l| l.text.as_str())
+            .filter(|t| !t.is_empty())
     };
-    h.lines
-        .iter()
-        .find(|l| l.kind == side || l.kind == LineKind::Context)
-        .map(|l| l.text.as_str())
+    line1(h.new_start, LineKind::Added).or_else(|| line1(h.old_start, LineKind::Removed))
 }
 
 /// Colours for every line of `diff`; `None` when no line has any (all
@@ -266,6 +268,33 @@ mod tests {
         assert!(highlight_file(&f)[0][1].is_some(), "shebang picks sh");
         let f = file("Makefile", 5, vec![line(LineKind::Added, "all: x")]);
         assert!(highlight_file(&f)[0][0].is_some());
+    }
+
+    #[test]
+    fn a_deleted_or_emptied_script_uses_its_old_first_line() {
+        let gone = vec![
+            line(LineKind::Removed, "#!/bin/sh"),
+            line(LineKind::Removed, "echo hello"),
+        ];
+        // `git rm run`: `@@ -1,2 +0,0 @@`.
+        let mut f = file("run", 1, gone);
+        f.hunks[0].new_start = 0;
+        f.new_path = None;
+        let s = &highlight_file(&f)[0];
+        assert!(s.iter().all(Option::is_some), "shell colours: {s:?}");
+        let echo = fg_of(s, 1, "echo hello", "echo").unwrap();
+        assert_ne!(fg_of(s, 1, "echo hello", "hello"), Some(echo));
+        // The new line 1 is empty: the old one still decides.
+        let f = file(
+            "run",
+            1,
+            vec![
+                line(LineKind::Removed, "#!/bin/sh"),
+                line(LineKind::Added, ""),
+                line(LineKind::Removed, "echo hello"),
+            ],
+        );
+        assert!(highlight_file(&f)[0][2].is_some());
     }
 
     #[test]

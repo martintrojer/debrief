@@ -243,6 +243,9 @@ pub struct CommitView {
     pub(super) hscroll: usize,
     /// Diff rows on screen, from the layout.
     pub(super) view_h: usize,
+    /// Rows the view may scroll past the last one (room for the comment
+    /// box under them).
+    pub(super) overscroll: usize,
     /// Text columns on screen (after the gutter), from the layout.
     pub(super) text_w: usize,
     pub(super) search: Search,
@@ -276,6 +279,7 @@ impl CommitView {
             scroll: 0,
             hscroll: 0,
             view_h: 20,
+            overscroll: 0,
             text_w: 60,
             search: Search::default(),
             anchor: 0,
@@ -667,13 +671,16 @@ impl App {
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
         let diff = self.commit_layout(area).diff;
         let marks = self.review_gutter();
+        let over = self.comment_overscroll();
         if let Some(v) = &mut self.commit {
             v.view_h = (diff.height as usize).max(1);
+            v.overscroll = over;
             v.text_w = (diff.width as usize)
                 .saturating_sub(gutter_width(v.num_w) + marks)
                 .max(1);
             v.keep_visible();
         }
+        self.comment_fit();
     }
 }
 

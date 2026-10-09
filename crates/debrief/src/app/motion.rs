@@ -325,8 +325,8 @@ impl CommitView {
 
     // Scrolling (ramble's scroll.rs).
 
-    fn max_scroll(&self) -> usize {
-        self.rows.len().saturating_sub(self.view_h)
+    pub(super) fn max_scroll(&self) -> usize {
+        (self.rows.len() + self.overscroll).saturating_sub(self.view_h)
     }
 
     /// `C-d` (down) / `C-u` (up).

@@ -149,7 +149,8 @@ a file list on the left (hidden below 80 columns).
 
 `cc` and `c` open a comment box directly below the commented lines (above
 them when there's no room), so the lines stay in view and stay
-highlighted. Its title shows the kind and the lines (`comment [ISSUE]
+highlighted. The box never covers them: with no room on either side the
+diff scrolls until the last selected line sits just above the box. Its title shows the kind and the lines (`comment [ISSUE]
 L12-18`). It grows with the text up to 8 rows, then scrolls; the usual
 readline keys and Up/Down edit it.
 

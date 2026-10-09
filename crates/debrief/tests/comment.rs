@@ -1073,6 +1073,7 @@ fn the_box_opens_below_a_selection_in_the_middle_and_keeps_it_highlighted() {
 fn the_box_opens_above_rows_at_the_bottom() {
     let f = fixture();
     let mut app = f.open();
+    app.event(AppEvent::Resize(100, 30));
     keys(&mut app, "G");
     let r = app.commit_cursor().row;
     keys(&mut app, "cc");
@@ -1166,4 +1167,74 @@ fn the_box_follows_a_resize() {
     assert!(narrow.rect.bottom() <= 11, "inside the pane");
     press(&mut app, KeyCode::Enter);
     assert_eq!(f.comments()[0].body, "word ".repeat(20).trim());
+}
+
+/// The box covers none of rows `lo..=hi` that are on screen.
+fn off_the_rows(app: &App, bx: &CommentBox, lo: usize, hi: usize, pane_y: u16) -> bool {
+    let s = app.commit_scroll().0;
+    (lo.max(s)..=hi).all(|r| {
+        let y = pane_y + (r - s) as u16;
+        y < bx.rect.y || y >= bx.rect.bottom()
+    })
+}
+
+#[test]
+fn a_selection_taller_than_the_screen_shows_its_last_rows_above_the_box() {
+    let f = fixture();
+    let mut app = f.open();
+    let (a, b) = (added(&app, "g1"), added(&app, "g50"));
+    app.event(AppEvent::Resize(60, 12));
+    select_and_comment(&mut app, a, b);
+    assert_eq!(app.mode(), Mode::Comment, "{}", app.status());
+    let (lines, bx, _) = draw_box(&mut app, 60, 12);
+    let bx = bx.unwrap();
+    let pane = app.commit_layout(Rect::new(0, 0, 60, 11)).diff;
+    assert!(off_the_rows(&app, &bx, a, b, pane.y), "{:?}", bx.rect);
+    let y = pane.y + on_screen(&app, b);
+    assert_eq!(bx.rect.y, y + 1, "the last row just above the box");
+    assert!(lines[y as usize].contains("g50"), "{}", lines[y as usize]);
+    // The box grows; the rows move up out of its way.
+    for _ in 0..3 {
+        press_ctrl(&mut app, 'j');
+    }
+    let (lines, bx, _) = draw_box(&mut app, 60, 12);
+    let bx = bx.unwrap();
+    assert_eq!(bx.rect.height, 6);
+    assert!(off_the_rows(&app, &bx, a, b, pane.y), "{:?}", bx.rect);
+    assert!(lines[bx.rect.y as usize - 1].contains("g50"));
+}
+
+#[test]
+fn a_one_row_comment_at_heights_6_and_8_never_covers_its_row() {
+    let f = fixture();
+    let mut app = f.open();
+    let first = added(&app, "g1");
+    for (w, h) in [(40, 6), (100, 6), (40, 8), (100, 8)] {
+        app.event(AppEvent::Resize(w, h));
+        for r in first..first + 12 {
+            for (anchor, body) in [("zt", 1), ("zz", 1), ("zb", 1), ("zz", 3), ("zb", 3)] {
+                goto(&mut app, r);
+                keys(&mut app, anchor);
+                keys(&mut app, "cc");
+                assert_eq!(app.mode(), Mode::Comment, "{}", app.status());
+                // A three-line body: a 5-row box.
+                for _ in 1..body {
+                    press_ctrl(&mut app, 'j');
+                }
+                let (lines, bx, _) = draw_box(&mut app, w, h);
+                let bx = bx.unwrap();
+                let pane = app.commit_layout(Rect::new(0, 0, w, h - 1)).diff;
+                assert!(
+                    off_the_rows(&app, &bx, r, r, pane.y),
+                    "{w}x{h} row {r} {anchor} body {body}: {:?} scroll {}",
+                    bx.rect,
+                    app.commit_scroll().0
+                );
+                let y = pane.y + on_screen(&app, r);
+                let text = &app.commit_rows()[r].text;
+                assert!(lines[y as usize].contains(text.as_str()));
+                press(&mut app, KeyCode::Esc);
+            }
+        }
+    }
 }

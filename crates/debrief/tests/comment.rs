@@ -904,3 +904,61 @@ fn ctrl_e_keeps_the_kind() {
     assert_eq!(c.body, "from the editor");
     assert_eq!(c.kind.as_deref(), Some("issue"));
 }
+
+#[test]
+fn kinds_show_in_the_picker_the_popup_and_the_preview() {
+    let f = fixture();
+    let mut app = f.open();
+    let row = added(&app, "a40 new");
+    goto(&mut app, row);
+    keys(&mut app, "cc");
+    press(&mut app, KeyCode::Tab);
+    type_and_save(&mut app, "broken");
+    assert_eq!(app.review_preview().as_deref(), Some("● [ISSUE] broken"));
+    keys(&mut app, "K");
+    assert_eq!(app.popup(), Some("● line 37 [ISSUE]\nbroken"));
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, " rl");
+    assert_eq!(app.picker().unwrap().items[0].detail, "[ISSUE] broken");
+    assert!(
+        screen(&mut app)
+            .iter()
+            .any(|l| l.contains("[ISSUE] broken"))
+    );
+    // The label filters too.
+    keys(&mut app, "issue");
+    assert_eq!(app.picker().unwrap().items.len(), 1);
+}
+
+#[test]
+fn send_exports_the_label_and_a_legend_of_the_configured_kinds() {
+    let f = fixture();
+    let out = f.root.parent().unwrap().join("sent.md");
+    let cmd = format!("cat > '{}'", out.display());
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config = debrief::app::config::Config::parse(&format!(
+        "[send]\ncommand = [\"sh\", \"-c\", \"{}\"]\n\
+         [review]\nkinds = [{{ id = \"praise\", definition = \"Keep doing this.\" }}, {{ id = \"issue\" }}]\n",
+        cmd.replace('"', "\\\"")
+    ))
+    .unwrap();
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    press(&mut app, KeyCode::Tab);
+    type_and_save(&mut app, "nice");
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert_eq!(app.status(), "Review sent (1 comments)");
+    let md = std::fs::read_to_string(&out).unwrap();
+    assert!(md.contains("## Item 1 [PRAISE]"), "{md}");
+    assert!(md.contains("- PRAISE: Keep doing this."), "{md}");
+    assert!(!md.contains("ISSUE"), "only used kinds: {md}");
+}

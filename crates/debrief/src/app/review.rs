@@ -33,6 +33,13 @@ pub const NO_MORE_REVIEW: &str = "No more review comments";
 /// Status when there is no batch (the cache dir couldn't be read).
 pub const NO_BATCH: &str = "No review batch";
 
+/// `[ISSUE] ` for a typed comment, `""` for an untyped one.
+pub fn kind_tag(c: &Comment) -> String {
+    c.kind.as_deref().map_or(String::new(), |k| {
+        format!("[{}] ", debrief_review::Kind::label(k))
+    })
+}
+
 impl App {
     /// Open the batch for the repo root; a failure leaves the status.
     pub(super) fn review_open(&mut self) {
@@ -148,11 +155,15 @@ impl App {
         usize::from(!self.comments_here().is_empty())
     }
 
-    /// The status-line preview: `● ` and the first line of the first
-    /// comment on the cursor row.
+    /// The status-line preview: `● `, the kind (`[ISSUE] `) and the first
+    /// line of the first comment on the cursor row.
     pub fn review_preview(&self) -> Option<String> {
         let c = *self.comments_at(self.commit_cursor().row).first()?;
-        Some(format!("{MARKER} {}", c.body.lines().next().unwrap_or("")))
+        Some(format!(
+            "{MARKER} {}{}",
+            kind_tag(c),
+            c.body.lines().next().unwrap_or("")
+        ))
     }
 
     /// Rows `]r` / `[r` stop on: the first marked row of each comment.
@@ -199,7 +210,7 @@ impl App {
     }
 
     /// `K`: every comment on the cursor row, `● line a` / `● lines a-b`
-    /// over its body, in a popup.
+    /// (and its kind, `[ISSUE]`) over its body, in a popup.
     pub(super) fn review_hover(&mut self) {
         let cs = self.comments_at(self.commit_cursor().row);
         if cs.is_empty() {
@@ -214,7 +225,8 @@ impl App {
                 } else {
                     format!("lines {a}-{b}")
                 };
-                format!("{MARKER} {at}\n{}", c.body.trim_end())
+                let head = format!("{MARKER} {at} {}", kind_tag(c));
+                format!("{}\n{}", head.trim_end(), c.body.trim_end())
             })
             .collect();
         self.popup = Some(parts.join("\n\n"));

@@ -41,7 +41,7 @@ pub struct PickerItem {
     pub id: u64,
     /// `path:lines` and, for diff comments, ` @<short commit>` and the side.
     pub label: String,
-    /// The body's first line.
+    /// The kind (`[ISSUE] `) and the body's first line.
     pub detail: String,
 }
 
@@ -102,7 +102,11 @@ fn item(c: &Comment) -> PickerItem {
     PickerItem {
         id: c.id,
         label: format!("{}:{lines}{rev}", c.path),
-        detail: c.body.lines().next().unwrap_or("").to_string(),
+        detail: format!(
+            "{}{}",
+            super::review::kind_tag(c),
+            c.body.lines().next().unwrap_or("")
+        ),
     }
 }
 
@@ -336,7 +340,7 @@ impl App {
         let n = ids.len();
         let md = r.to_markdown(
             self.config.send.preamble.as_deref(),
-            &debrief_review::builtin_kinds(),
+            &self.config.review.kinds,
         );
         let root = r.root().to_path_buf();
         let terminal = &mut self.terminal;

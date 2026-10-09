@@ -1275,3 +1275,29 @@ fn page_keys_scroll_the_diff_behind_the_box_which_follows_its_rows() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(f.comments()[0].body, "draft");
 }
+
+#[test]
+fn the_box_is_drawn_over_everything_with_the_file_list_shown_and_resized() {
+    let f = fixture();
+    let mut app = f.open();
+    app.event(AppEvent::Resize(100, 30));
+    assert!(
+        app.commit_layout(Rect::new(0, 0, 100, 29))
+            .sidebar
+            .is_some()
+    );
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "ccdraft");
+    for (w, h) in [(100, 30), (60, 12), (40, 12)] {
+        app.event(AppEvent::Resize(w, h));
+        assert_eq!(app.mode(), Mode::Comment);
+        let (lines, bx, cur) = draw_box(&mut app, w, h);
+        let bx = bx.unwrap();
+        let top = &lines[bx.rect.y as usize];
+        assert!(top.contains("╭ comment L3 "), "{w}x{h} title: {top}");
+        let body = &lines[bx.rect.y as usize + 1];
+        assert!(body.contains("│draft"), "{w}x{h} draft: {body}");
+        assert_eq!(cur, (bx.rect.x + 6, bx.rect.y + 1), "{w}x{h} cursor");
+    }
+}

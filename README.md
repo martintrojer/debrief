@@ -142,6 +142,7 @@ a file list on the left (hidden below 80 columns).
 | box: `Enter` / `Esc` / `C-e` | save / cancel / finish in `$EDITOR` |
 | box: `C-j` or `Alt-Enter` | new line |
 | box: `Tab` / `S-Tab` | next / previous kind (`comment [ISSUE] L3`), back round to untyped |
+| box: `PageUp` / `PageDown` | scroll the diff behind the box |
 | `]r` `[r` | next / previous commented line (`●` in the gutter) |
 | `K` | show the comments on this line (j/k, C-d/C-u, gg/G scroll a long one; q or Esc closes) |
 | `<leader>rl` | list the batch: type to filter, `Enter` go, `C-d` remove, `C-e` edit |

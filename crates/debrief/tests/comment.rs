@@ -1238,3 +1238,40 @@ fn a_one_row_comment_at_heights_6_and_8_never_covers_its_row() {
         }
     }
 }
+
+#[test]
+fn page_keys_scroll_the_diff_behind_the_box_which_follows_its_rows() {
+    let f = fixture();
+    let mut app = f.open();
+    app.event(AppEvent::Resize(60, 12));
+    let r = added(&app, "g20");
+    goto(&mut app, r);
+    keys(&mut app, "zz");
+    keys(&mut app, "ccdraft");
+    let (_, bx, _) = draw_box(&mut app, 60, 12);
+    let before = app.commit_scroll().0;
+    assert_eq!(bx.unwrap().rect.y, on_screen(&app, r) + 1, "below the row");
+    // Down a page: the row scrolls off the top, the box pins there.
+    press(&mut app, KeyCode::PageDown);
+    assert_eq!(app.mode(), Mode::Comment);
+    let after = app.commit_scroll().0;
+    assert!(after > r, "scrolled past the row: {before} -> {after}");
+    let (lines, bx, _) = draw_box(&mut app, 60, 12);
+    let bx = bx.unwrap();
+    assert_eq!(bx.rect.y, 0, "pinned to the top edge");
+    assert!(lines[1].contains("draft"), "{}", lines[1]);
+    // Back up: the box is beside its row again, the text kept.
+    press(&mut app, KeyCode::PageUp);
+    let (_, bx, _) = draw_box(&mut app, 60, 12);
+    let bx = bx.unwrap();
+    assert!(app.commit_scroll().0 <= r);
+    let y = on_screen(&app, r);
+    assert!(
+        bx.rect.y == y + 1 || bx.rect.bottom() == y,
+        "{:?} row {y}",
+        bx.rect
+    );
+    assert_eq!(app.comment_text(), Some("draft"));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(f.comments()[0].body, "draft");
+}

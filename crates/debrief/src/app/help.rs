@@ -220,6 +220,12 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Esc", P, G::Review, "in a comment: cancel"),
         b("C-e", P, G::Review, "in a comment: edit in $EDITOR"),
         b(
+            "PageUp, PageDown",
+            P,
+            G::Review,
+            "in a comment: scroll the diff (the box follows)",
+        ),
+        b(
             "Backspace",
             P,
             G::Review,
@@ -304,7 +310,7 @@ impl App {
 }
 
 /// Named keys of the `keys` notation, as whole alternatives.
-pub(super) const NAMED: [(&str, KeyCode); 9] = [
+pub(super) const NAMED: [(&str, KeyCode); 11] = [
     ("Enter", KeyCode::Enter),
     ("Esc", KeyCode::Esc),
     ("Down", KeyCode::Down),
@@ -314,6 +320,8 @@ pub(super) const NAMED: [(&str, KeyCode); 9] = [
     ("Backspace", KeyCode::Backspace),
     ("Tab", KeyCode::Tab),
     ("S-Tab", KeyCode::BackTab),
+    ("PageUp", KeyCode::PageUp),
+    ("PageDown", KeyCode::PageDown),
 ];
 
 /// One token of a row's key alternative.

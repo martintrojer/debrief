@@ -4,8 +4,8 @@
 //! (above when it doesn't fit) takes the body, as in ramble: Enter saves,
 //! `C-j` / `Alt-Enter` insert a newline, Esc cancels, `C-e` moves it into
 //! `$EDITOR`, Tab / S-Tab pick the kind from `[review] kinds`, readline
-//! keys edit it (see [`super::textbox`]). The rows stay highlighted while
-//! typing.
+//! keys edit it (see [`super::textbox`]), PageUp / PageDown scroll the
+//! diff behind it. The rows stay highlighted while typing.
 //!
 //! On the working copy (spec Q23, K11) new and context lines make
 //! ramble-style comments: no revision, the new path, the line numbers of
@@ -222,11 +222,17 @@ fn paste_text(text: &str) -> String {
         .collect()
 }
 
-/// Keys while typing a comment.
+/// Keys while typing a comment: the box's, and PageUp / PageDown scroll
+/// the diff behind it (the box follows its rows).
 pub(super) fn comment_keymap(keys: &[KeyEvent]) -> KeyResult {
     let Some(key) = keys.last() else {
         return KeyResult::None;
     };
+    match key.code {
+        KeyCode::PageDown => return KeyResult::Action(Action::PageDown),
+        KeyCode::PageUp => return KeyResult::Action(Action::PageUp),
+        _ => {}
+    }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let a = match key.code {

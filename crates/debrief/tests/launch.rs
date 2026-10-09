@@ -273,6 +273,46 @@ fn launchers_are_configurable() {
     assert_eq!(argv[1], format!("{}:7", f.file("e.txt")));
 }
 
+/// Configured launcher keys win over built-in `<leader>` keys (ramble's
+/// order): `rx` and `rrx` are reachable, and `ex` beats the commit
+/// screen's `<leader>e` because a launcher prefix waits.
+#[test]
+fn configured_launcher_keys_win_over_built_ins() {
+    let f = fixture();
+    let launcher = |name: &str, key: &str| {
+        format!(
+            "[[launch]]\nname = \"{name}\"\nkey = \"{key}\"\ncommand = [\"${{editor}}\", \"{name}\"]\n"
+        )
+    };
+    let toml = ["rx", "rrx", "ex"]
+        .map(|k| launcher(k, &format!("<leader>{k}")))
+        .concat();
+    let mut c = Config::parse(&toml).unwrap();
+    c.launch
+        .retain(|l| ["rx", "rrx", "ex"].contains(&l.name.as_str()));
+    let mut app = f.app_with(c);
+    for (screen, open) in [("log", false), ("commit", true)] {
+        if open {
+            keys(&mut app, "gg");
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.screen(), Screen::Commit(0));
+        }
+        for k in ["rx", "rrx", "ex"] {
+            keys(&mut app, &format!(" {k}"));
+            assert!(
+                matches!(app.pending_effect(), Some(Effect::Launch(l)) if l.name == k),
+                "<leader>{k} on {screen}: {:?} / {}",
+                app.pending_effect(),
+                app.status()
+            );
+            assert_eq!(f.run(&mut app).last().map(String::as_str), Some(k));
+        }
+    }
+    // The built-ins still work where no launcher claims the sequence.
+    keys(&mut app, " rl");
+    assert!(app.picker().is_some(), "<leader>rl still opens the picker");
+}
+
 #[test]
 fn enter_on_a_md_header_runs_the_md_launcher() {
     let f = fixture();

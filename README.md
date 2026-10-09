@@ -116,7 +116,9 @@ command = ["debrief-send"]   # default: none, copy to the clipboard
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}
 # (an argument that is exactly "${editor}" expands to $VISUAL / $EDITOR /
 # vi, split into words). Entries merge into the defaults by name;
-# `disabled = true` drops one.
+# `disabled = true` drops one. A launcher key wins over a built-in
+# <leader> key it shares a prefix with (<leader>rx shadows nothing,
+# <leader>ex replaces <leader>e on the commit screen), as in ramble.
 [[launch]]
 name = "edit"                # default: <leader>o
 key = "<leader>o"

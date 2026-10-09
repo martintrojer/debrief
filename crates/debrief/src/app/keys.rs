@@ -224,25 +224,24 @@ impl App {
         Some(if keys.len() > 2 { KeyResult::None } else { r })
     }
 
-    /// Keys after `<leader>`: built-ins first (`e` on the commit screen),
-    /// then the `[[launch]]` keys.
+    /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
+    /// prefix waits for more keys), then the built-ins (`e` on the commit
+    /// screen, `rl`, `rr`), as in ramble.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent], commit: bool) -> KeyResult {
         let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
             return KeyResult::None;
         };
-        match typed.as_slice() {
-            [] | ['r'] => return KeyResult::Pending,
-            ['e'] if commit => return KeyResult::Action(Action::ToggleSidebar),
-            ['r', 'l'] => return KeyResult::Action(Action::ReviewList),
-            ['r', 'r'] => return KeyResult::Action(Action::ReviewSend),
-            ['r', _] => return KeyResult::None,
-            _ => {}
-        }
         use super::launch::LeaderMatch;
         match super::launch::match_leader(&self.launch_keys, &typed) {
             LeaderMatch::Launch(i) => KeyResult::Action(Action::Launch(i)),
             LeaderMatch::Pending => KeyResult::Pending,
-            LeaderMatch::NoMapping => KeyResult::None,
+            LeaderMatch::NoMapping => match typed.as_slice() {
+                [] | ['r'] => KeyResult::Pending,
+                ['e'] if commit => KeyResult::Action(Action::ToggleSidebar),
+                ['r', 'l'] => KeyResult::Action(Action::ReviewList),
+                ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
+                _ => KeyResult::None,
+            },
         }
     }
 

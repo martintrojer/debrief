@@ -16,12 +16,19 @@ use crate::vcs::{CommitStat, FileStat};
 /// `(plus, minus)` bar lengths for a file's counts, scaled so the
 /// widest count (`max` changed lines) fits `width` columns, as git does:
 /// unscaled when it fits; scaled, a non-zero side keeps at least one.
-pub fn bar(added: u32, removed: u32, max: u32, width: usize) -> (usize, usize) {
-    let (a, r, max, w) = (added as u64, removed as u64, max as u64, width as u64);
+/// Counts are `u64` so two `u32` sides never overflow.
+pub fn bar(a: u64, r: u64, max: u64, width: usize) -> (usize, usize) {
+    let w = width as u64;
     if max <= w {
         return (a as usize, r as usize);
     }
-    let scale = |n: u64| if n == 0 { 0 } else { (n * w / max).max(1) };
+    let scale = |n: u64| {
+        if n == 0 {
+            0
+        } else {
+            (u128::from(n) * u128::from(w) / u128::from(max)).max(1) as u64
+        }
+    };
     let total = scale(a + r).min(w);
     let plus = scale(a).min(total);
     let minus = total - plus;
@@ -63,12 +70,12 @@ pub fn date_label(now: i64, then: i64) -> String {
 
 /// `N files changed, X insertions(+), Y deletions(-)`.
 pub fn summary(files: &[FileStat]) -> String {
-    let add: u32 = files.iter().filter_map(|f| f.added).sum();
-    let del: u32 = files.iter().filter_map(|f| f.removed).sum();
-    let s = |n: u32, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let add: u64 = files.iter().filter_map(|f| f.added).map(u64::from).sum();
+    let del: u64 = files.iter().filter_map(|f| f.removed).map(u64::from).sum();
+    let s = |n: u64, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     format!(
         "{}, {}, {}",
-        s(files.len() as u32, "file changed", "files changed"),
+        s(files.len() as u64, "file changed", "files changed"),
         s(add, "insertion(+)", "insertions(+)"),
         s(del, "deletion(-)", "deletions(-)")
     )
@@ -104,7 +111,8 @@ fn fit_start(s: &str, w: usize) -> String {
 
 /// The `path | N ++--` rows for a pane `width` columns wide.
 pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
-    let changed = |f: &FileStat| f.added.unwrap_or(0) + f.removed.unwrap_or(0);
+    let changed =
+        |f: &FileStat| u64::from(f.added.unwrap_or(0)) + u64::from(f.removed.unwrap_or(0));
     let max = files.iter().map(changed).max().unwrap_or(0);
     let num_w = files
         .iter()
@@ -114,14 +122,17 @@ pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
         })
         .max()
         .unwrap_or(1);
-    let path_w = files
-        .iter()
-        .map(|f| file_label(f).width())
-        .max()
-        .unwrap_or(0)
-        // Leave the bar a third of the pane (or all it needs).
-        .min(width.saturating_sub(num_w + 4 + (max as usize).min(width / 3)))
-        .max(1);
+    let path_w =
+        files
+            .iter()
+            .map(|f| file_label(f).width())
+            .max()
+            .unwrap_or(0)
+            // Leave the bar a third of the pane (or all it needs).
+            .min(width.saturating_sub(
+                num_w + 4 + usize::try_from(max).unwrap_or(usize::MAX).min(width / 3),
+            ))
+            .max(1);
     let bar_w = width.saturating_sub(path_w + 3 + num_w + 1).max(1);
     let text = Style::new().fg(palette::TEXT);
     files
@@ -133,8 +144,8 @@ pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
             ];
             match (f.added, f.removed) {
                 (Some(a), Some(r)) => {
-                    let (p, m) = bar(a, r, max, bar_w);
-                    spans.push(Span::styled(format!("{:>num_w$} ", a + r), text));
+                    let (p, m) = bar(a.into(), r.into(), max, bar_w);
+                    spans.push(Span::styled(format!("{:>num_w$} ", changed(f)), text));
                     spans.push(Span::styled("+".repeat(p), Style::new().fg(palette::GREEN)));
                     spans.push(Span::styled("-".repeat(m), Style::new().fg(palette::RED)));
                 }
@@ -247,6 +258,30 @@ mod tests {
         assert_eq!(bar(0, 1, 1000, 10), (0, 1));
         assert_eq!(bar(999, 1, 1000, 10), (9, 1));
         assert_eq!(bar(0, 0, 1000, 10), (0, 0));
+    }
+
+    #[test]
+    fn huge_counts_sum_in_u64_and_scale() {
+        let f = |p: &str, a, r| FileStat {
+            path: p.into(),
+            old_path: None,
+            added: Some(a),
+            removed: Some(r),
+        };
+        let files = vec![f("a", u32::MAX, 1), f("b", 1, u32::MAX)];
+        assert_eq!(
+            summary(&files),
+            "2 files changed, 4294967296 insertions(+), 4294967296 deletions(-)"
+        );
+        let text: Vec<String> = file_lines(&files, 40)
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(text[0].starts_with("a | 4294967296 +"), "{text:?}");
+        assert!(text[0].ends_with("+-"), "{text:?}");
+        assert!(text.iter().all(|l| l.chars().count() <= 40), "{text:?}");
+        let big = u64::from(u32::MAX) + 1;
+        assert_eq!(bar(big, 0, big, 10), (10, 0));
     }
 
     #[test]

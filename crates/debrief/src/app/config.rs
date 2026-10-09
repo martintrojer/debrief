@@ -27,7 +27,7 @@ pub struct Config {
 /// `[review]`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewConfig {
-    /// Kinds Tab cycles through in the comment prompt, in order; the
+    /// Kinds Tab cycles through in the comment box, in order; the
     /// export's legend defines them. Omitted: debrief-review's built-ins;
     /// a list replaces them; `[]` leaves comments untyped.
     pub kinds: Vec<Kind>,

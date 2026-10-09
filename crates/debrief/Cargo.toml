@@ -8,8 +8,19 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "debrief"
+path = "src/main.rs"
+
 [dependencies]
+anyhow = "1"
 debrief-review = { path = "../debrief-review", version = "0.1.0" }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

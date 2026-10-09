@@ -22,9 +22,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::{CommitDiff, CommitInfo, Kind, OpenOptions, Vcs, parse_unified, run};
+use super::{
+    CommitDiff, CommitInfo, CommitStat, Kind, OpenOptions, Vcs, file_stats, parse_unified, run,
+};
 
 const LOG_TEMPLATE: &str = r#"commit_id ++ "\x1f" ++ change_id ++ "\x1f" ++ author.name() ++ "\x1f" ++ author.timestamp().format("%s") ++ "\x1f" ++ description.first_line() ++ "\x1f" ++ parents.map(|c| c.commit_id()).join(" ") ++ "\x1e""#;
+
+const STAT_TEMPLATE: &str = r#"author.name() ++ "\x1f" ++ author.email() ++ "\x1f" ++ author.timestamp().format("%s") ++ "\x1f" ++ description"#;
 
 pub struct Jj {
     root: PathBuf,
@@ -224,6 +228,40 @@ impl Vcs for Jj {
             files: parse_unified(&patch),
         })
     }
+
+    fn stat(&self, commit: &str) -> Result<CommitStat> {
+        // `jj diff --stat` is for people; count the git diff instead.
+        let op = self.at_op()?;
+        let id = self.resolve(&op, commit)?;
+        let rev = format!("--revisions={id}");
+        let head = self.jj(&op, &["log", "--no-graph", &rev, "-T", STAT_TEMPLATE])?;
+        let (author, email, time, message) = parse_stat_header(&head)?;
+        let patch = self.jj(&op, &["diff", "--git", &rev])?;
+        Ok(CommitStat {
+            message,
+            author,
+            email,
+            time,
+            files: file_stats(&parse_unified(&patch)),
+        })
+    }
+}
+
+/// [`STAT_TEMPLATE`]'s output: author, email, time, then the description.
+fn parse_stat_header(out: &str) -> Result<(String, String, i64, String)> {
+    let f: Vec<&str> = out.splitn(4, '\x1f').collect();
+    let [author, email, time, message] = f[..] else {
+        bail!("unexpected jj log output: {out:?}");
+    };
+    let time = time
+        .parse()
+        .with_context(|| format!("bad time in jj log: {time:?}"))?;
+    Ok((
+        author.to_string(),
+        email.to_string(),
+        time,
+        message.trim_end_matches('\n').to_string(),
+    ))
 }
 
 fn parse_record(rec: &str) -> Result<CommitInfo> {

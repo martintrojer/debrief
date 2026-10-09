@@ -43,6 +43,9 @@ impl Vcs for Fake {
     fn show(&self, _: &str) -> anyhow::Result<CommitDiff> {
         Ok(self.diff.clone())
     }
+    fn stat(&self, _: &str) -> anyhow::Result<vcs::CommitStat> {
+        anyhow::bail!("no stat")
+    }
 }
 
 fn file(old: Option<&str>, new: Option<&str>, lines: Vec<DiffLine>) -> FileDiff {

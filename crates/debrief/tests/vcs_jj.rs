@@ -313,3 +313,68 @@ fn working_copy_commit_is_this_workspaces_at() {
     assert_eq!(v.working_copy_commit().unwrap().as_deref(), Some(at.trim()));
     assert_eq!(v.working_copy().unwrap(), None, "jj has no extra row");
 }
+
+#[test]
+fn stat_counts_lines_per_file() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let log = v.log(Some("::@ ~ root()"), 200).unwrap();
+    let s = v.stat(&log[1].commit).unwrap();
+    assert_eq!(s.message, "second");
+    assert_eq!(s.author, "t");
+    assert_eq!(s.email, "t@t");
+    assert_eq!(s.time, log[1].time);
+    let rows: Vec<_> = s
+        .files
+        .iter()
+        .map(|f| (f.old_path.as_deref(), f.path.as_str(), f.added, f.removed))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (None, "a.txt", Some(1), Some(1)),
+            (None, "b.txt", Some(1), Some(0))
+        ]
+    );
+    let first = v.stat(&log[2].commit).unwrap();
+    assert_eq!(first.message, "first\n\nbody");
+    // A change ID works as in show; the empty @ has no files.
+    assert!(
+        v.stat(log[0].change.as_deref().unwrap())
+            .unwrap()
+            .files
+            .is_empty()
+    );
+}
+
+#[test]
+fn stat_rename_and_binary() {
+    if !have_jj() {
+        return;
+    }
+    let e = Env::new(false);
+    e.write("a.txt", "a\nb\nc\nd\n");
+    std::fs::write(e.root.join("bin"), b"\0\x01").unwrap();
+    e.jj(&["--quiet", "commit", "-m", "one"]);
+    std::fs::rename(e.root.join("a.txt"), e.root.join("z.txt")).unwrap();
+    std::fs::write(e.root.join("bin"), b"\0\x02").unwrap();
+    e.jj(&["--quiet", "commit", "-m", "two"]);
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let log = v.log(Some("::@ ~ root()"), 200).unwrap();
+    let s = v.stat(&log[1].commit).unwrap();
+    let rows: Vec<_> = s
+        .files
+        .iter()
+        .map(|f| (f.old_path.as_deref(), f.path.as_str(), f.added, f.removed))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (None, "bin", None, None),
+            (Some("a.txt"), "z.txt", Some(0), Some(0))
+        ]
+    );
+}

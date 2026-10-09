@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::{
-    CommitDiff, CommitInfo, DiffLine, FileDiff, Hunk, Kind, LineKind, OpenOptions, Vcs,
-    WorkingCopy, parse_unified, run,
+    CommitDiff, CommitInfo, CommitStat, DiffLine, FileDiff, FileStat, Hunk, Kind, LineKind,
+    OpenOptions, Vcs, WorkingCopy, parse_unified, run,
 };
 
 /// Bytes of an untracked file sniffed for a NUL (binary).
@@ -265,6 +265,22 @@ impl Vcs for Git {
         })
     }
 
+    fn stat(&self, commit: &str) -> Result<CommitStat> {
+        let id = self.resolve(commit)?;
+        let mut args = vec![
+            "show",
+            "--first-parent",
+            "--root",
+            "--numstat",
+            "-z",
+            "-M",
+            "--format=%an%x00%ae%x00%at%x00%B%x00",
+        ];
+        args.extend_from_slice(DIFF_FLAGS);
+        args.extend_from_slice(&[&id, "--"]);
+        parse_numstat(&self.git(&args)?)
+    }
+
     fn working_copy(&self) -> Result<Option<WorkingCopy>> {
         let head = self.head();
         let against = match &head {
@@ -297,6 +313,67 @@ impl Vcs for Git {
             },
         }))
     }
+}
+
+/// `git show --numstat -z` with the format `%an NUL %ae NUL %at NUL %B
+/// NUL`: the header fields, then one record per file, `added TAB removed
+/// TAB path NUL`, or for a rename `added TAB removed TAB NUL old NUL new
+/// NUL`; binary files count `-`.
+fn parse_numstat(out: &str) -> Result<CommitStat> {
+    let mut f = out.splitn(5, '\0');
+    let (Some(author), Some(email), Some(time), Some(message)) =
+        (f.next(), f.next(), f.next(), f.next())
+    else {
+        bail!("unexpected git show output: {out:?}");
+    };
+    let time = time
+        .trim()
+        .parse()
+        .with_context(|| format!("bad time in git show: {time:?}"))?;
+    // Records start with a digit or `-`; before them git puts the header
+    // terminator and a newline.
+    let rest = f.next().unwrap_or("").trim_start_matches(['\0', '\n']);
+    let mut fields = rest.split('\0');
+    let mut files = Vec::new();
+    while let Some(rec) = fields.next() {
+        if rec.is_empty() {
+            continue;
+        }
+        let mut parts = rec.splitn(3, '\t');
+        let (Some(add), Some(del), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
+            bail!("unexpected numstat record: {rec:?}");
+        };
+        let count = |s: &str| -> Result<Option<u32>> {
+            if s == "-" {
+                return Ok(None);
+            }
+            Ok(Some(
+                s.parse()
+                    .with_context(|| format!("bad numstat count: {s:?}"))?,
+            ))
+        };
+        let (old_path, path) = if path.is_empty() {
+            let (Some(old), Some(new)) = (fields.next(), fields.next()) else {
+                bail!("truncated numstat rename: {rec:?}");
+            };
+            (Some(old.to_string()), new.to_string())
+        } else {
+            (None, path.to_string())
+        };
+        files.push(FileStat {
+            path,
+            old_path,
+            added: count(add)?,
+            removed: count(del)?,
+        });
+    }
+    Ok(CommitStat {
+        message: message.trim_end_matches('\n').to_string(),
+        author: author.to_string(),
+        email: email.to_string(),
+        time,
+        files,
+    })
 }
 
 fn parse_record(rec: &str) -> Result<CommitInfo> {

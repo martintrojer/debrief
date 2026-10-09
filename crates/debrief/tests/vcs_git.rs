@@ -562,3 +562,74 @@ fn split_index_contents_stay_unchanged() {
     };
     assert_eq!(contents(&raw_before), contents(&raw_after));
 }
+
+fn stat_row(s: &vcs::FileStat) -> (Option<&str>, &str, Option<u32>, Option<u32>) {
+    (s.old_path.as_deref(), s.path.as_str(), s.added, s.removed)
+}
+
+#[test]
+fn stat_counts_modify_add_delete_rename_and_binary() {
+    let (_t, root) = repo();
+    std::fs::write(root.join("bin"), b"\0\x01").unwrap();
+    commit(&root, "add bin");
+    std::fs::write(root.join("a.txt"), "one\nTWO\nthree\nfour\n").unwrap();
+    std::fs::remove_file(root.join("sub/keep.txt")).unwrap();
+    std::fs::write(root.join("bin"), b"\0\x02").unwrap();
+    std::fs::write(root.join("new.txt"), "n\n").unwrap();
+    git(&root, &["mv", "c d.txt", "e.txt"]);
+    git(&root, &["add", "-A"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "user.name=Ann Author",
+            "-c",
+            "user.email=ann@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "mixed\n\nbody",
+        ],
+    );
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    let head = v.log(None, 1).unwrap().remove(0);
+    let s = v.stat(&head.commit).unwrap();
+    assert_eq!(s.message, "mixed\n\nbody");
+    assert_eq!(s.author, "Ann Author");
+    assert_eq!(s.email, "ann@example.com");
+    assert_eq!(s.time, head.time);
+    let mut rows: Vec<_> = s.files.iter().map(stat_row).collect();
+    rows.sort_by_key(|r| r.1);
+    assert_eq!(
+        rows,
+        [
+            (None, "a.txt", Some(1), Some(0)),
+            (None, "bin", None, None),
+            (Some("c d.txt"), "e.txt", Some(0), Some(0)),
+            (None, "new.txt", Some(1), Some(0)),
+            (None, "sub/keep.txt", Some(0), Some(1)),
+        ]
+    );
+    // The root commit, and a short revision.
+    let first = v.stat("HEAD~4").unwrap();
+    assert_eq!(first.message, "first\n\nbody line");
+    let rows: Vec<_> = first.files.iter().map(stat_row).collect();
+    assert_eq!(
+        rows,
+        [
+            (None, "a.txt", Some(3), Some(0)),
+            (None, "sub/keep.txt", Some(1), Some(0))
+        ]
+    );
+    assert!(v.stat("--all").is_err());
+}
+
+#[test]
+fn stat_of_an_empty_commit_has_no_files() {
+    let (_t, root) = repo();
+    git(&root, &["commit", "-q", "--allow-empty", "-m", "empty"]);
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    let s = v.stat("HEAD").unwrap();
+    assert_eq!(s.message, "empty");
+    assert!(s.files.is_empty());
+}

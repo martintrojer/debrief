@@ -63,6 +63,63 @@ pub struct FileDiff {
     pub copied: bool,
 }
 
+/// A commit as `git log --stat` shows it (spec Q27).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitStat {
+    pub message: String,
+    pub author: String,
+    pub email: String,
+    /// Author time, unix seconds.
+    pub time: i64,
+    pub files: Vec<FileStat>,
+}
+
+/// One file of a [`CommitStat`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStat {
+    /// The new path (the old one when the file was deleted).
+    pub path: String,
+    /// The old path of a rename or copy.
+    pub old_path: Option<String>,
+    /// Added lines; `None` for a binary file.
+    pub added: Option<u32>,
+    /// Removed lines; `None` for a binary file.
+    pub removed: Option<u32>,
+}
+
+/// Per-file line counts of a parsed diff (jj's stat, git's working copy).
+pub fn file_stats(files: &[FileDiff]) -> Vec<FileStat> {
+    files
+        .iter()
+        .map(|f| {
+            let path = f
+                .new_path
+                .clone()
+                .or_else(|| f.old_path.clone())
+                .unwrap_or_default();
+            let old_path = match (&f.old_path, &f.new_path) {
+                (Some(o), Some(n)) if o != n => Some(o.clone()),
+                _ => None,
+            };
+            let (mut add, mut del) = (0u32, 0u32);
+            for l in f.hunks.iter().flat_map(|h| &h.lines) {
+                match l.kind {
+                    LineKind::Added => add += 1,
+                    LineKind::Removed => del += 1,
+                    LineKind::Context => {}
+                }
+            }
+            let binary = f.binary && f.hunks.is_empty();
+            FileStat {
+                path,
+                old_path,
+                added: (!binary).then_some(add),
+                removed: (!binary).then_some(del),
+            }
+        })
+        .collect()
+}
+
 /// What happened to a file, as git's status letters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
@@ -184,6 +241,9 @@ pub trait Vcs {
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
     /// revision naming one commit.
     fn show(&self, commit: &str) -> Result<CommitDiff>;
+    /// The message, author and per-file line counts of `commit` (same
+    /// IDs as [`Vcs::show`]; merges against the first parent).
+    fn stat(&self, commit: &str) -> Result<CommitStat>;
 }
 
 /// Find the repository holding `path`: the nearest directory with `.jj`

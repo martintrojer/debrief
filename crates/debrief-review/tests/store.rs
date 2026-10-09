@@ -57,7 +57,7 @@ fn add_edit_remove_clear_round_trip() {
             "two",
         ))
         .unwrap();
-    assert_eq!((a, b), (1, 2));
+    assert!(b > a);
 
     let fresh = Review::open(cache.path(), root.path()).unwrap();
     assert_eq!(fresh.comments(), r.comments());
@@ -78,8 +78,8 @@ fn add_edit_remove_clear_round_trip() {
     assert_eq!(fresh.comments().len(), 1);
     assert_eq!(fresh.comments()[0].id, b);
 
-    // Ids keep counting from the max.
-    assert_eq!(r.add(note("a", 1, "three")).unwrap(), 3);
+    // Ids keep growing.
+    assert!(r.add(note("a", 1, "three")).unwrap() > b);
 
     r.clear().unwrap();
     assert!(r.comments().is_empty());
@@ -216,6 +216,18 @@ fn remove_all_keeps_comments_added_after_export() {
     let fresh = Review::open(cache.path(), root.path()).unwrap();
     assert_eq!(fresh.comments().len(), 1);
     assert_eq!(fresh.comments()[0].body, "late");
+}
+
+#[test]
+fn ids_never_repeat_after_the_batch_file_is_deleted() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let old = r.add(note("a", 1, "one")).unwrap();
+    assert_eq!(r.remove_all(&[old]).unwrap(), 1);
+    assert_eq!(json_files(cache.path()), 0);
+    let mut other = Review::open(cache.path(), root.path()).unwrap();
+    let new = other.add(note("a", 1, "two")).unwrap();
+    assert!(new > old, "{new} should be > {old}");
 }
 
 #[test]

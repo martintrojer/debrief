@@ -60,13 +60,20 @@ impl Review {
         &self.comments
     }
 
-    /// Adds `c` with the next id (max + 1) and the current time; returns the id.
+    /// Adds `c` with the current time and a fresh id; returns the id.
+    ///
+    /// The id is one past the larger of the max existing id and the current
+    /// unix time in milliseconds, so ids never repeat for a root even after the
+    /// batch file is deleted and a new one started.
     pub fn add(&mut self, mut c: Comment) -> io::Result<u64> {
-        c.created = SystemTime::now()
+        let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
+            .unwrap_or_default();
+        c.created = now.as_secs();
+        let now_ms = u64::try_from(now.as_millis()).unwrap_or(u64::MAX - 1);
         self.mutate(move |comments| {
-            c.id = comments.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+            let max = comments.iter().map(|c| c.id).max().unwrap_or(0);
+            c.id = max.max(now_ms) + 1;
             let id = c.id;
             comments.push(c);
             Some(id)

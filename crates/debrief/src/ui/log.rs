@@ -1,5 +1,6 @@
 //! The log: one row per commit, newest first:
-//! `<marker> <short id> <age> <author> <summary>`.
+//! `<marker> <short id> <age> <author> <summary>`. git's working copy
+//! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,11 +11,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::palette;
-use crate::app::{App, age, short_id};
+use crate::app::{App, WORKING_ID, age, short_id};
 use crate::seen::Status;
 
 /// Columns given to the author.
 const AUTHOR_W: usize = 12;
+/// The working copy's marker.
+pub const WORKING_MARKER: &str = "✎";
 
 /// The marker and its colour for a status.
 pub fn marker(s: Status) -> (&'static str, Color) {
@@ -55,10 +58,25 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         .skip(app.scroll())
         .take(area.height as usize)
         .map(|(i, r)| {
-            let (m, mc) = marker(r.status);
+            let (mut m, mut mc) = marker(r.status);
+            if r.working {
+                (m, mc) = (WORKING_MARKER, palette::YELLOW);
+            }
             let mut base = Style::new().fg(palette::TEXT);
             if i == app.cursor() {
                 base = base.bg(palette::SURFACE);
+            }
+            if let (true, Some(w)) = (r.info.commit == WORKING_ID, app.working_copy()) {
+                let files = match w.files {
+                    1 => "1 file".to_string(),
+                    n => format!("{n} files"),
+                };
+                return Line::from(vec![
+                    Span::styled(format!("{m} "), base.fg(mc)),
+                    Span::styled("Working copy  ", base.fg(palette::YELLOW)),
+                    Span::styled(files, base.fg(palette::OVERLAY)),
+                ])
+                .style(base);
             }
             Line::from(vec![
                 Span::styled(format!("{m} "), base.fg(mc)),

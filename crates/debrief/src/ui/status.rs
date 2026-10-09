@@ -47,6 +47,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     if updated > 0 {
         counts.push_str(&format!(", {updated} updated"));
     }
+    if app.working_copy().is_some() {
+        counts.push_str(", working copy dirty");
+    }
     let right = match app.rows().len() {
         0 => " 0/0 ".to_string(),
         n => format!(" {}/{n} ", app.cursor() + 1),
@@ -88,7 +91,11 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
 /// The commit screen: mode, commit ID, loading/status message, position.
 fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     let id = app.commit_id().unwrap_or("");
-    let id = id.get(..8).unwrap_or(id);
+    let id = if app.commit_id() == Some(crate::app::WORKING_ID) {
+        "working copy"
+    } else {
+        id.get(..8).unwrap_or(id)
+    };
     let mut spans = Vec::new();
     if app.mode() == Mode::Visual {
         spans.push(Span::styled(

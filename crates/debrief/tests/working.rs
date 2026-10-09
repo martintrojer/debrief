@@ -1,0 +1,658 @@
+//! The working copy in the app (spec §3 "Working copy", Q21–Q24): git's
+//! synthetic row, its commit view, comments on it, refresh; jj's `@`
+//! after a snapshot. Temp repos and cache dirs; nothing sleeps except the
+//! tree-watcher test, which waits on its debounced channel.
+
+mod common;
+
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::Duration;
+
+use common::{JjEnv, commit, git, have_jj};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use debrief::app::comment::{MERGE_OLD_SIDE, OUTSIDE_ROOT};
+use debrief::app::watch::tree_watcher;
+use debrief::app::{App, AppEvent, Mode, RowKind, Screen, StartOptions, WORKING_ID};
+use debrief::seen::Status;
+use debrief::vcs::{self, LineKind, OpenOptions};
+use debrief_review::{Comment, Review, Side};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+
+struct Fixture {
+    _tmp: tempfile::TempDir,
+    root: PathBuf,
+    cache: PathBuf,
+}
+
+/// Two commits (`base`, `second`: a.txt = a1..a5); then, uncommitted,
+/// a.txt line 2 is edited and line 4 removed, and new.txt is untracked.
+fn fixture() -> Fixture {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join("old.txt"), "o\n").unwrap();
+    commit(&root, "base");
+    std::fs::write(root.join("a.txt"), "a1\na2\na3\na4\na5\n").unwrap();
+    commit(&root, "second");
+    std::fs::write(root.join("a.txt"), "a1\nA2\na3\na5\n").unwrap();
+    std::fs::write(root.join("new.txt"), "n1\nn2\n").unwrap();
+    Fixture {
+        root: root.canonicalize().unwrap(),
+        cache: tmp.path().join("cache"),
+        _tmp: tmp,
+    }
+}
+
+impl Fixture {
+    fn app(&self) -> App {
+        App::new(
+            vcs::open(&self.root, OpenOptions::default()).unwrap(),
+            StartOptions::new(self.cache.clone()),
+        )
+        .unwrap()
+    }
+
+    /// The app with the working copy open.
+    fn open(&self) -> App {
+        let mut app = self.app();
+        keys(&mut app, "gg");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen(), Screen::Commit(0));
+        assert!(app.viewing_working_copy());
+        app
+    }
+
+    fn comments(&self) -> Vec<Comment> {
+        Review::open(&self.cache, &self.root)
+            .unwrap()
+            .comments()
+            .to_vec()
+    }
+}
+
+fn press(app: &mut App, code: KeyCode) {
+    app.key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+fn keys(app: &mut App, s: &str) {
+    s.chars().for_each(|c| press(app, KeyCode::Char(c)));
+}
+
+fn row_of(app: &App, text: &str, kind: RowKind) -> usize {
+    app.commit_rows()
+        .iter()
+        .position(|r| r.text == text && r.kind == kind)
+        .unwrap_or_else(|| panic!("no {kind:?} row {text:?}"))
+}
+
+fn goto(app: &mut App, row: usize) {
+    keys(app, &format!("{}G", row + 1));
+    assert_eq!(app.commit_cursor().row, row);
+}
+
+fn comment_on(app: &mut App, row: usize, body: &str) {
+    goto(app, row);
+    keys(app, "cc");
+    assert_eq!(app.mode(), Mode::Comment, "prompt: {}", app.status());
+    keys(app, body);
+    press(app, KeyCode::Enter);
+}
+
+fn screen(app: &mut App, w: u16, h: u16) -> Vec<String> {
+    let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let buf = t.backend().buffer().clone();
+    (0..buf.area.height)
+        .map(|y| {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+fn summaries(app: &App) -> Vec<String> {
+    app.rows().iter().map(|r| r.info.summary.clone()).collect()
+}
+
+#[test]
+fn dirty_tree_puts_the_working_copy_row_on_top() {
+    let f = fixture();
+    let mut app = f.app();
+    assert_eq!(summaries(&app), ["Working copy", "second", "base"]);
+    assert!(app.rows()[0].working);
+    assert_eq!(app.rows()[0].info.commit, WORKING_ID);
+    assert_eq!(app.working_copy().unwrap().files, 2);
+    let s = screen(&mut app, 80, 6);
+    assert!(s[0].starts_with("✎ Working copy  2 files"), "{}", s[0]);
+    assert!(s[5].contains("0 new, working copy dirty"), "{}", s[5]);
+    // Marking all seen skips the row; it never becomes new.
+    keys(&mut app, "m");
+    assert_eq!(app.status(), "marked 2 commits seen");
+    assert_eq!(app.rows()[0].status, Status::Seen);
+}
+
+#[test]
+fn clean_tree_has_no_row() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    let mut app = f.app();
+    assert_eq!(summaries(&app), ["second", "base"]);
+    let s = screen(&mut app, 80, 6);
+    assert!(!s[5].contains("working copy"), "{}", s[5]);
+}
+
+#[test]
+fn new_commits_count_without_the_row_and_start_the_cursor() {
+    let f = fixture();
+    drop(f.app());
+    std::fs::write(f.root.join("c.txt"), "c\n").unwrap();
+    git(&f.root, &["add", "c.txt"]);
+    git(&f.root, &["commit", "-q", "-m", "third"]);
+    let app = f.app();
+    assert_eq!(summaries(&app), ["Working copy", "third", "second", "base"]);
+    assert_eq!(app.counts(), (1, 0));
+    assert_eq!(app.cursor(), 1, "the oldest unseen commit, not the row");
+}
+
+#[test]
+fn enter_shows_the_working_copy_diff_with_its_header() {
+    let f = fixture();
+    let mut app = f.open();
+    let rows = app.commit_rows();
+    assert_eq!(rows[0].kind, RowKind::Message);
+    let head = app.rows()[1].info.commit[..8].to_string();
+    assert_eq!(
+        rows[0].text,
+        format!("Working copy (uncommitted) on {head} second")
+    );
+    row_of(&app, "A2", RowKind::Line(LineKind::Added));
+    row_of(&app, "a4", RowKind::Line(LineKind::Removed));
+    row_of(&app, "── new.txt (added) ──", RowKind::FileHeader);
+    row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    let s = screen(&mut app, 100, 12);
+    assert!(s[11].contains("working copy"), "{}", s[11]);
+    // ]] goes on to the commits, in log order.
+    keys(&mut app, "]]");
+    assert_eq!(app.screen(), Screen::Commit(1));
+    assert!(!app.viewing_working_copy());
+    keys(&mut app, "[[");
+    assert!(app.viewing_working_copy());
+    keys(&mut app, "[[");
+    assert_eq!(app.status(), "no previous commit");
+    keys(&mut app, "q");
+    assert_eq!(app.cursor(), 0);
+}
+
+#[test]
+fn comments_on_new_lines_are_working_copy_comments() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = row_of(&app, "A2", RowKind::Line(LineKind::Added));
+    comment_on(&mut app, r, "why caps");
+    let c = &f.comments()[0];
+    assert_eq!(c.path, "a.txt");
+    assert_eq!(c.rev, None);
+    assert_eq!(c.side, None);
+    assert_eq!(c.lines, (2, 2));
+    assert_eq!(c.excerpt, "+A2");
+    // A context line: also the file on disk.
+    let r = row_of(&app, "a3", RowKind::Line(LineKind::Context));
+    comment_on(&mut app, r, "ctx");
+    assert_eq!(f.comments()[1].lines, (3, 3));
+    assert_eq!(f.comments()[1].rev, None);
+    assert_eq!(app.review_marked_rows().len(), 2);
+}
+
+#[test]
+fn comments_on_removed_lines_anchor_to_head_old_side() {
+    let f = fixture();
+    let mut app = f.open();
+    let head = app.rows()[1].info.clone();
+    let r = row_of(&app, "a4", RowKind::Line(LineKind::Removed));
+    comment_on(&mut app, r, "keep it");
+    let c = &f.comments()[0];
+    assert_eq!(c.side, Some(Side::Old));
+    assert_eq!(c.lines, (4, 4));
+    let rev = c.rev.as_ref().unwrap();
+    assert_eq!(rev.commit, head.commit);
+    assert_eq!(rev.summary.as_deref(), Some("second"));
+    assert_eq!(app.review_marked_rows(), [r]);
+}
+
+#[test]
+fn removed_lines_of_a_renamed_file_use_the_old_path() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    // Staged rename, then an edit: diff-index pairs them up.
+    git(&f.root, &["mv", "a.txt", "b.txt"]);
+    std::fs::write(f.root.join("b.txt"), "a1\na2\na3\na5\n").unwrap();
+    let mut app = f.open();
+    let r = row_of(&app, "a4", RowKind::Line(LineKind::Removed));
+    comment_on(&mut app, r, "gone");
+    let c = &f.comments()[0];
+    assert_eq!(c.path, "a.txt", "the path in HEAD");
+    assert_eq!(c.side, Some(Side::Old));
+    assert_eq!(app.review_marked_rows(), [r]);
+}
+
+#[test]
+fn ramble_comments_show_as_markers() {
+    let f = fixture();
+    let mut review = Review::open(&f.cache, &f.root).unwrap();
+    review
+        .add(Comment::on_file("new.txt", 2..=2, "n2", "from ramble"))
+        .unwrap();
+    // A comment on another file, and one on an older commit, don't mark.
+    review
+        .add(Comment::on_file("old.txt", 1..=1, "o", "elsewhere"))
+        .unwrap();
+    drop(review);
+    let mut app = f.open();
+    let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    assert_eq!(app.review_marked_rows(), [r]);
+    goto(&mut app, r);
+    assert_eq!(app.review_preview().as_deref(), Some("● from ramble"));
+    // Not on a commit's view.
+    keys(&mut app, "]]");
+    assert!(app.review_marked_rows().is_empty());
+}
+
+#[test]
+fn r_reloads_the_working_copy_in_place() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    std::fs::write(f.root.join("new.txt"), "n1\nn2\nn3\n").unwrap();
+    keys(&mut app, "r");
+    row_of(&app, "n3", RowKind::Line(LineKind::Added));
+    assert_eq!(app.commit_cursor().row, r, "cursor row kept");
+    // A clean tree: the view stays, with a message.
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    keys(&mut app, "r");
+    assert_eq!(app.status(), "The working copy is clean");
+    keys(&mut app, "q");
+    assert_eq!(summaries(&app), ["second", "base"]);
+}
+
+#[test]
+fn a_commit_view_stays_frozen_on_reload() {
+    let f = fixture();
+    let mut app = f.app();
+    keys(&mut app, "ggj");
+    press(&mut app, KeyCode::Enter);
+    let before = app.commit_rows().to_vec();
+    std::fs::write(f.root.join("new.txt"), "changed\n").unwrap();
+    keys(&mut app, "r");
+    assert_eq!(app.commit_rows(), before);
+    assert_eq!(app.screen(), Screen::Commit(1));
+}
+
+#[test]
+fn working_changed_event_refreshes_only_the_row() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    let mut app = f.app();
+    keys(&mut app, "j");
+    assert_eq!(summaries(&app), ["second", "base"]);
+    std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(summaries(&app), ["Working copy", "second", "base"]);
+    assert_eq!(app.rows()[app.cursor()].info.summary, "base", "cursor kept");
+}
+
+#[test]
+fn editor_jump_uses_the_file_on_disk_and_refuses_paths_outside() {
+    let f = fixture();
+    let outside = f.root.parent().unwrap().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, f.root.join("link")).unwrap();
+    let mut app = f.open();
+    let r = row_of(&app, "A2", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    assert_eq!(app.edit_target(), Ok((f.root.join("a.txt"), 2)));
+    // An untracked symlink shows its target; its canonical path leaves
+    // the repo, so neither the editor nor a comment takes it.
+    let target = outside.display().to_string();
+    let link = row_of(&app, &target, RowKind::Line(LineKind::Added));
+    goto(&mut app, link);
+    assert_eq!(app.edit_target(), Err(OUTSIDE_ROOT.to_string()));
+    keys(&mut app, "cc");
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.status(), OUTSIDE_ROOT);
+}
+
+#[test]
+fn untracked_binary_and_large_files_show_a_placeholder() {
+    let f = fixture();
+    std::fs::write(f.root.join("bin.dat"), b"a\0b").unwrap();
+    std::fs::write(f.root.join("big.txt"), "x\n".repeat(600 * 1024)).unwrap();
+    let app = f.open();
+    let text: Vec<_> = app
+        .commit_rows()
+        .iter()
+        .filter(|r| r.kind == RowKind::Binary)
+        .map(|r| r.text.as_str())
+        .collect();
+    assert_eq!(text, [vcs::TOO_LARGE, "binary file not shown"]);
+}
+
+fn unborn(format: &str) -> Fixture {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", &format!("--object-format={format}")]);
+    Fixture {
+        root: root.canonicalize().unwrap(),
+        cache: tmp.path().join("cache"),
+        _tmp: tmp,
+    }
+}
+
+#[test]
+fn unborn_repos_start_and_show_the_working_copy() {
+    for format in ["sha1", "sha256"] {
+        let f = unborn(format);
+        let mut app = f.app();
+        assert!(app.rows().is_empty(), "{format}");
+        let s = screen(&mut app, 80, 4);
+        assert!(s[0].contains("no commits"), "{format}: {}", s[0]);
+        std::fs::write(f.root.join("first.txt"), "hello\n").unwrap();
+        keys(&mut app, "r");
+        assert_eq!(summaries(&app), ["Working copy"], "{format}");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.commit_rows()[0].text,
+            "Working copy (uncommitted; no commits yet)"
+        );
+        let r = row_of(&app, "hello", RowKind::Line(LineKind::Added));
+        comment_on(&mut app, r, "hi");
+        assert_eq!(f.comments()[0].rev, None, "{format}");
+    }
+}
+
+#[test]
+fn launchers_reload_the_working_copy() {
+    let f = fixture();
+    let root = f.root.clone();
+    let mut app = f.open().with_runner(move |_| {
+        std::fs::write(root.join("new.txt"), "n1\nn2\nedited\n").unwrap();
+        Ok(debrief::app::Exit::Code(0))
+    });
+    let r = row_of(&app, "n1", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    keys(&mut app, " o");
+    app.run_pending_effect();
+    row_of(&app, "edited", RowKind::Line(LineKind::Added));
+    assert_eq!(app.commit_cursor().row, r);
+}
+
+/// Wait for the watcher to fire within a few seconds.
+fn fires(rx: &mpsc::Receiver<()>) -> bool {
+    rx.recv_timeout(Duration::from_secs(5)).is_ok()
+}
+
+fn drain(rx: &mpsc::Receiver<()>) {
+    while rx.recv_timeout(Duration::from_millis(600)).is_ok() {}
+}
+
+fn watch(root: &Path) -> (debrief::app::watch::RepoWatcher, mpsc::Receiver<()>) {
+    let (tx, rx) = mpsc::channel();
+    let w = tree_watcher(root, move || {
+        let _ = tx.send(());
+    })
+    .unwrap();
+    drain(&rx);
+    (w, rx)
+}
+
+#[test]
+fn tree_watcher_fires_on_edits_and_skips_ignored_and_git_dir() {
+    let f = fixture();
+    std::fs::write(f.root.join(".gitignore"), "*.log\nbuild/\n").unwrap();
+    commit(&f.root, "ignore");
+    // Tracked although it matches a rule.
+    std::fs::write(f.root.join("kept.log"), "k\n").unwrap();
+    git(&f.root, &["add", "-f", "kept.log"]);
+    commit(&f.root, "kept");
+    std::fs::create_dir(f.root.join("build")).unwrap();
+    let (_w, rx) = watch(&f.root);
+
+    std::fs::write(f.root.join("x.log"), "ignored\n").unwrap();
+    std::fs::write(f.root.join("build/out"), "ignored\n").unwrap();
+    assert!(!fires(&rx), "ignored paths don't refresh");
+
+    std::fs::write(f.root.join("kept.log"), "k2\n").unwrap();
+    assert!(fires(&rx), "a tracked path refreshes even if ignored");
+    drain(&rx);
+
+    std::fs::write(f.root.join("a.txt"), "edited\n").unwrap();
+    assert!(fires(&rx), "an edit refreshes");
+    drain(&rx);
+
+    // Changing the rules: the .gitignore event fires, and the new rule
+    // applies afterwards.
+    std::fs::write(f.root.join(".gitignore"), "*.log\nbuild/\n*.tmp\n").unwrap();
+    assert!(fires(&rx));
+    drain(&rx);
+    std::fs::write(f.root.join("y.tmp"), "t\n").unwrap();
+    assert!(!fires(&rx), "the rebuilt rules ignore *.tmp");
+
+    // A nested .gitignore.
+    std::fs::create_dir(f.root.join("sub")).unwrap();
+    std::fs::write(f.root.join("sub/.gitignore"), "*.gen\n").unwrap();
+    assert!(fires(&rx));
+    drain(&rx);
+    std::fs::write(f.root.join("sub/z.gen"), "g\n").unwrap();
+    assert!(!fires(&rx), "nested rules apply");
+    std::fs::write(f.root.join("sub/z.txt"), "g\n").unwrap();
+    assert!(fires(&rx));
+    drain(&rx);
+
+    // info/exclude.
+    std::fs::write(f.root.join(".git/info/exclude"), "*.ex\n").unwrap();
+    drain(&rx);
+    std::fs::write(f.root.join("w.ex"), "e\n").unwrap();
+    assert!(!fires(&rx), "info/exclude applies");
+}
+
+// jj: @ is the working copy, after a snapshot (Q21, K5–K8).
+
+fn jj_app(e: &JjEnv, opts: OpenOptions, revset: Option<&str>) -> App {
+    let cache = e.root.parent().unwrap().join("cache");
+    App::new(
+        vcs::open(&e.root, opts).unwrap(),
+        StartOptions {
+            revset: revset.map(str::to_string),
+            ..StartOptions::new(cache)
+        },
+    )
+    .unwrap()
+}
+
+fn jj_sample() -> JjEnv {
+    let e = JjEnv::new(false);
+    e.write("a.txt", "one\ntwo\n");
+    e.jj(&["--quiet", "commit", "-m", "first"]);
+    e
+}
+
+fn added_texts(app: &App) -> Vec<String> {
+    app.commit_rows()
+        .iter()
+        .filter(|r| r.kind == RowKind::Line(LineKind::Added))
+        .map(|r| r.text.clone())
+        .collect()
+}
+
+#[test]
+fn jj_at_shows_the_edit_after_the_snapshot() {
+    if !have_jj() {
+        return;
+    }
+    let e = jj_sample();
+    e.write("a.txt", "one\ntwo\nthree\n");
+    let mut app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    assert_eq!(summaries(&app), ["", "first"]);
+    assert!(app.rows()[0].working, "@ is marked");
+    assert!(!app.rows()[1].working);
+    let s = screen(&mut app, 80, 6);
+    assert!(s[0].starts_with("✎ "), "{}", s[0]);
+    assert!(!s[1].starts_with("✎"), "{}", s[1]);
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.viewing_working_copy());
+    assert_eq!(added_texts(&app), ["three"]);
+    // Edit again; r re-snapshots and reloads @ in place.
+    e.write("a.txt", "one\ntwo\nthree\nfour\n");
+    let r = row_of(&app, "three", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    keys(&mut app, "r");
+    assert_eq!(added_texts(&app), ["three", "four"]);
+    assert_eq!(app.commit_cursor().row, r);
+    // The open view is on the new @ commit.
+    assert_eq!(app.commit_id(), Some(app.rows()[0].info.commit.as_str()));
+}
+
+#[test]
+fn jj_no_snapshot_shows_at_as_of_the_last_command() {
+    if !have_jj() {
+        return;
+    }
+    let e = jj_sample();
+    e.write("a.txt", "one\ntwo\nthree\n");
+    let ops = e.op_count();
+    let mut app = jj_app(&e, OpenOptions { snapshot: false }, Some("::@ ~ root()"));
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    assert!(added_texts(&app).is_empty());
+    keys(&mut app, "r");
+    assert!(added_texts(&app).is_empty());
+    assert_eq!(e.op_count(), ops);
+}
+
+#[test]
+fn jj_working_row_is_at_not_the_top_row() {
+    if !have_jj() {
+        return;
+    }
+    let e = jj_sample();
+    // A sibling of @ newer than it, so @ is not first in the log.
+    e.jj(&["--quiet", "new", "root()", "-m", "side"]);
+    e.write("s.txt", "s\n");
+    e.jj(&["--quiet", "new", "description(glob:first*)"]);
+    e.write("a.txt", "one\ntwo\nmore\n");
+    e.jj(&[
+        "--quiet",
+        "describe",
+        "-r",
+        "description(glob:side*)",
+        "-m",
+        "side, later",
+    ]);
+    let app = jj_app(&e, OpenOptions::default(), Some("all() ~ root()"));
+    let working: Vec<_> = app
+        .rows()
+        .iter()
+        .filter(|r| r.working)
+        .map(|r| r.info.summary.clone())
+        .collect();
+    assert_eq!(working, [""], "{:?}", summaries(&app));
+    assert_eq!(app.rows()[0].info.summary, "side, later");
+    // Not in the log: no working row.
+    let app = jj_app(&e, OpenOptions::default(), Some("description(glob:first*)"));
+    assert!(app.rows().iter().all(|r| !r.working));
+}
+
+#[test]
+fn jj_comments_on_at() {
+    if !have_jj() {
+        return;
+    }
+    let e = jj_sample();
+    e.write("a.txt", "one\nTWO\n");
+    let mut app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    let parent = app.rows()[1].info.clone();
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    let r = row_of(&app, "TWO", RowKind::Line(LineKind::Added));
+    comment_on(&mut app, r, "new side");
+    let r = row_of(&app, "two", RowKind::Line(LineKind::Removed));
+    comment_on(&mut app, r, "old side");
+    let cache = e.root.parent().unwrap().join("cache");
+    let cs = Review::open(&cache, &e.root).unwrap().comments().to_vec();
+    assert_eq!(cs[0].rev, None);
+    assert_eq!(cs[0].lines, (2, 2));
+    let rev = cs[1].rev.as_ref().unwrap();
+    assert_eq!(rev.commit, parent.commit, "@-");
+    assert_eq!(rev.change, parent.change);
+    assert_eq!(cs[1].side, Some(Side::Old));
+    assert_eq!(app.review_marked_rows().len(), 2);
+}
+
+#[test]
+fn jj_merge_at_refuses_old_side_comments() {
+    if !have_jj() {
+        return;
+    }
+    let e = JjEnv::new(false);
+    e.write("a.txt", "a\n");
+    e.jj(&["--quiet", "commit", "-m", "left"]);
+    e.jj(&["--quiet", "new", "root()", "-m", "right"]);
+    e.write("b.txt", "b1\nb2\n");
+    e.jj(&[
+        "--quiet",
+        "new",
+        "description(glob:left*)",
+        "description(glob:right*)",
+    ]);
+    e.write("b.txt", "b1\nB2\n");
+    let mut app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    let at = app.working_row_index().unwrap();
+    assert_eq!(app.rows()[at].info.parents.len(), 2);
+    keys(&mut app, &format!("{}G", at + 1));
+    press(&mut app, KeyCode::Enter);
+    assert!(app.viewing_working_copy());
+    let r = row_of(&app, "B2", RowKind::Line(LineKind::Added));
+    comment_on(&mut app, r, "fine");
+    let r = row_of(&app, "b2", RowKind::Line(LineKind::Removed));
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.status(), MERGE_OLD_SIDE);
+}
+
+#[test]
+fn jj_snapshot_failure_shows_in_the_status_line() {
+    if !have_jj() {
+        return;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let e = jj_sample();
+    e.write("a.txt", "one\ntwo\nthree\n");
+    let lock = |mode| {
+        for d in ["op_store", "op_store/operations"] {
+            let p = e.root.join(".jj/repo").join(d);
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+    };
+    lock(0o555);
+    let app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    lock(0o755);
+    assert!(
+        app.status().starts_with("jj snapshot failed: "),
+        "{}",
+        app.status()
+    );
+    assert_eq!(summaries(&app), ["", "first"], "the log still loads");
+}

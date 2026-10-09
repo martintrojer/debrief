@@ -1,10 +1,19 @@
 //! The log screen: loading and reloading the commit list, its cursor
 //! motions, and marking commits seen.
+//!
+//! The working copy (spec §3 "Working copy"): git gets a synthetic row on
+//! top while the tree is dirty, never seen or new; jj marks the row of
+//! this workspace's `@`. Loading snapshots jj first (Q21); a snapshot
+//! error goes to the status line and the log loads from the last pin.
 
 use crate::seen::Status;
-use crate::vcs::CommitInfo;
+use crate::vcs::{CommitInfo, Kind};
 
-use super::{App, Row};
+use super::{App, Row, Screen};
+
+/// The commit ID of git's synthetic working-copy row (not a hex ID, so it
+/// never names a commit).
+pub const WORKING_ID: &str = "working-copy";
 
 /// The commit ID of jj's root commit (and any all-zero ID).
 pub fn is_zero_id(id: &str) -> bool {
@@ -14,6 +23,9 @@ pub fn is_zero_id(id: &str) -> bool {
 /// The short ID shown in the log: the change ID for jj, else the commit
 /// ID, first 8 characters.
 pub fn short_id(c: &CommitInfo) -> &str {
+    if c.commit == WORKING_ID {
+        return "";
+    }
     let id = c.change.as_deref().unwrap_or(&c.commit);
     id.get(..8).unwrap_or(id)
 }
@@ -32,31 +44,88 @@ pub fn age(now: i64, then: i64) -> String {
 
 impl App {
     /// Read the log from the VCS, without jj's root commit; a zero parent
-    /// counts as no parent.
-    pub(super) fn load(&self) -> anyhow::Result<Vec<CommitInfo>> {
+    /// counts as no parent. First brings the VCS up to date (`snapshot`:
+    /// jj snapshots the working copy), then reads the working copy: git's
+    /// changes, jj's `@`. Errors in either go to the status line.
+    pub(super) fn load(&mut self, snapshot: bool) -> anyhow::Result<Vec<CommitInfo>> {
+        if let Err(e) = self.vcs.refresh(snapshot) {
+            self.set_status(format!("{e:#}"));
+        }
         let mut commits = self.vcs.log(self.opts.revset.as_deref(), self.opts.limit)?;
         commits.retain(|c| !is_zero_id(&c.commit));
         for c in &mut commits {
             c.parents.retain(|p| !is_zero_id(p));
         }
+        match self.vcs.kind() {
+            Kind::Git => self.load_working(),
+            Kind::Jj => match self.vcs.working_copy_commit() {
+                Ok(id) => self.working_commit = id,
+                Err(e) => {
+                    self.working_commit = None;
+                    self.set_status(format!("cannot resolve @: {e:#}"));
+                }
+            },
+        }
         Ok(commits)
     }
 
+    /// git: re-read the uncommitted changes.
+    fn load_working(&mut self) {
+        match self.vcs.working_copy() {
+            Ok(w) => self.working = w,
+            Err(e) => {
+                self.working = None;
+                self.set_status(format!("cannot read the working copy: {e:#}"));
+            }
+        }
+    }
+
+    /// git's synthetic row for `self.working`.
+    fn working_row(&self) -> Option<Row> {
+        let w = self.working.as_ref()?;
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        Some(Row {
+            info: CommitInfo {
+                commit: WORKING_ID.to_string(),
+                change: None,
+                author: String::new(),
+                time,
+                summary: "Working copy".to_string(),
+                parents: w.base.iter().map(|b| b.commit.clone()).collect(),
+            },
+            status: Status::Seen,
+            working: true,
+        })
+    }
+
     pub(super) fn set_rows(&mut self, commits: Vec<CommitInfo>) {
-        self.rows = commits
-            .into_iter()
-            .map(|info| Row {
-                status: self.seen.status(&info),
-                info,
-            })
-            .collect();
+        let mut rows: Vec<Row> = self.working_row().into_iter().collect();
+        rows.extend(commits.into_iter().map(|info| Row {
+            status: self.seen.status(&info),
+            working: self.working_commit.as_deref() == Some(info.commit.as_str()),
+            info,
+        }));
+        self.rows = rows;
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
     }
 
     fn restatus(&mut self) {
         for r in &mut self.rows {
-            r.status = self.seen.status(&r.info);
+            if r.info.commit != WORKING_ID {
+                r.status = self.seen.status(&r.info);
+            }
         }
+    }
+
+    /// The log's commits, without git's synthetic row.
+    fn commits(&self) -> Vec<CommitInfo> {
+        self.rows
+            .iter()
+            .filter(|r| r.info.commit != WORKING_ID)
+            .map(|r| r.info.clone())
+            .collect()
     }
 
     /// The oldest new or updated row (the log is newest first).
@@ -64,27 +133,68 @@ impl App {
         self.rows.iter().rposition(|r| r.status != Status::Seen)
     }
 
-    /// `r` or a watcher event: re-read the log, keeping the cursor on the
-    /// same commit when it is still listed.
-    pub fn reload(&mut self) {
-        let current = self.rows.get(self.cursor).map(|r| r.info.commit.clone());
-        match self.load() {
+    /// The log row of the working copy (git's row, jj's `@`), if listed.
+    pub fn working_row_index(&self) -> Option<usize> {
+        self.working_index()
+    }
+
+    pub(super) fn working_index(&self) -> Option<usize> {
+        self.rows.iter().position(|r| r.working)
+    }
+
+    /// `r` (`snapshot`), a watcher event or a return from a launcher:
+    /// re-read the log, keeping the cursor on the same commit when it is
+    /// still listed (on the working copy when it was there).
+    pub fn reload(&mut self, snapshot: bool) {
+        let current = self
+            .rows
+            .get(self.cursor)
+            .map(|r| (r.info.commit.clone(), r.working));
+        match self.load(snapshot) {
             Ok(commits) => {
                 self.set_rows(commits);
-                if let Some(id) = current
-                    && let Some(i) = self.rows.iter().position(|r| r.info.commit == id)
-                {
-                    self.cursor = i;
-                }
+                self.cursor_to(current);
                 self.commit_reindex();
             }
             Err(e) => self.set_status(format!("reload failed: {e:#}")),
         }
     }
 
+    fn cursor_to(&mut self, current: Option<(String, bool)>) {
+        let Some((id, working)) = current else { return };
+        let i = if working {
+            self.working_index()
+        } else {
+            self.rows.iter().position(|r| r.info.commit == id)
+        };
+        if let Some(i) = i {
+            self.cursor = i;
+        }
+    }
+
+    /// git's tree watcher: re-read only the working copy and its row.
+    pub(super) fn working_changed(&mut self) {
+        if self.vcs.kind() != Kind::Git {
+            return;
+        }
+        let current = self
+            .rows
+            .get(self.cursor)
+            .map(|r| (r.info.commit.clone(), r.working));
+        self.load_working();
+        let commits = self.commits();
+        self.set_rows(commits);
+        self.cursor_to(current);
+        if !matches!(self.screen, Screen::Commit(_)) {
+            return;
+        }
+        // An open view stays as it is; only its log index follows.
+        self.commit_reindex();
+    }
+
     /// `m`: every listed commit is seen.
     pub(super) fn mark_all(&mut self) {
-        let commits: Vec<CommitInfo> = self.rows.iter().map(|r| r.info.clone()).collect();
+        let commits = self.commits();
         match self.seen.mark_all(&commits) {
             Ok(()) => {
                 self.restatus();
@@ -99,6 +209,9 @@ impl App {
         let Some(info) = self.rows.get(i).map(|r| r.info.clone()) else {
             return;
         };
+        if info.commit == WORKING_ID {
+            return;
+        }
         match self.seen.mark(&info) {
             Ok(()) => self.restatus(),
             Err(e) => self.set_status(format!("cannot write seen state: {e}")),

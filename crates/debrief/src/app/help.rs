@@ -156,6 +156,7 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("[f", C, G::Commit, "previous file"),
         b("]c", C, G::Commit, "next hunk"),
         b("[c", C, G::Commit, "previous hunk"),
+        b("r", C, G::Commit, "refresh the working-copy diff in place"),
         b("]]", C, G::Commit, "open the next commit"),
         b("[[", C, G::Commit, "open the previous commit"),
         b("/", C, G::Commit, "search forward"),

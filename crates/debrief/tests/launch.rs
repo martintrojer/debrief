@@ -42,6 +42,8 @@ fn fixture() -> Fixture {
     std::fs::write(root.join("notes.md"), "# notes\n").unwrap();
     std::fs::write(root.join("tail.txt"), "t1\n").unwrap();
     commit(&root, "change\n\nbody");
+    // Gone from disk without making the tree dirty (no working-copy row).
+    git(&root, &["update-index", "--skip-worktree", "gone.txt"]);
     std::fs::remove_file(root.join("gone.txt")).unwrap();
     let root = root.canonicalize().unwrap();
     let out = tmp.path().join("argv");

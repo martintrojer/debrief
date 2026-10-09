@@ -317,6 +317,7 @@ impl App {
             KeyCode::Char('v' | 'V') => A::Visual,
             KeyCode::Enter => A::DiffEnter,
             KeyCode::Char('K') => A::Hover,
+            KeyCode::Char('r') => A::Reload,
             _ => return KeyResult::None,
         };
         KeyResult::Action(action)
@@ -439,7 +440,7 @@ impl App {
             A::HalfPageUp => self.half_page(false),
             A::Open => self.open_commit(),
             A::MarkAll => self.mark_all(),
-            A::Reload => self.reload(),
+            A::Reload => self.reload(true),
             A::Help(a) => self.help_action(a),
             A::Launch(i) => self.launch_index(i),
             A::ReviewList => self.picker_open(),
@@ -455,6 +456,7 @@ impl App {
         let n = |c: Option<usize>| c.unwrap_or(1).max(1);
         match action {
             A::Back => return self.close_commit(),
+            A::Reload => return self.reload_view(),
             A::Commit(forward) => return self.step_commit(forward),
             A::SearchStart(f) => return self.search_start(f),
             A::SearchNext(same, c) => return self.search_next(same, n(c)),

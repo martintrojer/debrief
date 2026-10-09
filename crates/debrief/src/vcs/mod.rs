@@ -129,6 +129,11 @@ pub trait Vcs {
     fn working_copy(&self) -> Result<Option<WorkingCopy>> {
         Ok(None)
     }
+    /// jj: the operation reads are pinned to (to reopen on another
+    /// thread with [`reopen`]). git: `None`.
+    fn pinned_op(&self) -> Option<String> {
+        None
+    }
     /// jj: the commit ID of this workspace's `@`. git: `None`.
     fn working_copy_commit(&self) -> Result<Option<String>> {
         Ok(None)
@@ -162,6 +167,15 @@ pub fn open(path: &Path, opts: OpenOptions) -> Result<Box<dyn Vcs>> {
         return Ok(Box::new(Git::open(&start)?));
     }
     bail!("not a git or jj repository: {}", path.display())
+}
+
+/// Open `root` again (a worker thread's handle), reading at `pin` when
+/// it is a jj repo pinned there.
+pub fn reopen(root: &Path, opts: OpenOptions, pin: Option<String>) -> Result<Box<dyn Vcs>> {
+    if let Some(op) = pin {
+        return Ok(Box::new(Jj::pinned(root.to_path_buf(), opts, op)));
+    }
+    open(root, opts)
 }
 
 fn find_up(start: &Path, marker: &str) -> Option<PathBuf> {

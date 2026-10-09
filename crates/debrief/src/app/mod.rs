@@ -27,7 +27,7 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 
 use crate::seen::{Seen, Status};
-use crate::vcs::{CommitDiff, CommitInfo, Kind, Vcs};
+use crate::vcs::{CommitDiff, CommitInfo, Kind, Vcs, WorkingCopy};
 
 pub use clue::{CLUE_DELAY, ClueRow};
 pub use comment::{CommentAction, Draft};
@@ -36,7 +36,7 @@ pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::LEADER;
 pub use keys::{Action, KeyResult};
 pub use launch::{Effect, Exit, LaunchCommand};
-pub use log::{age, is_zero_id, short_id};
+pub use log::{WORKING_ID, age, is_zero_id, short_id};
 pub use motion::Cursor;
 pub use picker::{PickerAction, PickerItem, PickerView};
 pub use visual::osc52;
@@ -71,8 +71,10 @@ impl StartOptions {
 pub enum AppEvent {
     Key(KeyEvent),
     Resize(u16, u16),
-    /// The repository changed on disk (from the watcher).
+    /// The repository's refs or jj operations changed (from the watcher).
     Reload,
+    /// git: a file in the working tree changed (from the tree watcher).
+    WorkingChanged,
     /// A commit's diff from the loader thread, tagged with its request.
     Loaded {
         request: u64,
@@ -111,6 +113,9 @@ pub enum Mode {
 pub struct Row {
     pub info: CommitInfo,
     pub status: Status,
+    /// The working copy: git's synthetic row (`info.commit` is
+    /// [`WORKING_ID`]) or jj's `@`.
+    pub working: bool,
 }
 
 pub struct App {
@@ -136,6 +141,12 @@ pub struct App {
     size: (u16, u16),
     sender: Option<Sender<AppEvent>>,
     watcher: Option<watch::RepoWatcher>,
+    /// git: the working-tree watcher.
+    tree_watcher: Option<watch::RepoWatcher>,
+    /// git: the uncommitted changes, `None` when clean (or jj).
+    working: Option<WorkingCopy>,
+    /// jj: the commit ID of `@` at the pinned operation.
+    working_commit: Option<String>,
     /// The open commit (on `Screen::Commit`).
     commit: Option<commit::CommitView>,
     /// The last commit-load request number.
@@ -207,6 +218,9 @@ impl App {
             size: (80, 24),
             sender: None,
             watcher: None,
+            tree_watcher: None,
+            working: None,
+            working_commit: None,
             commit: None,
             next_request: 0,
             focus: Focus::Diff,
@@ -233,7 +247,7 @@ impl App {
         if !errors.is_empty() {
             app.status = errors.join("; ");
         }
-        let commits = app.load()?;
+        let commits = app.load(true)?;
         if app.seen.is_fresh() {
             app.seen
                 .mark_all(&commits)
@@ -252,7 +266,8 @@ impl App {
                 self.size = (c, r);
                 self.commit_follow();
             }
-            AppEvent::Reload => self.reload(),
+            AppEvent::Reload => self.reload(false),
+            AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
         }
     }
@@ -318,6 +333,11 @@ impl App {
         &self.seen
     }
 
+    /// git: the uncommitted changes the log's top row stands for.
+    pub fn working_copy(&self) -> Option<&WorkingCopy> {
+        self.working.as_ref()
+    }
+
     /// Rows that are new, and rows that are updated.
     pub fn counts(&self) -> (usize, usize) {
         let n = |s| self.rows.iter().filter(|r| r.status == s).count();
@@ -344,15 +364,22 @@ impl App {
         self.sender = Some(tx);
     }
 
-    /// Watch the repository and send [`AppEvent::Reload`] on changes.
+    /// Watch the repository and send [`AppEvent::Reload`] on changes; for
+    /// git also the working tree, sending [`AppEvent::WorkingChanged`].
     pub fn start_watcher(&mut self) -> anyhow::Result<()> {
         let Some(tx) = self.sender.clone() else {
             anyhow::bail!("no event sender");
         };
         let targets = watch::watch_targets(self.vcs.as_ref())?;
+        let refs = tx.clone();
         self.watcher = Some(watch::RepoWatcher::start(targets, move || {
-            let _ = tx.send(AppEvent::Reload);
+            let _ = refs.send(AppEvent::Reload);
         })?);
+        if self.vcs.kind() == Kind::Git {
+            self.tree_watcher = Some(watch::tree_watcher(self.vcs.root(), move || {
+                let _ = tx.send(AppEvent::WorkingChanged);
+            })?);
+        }
         Ok(())
     }
 }

@@ -2,7 +2,8 @@
 //! file's unified diff in one scrolling stream of [`Row`]s.
 //!
 //! `show()` runs on a worker thread: the [`Vcs`](crate::vcs::Vcs) handle is
-//! not `Send`, so the thread reopens the repository from its root and
+//! not `Send`, so the thread reopens the repository from its root (with
+//! the same options and jj operation pin) and
 //! sends the result back as a request-tagged [`AppEvent::Loaded`]; results
 //! for a view that is no longer open are dropped.
 
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 
 use ratatui::layout::Rect;
 
-use crate::vcs::{CommitDiff, FileDiff, LineKind, OpenOptions};
+use crate::vcs::{CommitDiff, CommitInfo, FileDiff, Kind, LineKind, OpenOptions, WorkingCopy};
 
 use super::motion::{Cell, Cursor, row_cells};
 use super::search::Search;
@@ -139,7 +140,9 @@ pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
             None,
             &header_text(f),
         ));
-        if f.binary && f.hunks.is_empty() {
+        if let Some(note) = &f.note {
+            rows.push(row(RowKind::Binary, Some(fi), None, None, note));
+        } else if f.binary && f.hunks.is_empty() {
             rows.push(row(
                 RowKind::Binary,
                 Some(fi),
@@ -166,6 +169,26 @@ pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
         }
     }
     rows
+}
+
+/// The commit-view message of git's working copy (spec §3).
+pub fn working_header(base: Option<&CommitInfo>) -> String {
+    match base {
+        Some(b) => format!(
+            "Working copy (uncommitted) on {} {}",
+            super::short_id(b),
+            b.summary
+        ),
+        None => "Working copy (uncommitted; no commits yet)".to_string(),
+    }
+}
+
+/// git's working copy as the diff the commit view shows.
+fn working_diff(w: &WorkingCopy) -> CommitDiff {
+    CommitDiff {
+        message: working_header(w.base.as_ref()),
+        files: w.diff.files.clone(),
+    }
 }
 
 /// A row as diff text: Line rows get one `+`/`-`/space prefix.
@@ -213,6 +236,12 @@ pub struct CommitView {
     pub(super) side_sel: usize,
     /// A picked comment to put the cursor on once the diff loads.
     pub(super) goto_comment: Option<debrief_review::Comment>,
+    /// The working copy: git's uncommitted changes or jj's `@`.
+    pub(super) working: bool,
+    /// git's working copy: `HEAD` (`None` before the first commit).
+    pub(super) base: Option<CommitInfo>,
+    /// A reload in place: the cursor row to keep once the diff loads.
+    pub(super) keep_row: Option<usize>,
 }
 
 impl CommitView {
@@ -235,6 +264,9 @@ impl CommitView {
             anchor: 0,
             side_sel: 0,
             goto_comment: None,
+            working: false,
+            base: None,
+            keep_row: None,
         }
     }
 
@@ -271,15 +303,16 @@ impl CommitView {
 }
 
 /// Load a commit on a worker thread; the result comes back on `tx`.
+/// `pin`: the jj operation the app reads at, so the worker sees the same
+/// snapshot.
 fn spawn_show(
-    root: PathBuf,
-    opts: OpenOptions,
+    (root, opts, pin): (PathBuf, OpenOptions, Option<String>),
     commit: String,
     request: u64,
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
-        let result = crate::vcs::open(&root, opts)
+        let result = crate::vcs::reopen(&root, opts, pin)
             .and_then(|v| v.show(&commit))
             .map_err(|e| format!("{e:#}"));
         let _ = tx.send(AppEvent::Loaded { request, result });
@@ -289,10 +322,46 @@ fn spawn_show(
 impl App {
     /// Open the log's commit `i`: mark it seen, switch screens and start
     /// loading its diff. With no event sender (unit tests) it loads here.
+    /// The working copy is brought up to date first: git re-reads it, jj
+    /// snapshots and opens the current `@` (spec K6).
     pub(super) fn open_index(&mut self, i: usize) {
-        let Some(info) = self.rows.get(i).map(|r| r.info.clone()) else {
+        let Some(row) = self.rows.get(i) else {
             return;
         };
+        if row.working {
+            return self.open_working();
+        }
+        self.open_row(i, false);
+    }
+
+    fn open_working(&mut self) {
+        match self.vcs.kind() {
+            Kind::Git => {
+                self.working_changed();
+                let (Some(i), Some(w)) = (self.working_index(), self.working.clone()) else {
+                    return self.set_status("The working copy is clean");
+                };
+                let request = self.enter_view(i);
+                if let Some(v) = &mut self.commit {
+                    v.working = true;
+                    v.base = w.base.clone();
+                }
+                self.loaded(request, Ok(working_diff(&w)));
+            }
+            Kind::Jj => {
+                self.reload(true);
+                match self.working_index() {
+                    Some(i) => self.open_row(i, true),
+                    None => self.set_status("@ is not in the log"),
+                }
+            }
+        }
+    }
+
+    /// Switch to the commit screen on log row `i` with a fresh view;
+    /// returns its request number.
+    fn enter_view(&mut self, i: usize) -> u64 {
+        let id = self.rows[i].info.commit.clone();
         self.mark_row(i);
         self.cursor = i;
         self.screen = Screen::Commit(i);
@@ -300,18 +369,79 @@ impl App {
         self.focus = Focus::Diff;
         self.next_request += 1;
         let request = self.next_request;
-        self.commit = Some(CommitView::new(info.commit.clone(), request));
+        self.commit = Some(CommitView::new(id, request));
+        request
+    }
+
+    fn open_row(&mut self, i: usize, working: bool) {
+        let request = self.enter_view(i);
+        if let Some(v) = &mut self.commit {
+            v.working = working;
+        }
+        self.start_show(request);
+    }
+
+    /// Load the open view's commit (on the worker when there is a sender).
+    fn start_show(&mut self, request: u64) {
+        let Some(id) = self.commit.as_ref().map(|v| v.commit.clone()) else {
+            return;
+        };
         match self.sender.clone() {
-            Some(tx) => spawn_show(
-                self.vcs.root().to_path_buf(),
-                self.vcs.open_options(),
-                info.commit,
-                request,
-                tx,
-            ),
+            Some(tx) => {
+                let at = (
+                    self.vcs.root().to_path_buf(),
+                    self.vcs.open_options(),
+                    self.vcs.pinned_op(),
+                );
+                spawn_show(at, id, request, tx)
+            }
             None => {
-                let result = self.vcs.show(&info.commit).map_err(|e| format!("{e:#}"));
+                let result = self.vcs.show(&id).map_err(|e| format!("{e:#}"));
                 self.loaded(request, result);
+            }
+        }
+    }
+
+    /// `r` in the commit view, and a return from the editor or a launcher:
+    /// reload the log (jj: snapshot first) and, on the working copy, its
+    /// diff in place, keeping the cursor row. Other commits stay as shown.
+    pub(super) fn reload_view(&mut self) {
+        self.reload(true);
+        let Some(v) = self.commit.as_ref().filter(|v| v.working) else {
+            return;
+        };
+        let row = v.cur.row;
+        match self.vcs.kind() {
+            Kind::Git => {
+                let Some(w) = self.working.clone() else {
+                    return self.set_status("The working copy is clean");
+                };
+                self.next_request += 1;
+                let request = self.next_request;
+                if let Some(v) = &mut self.commit {
+                    v.request = request;
+                    v.base = w.base.clone();
+                    v.keep_row = Some(row);
+                }
+                self.loaded(request, Ok(working_diff(&w)));
+            }
+            Kind::Jj => {
+                let Some(id) = self
+                    .working_index()
+                    .map(|i| self.rows[i].info.commit.clone())
+                else {
+                    return self.set_status("@ is not in the log");
+                };
+                self.next_request += 1;
+                let request = self.next_request;
+                if let Some(v) = &mut self.commit {
+                    v.request = request;
+                    v.commit = id;
+                    v.keep_row = Some(row);
+                    v.loading = true;
+                }
+                self.commit_reindex();
+                self.start_show(request);
             }
         }
     }
@@ -326,7 +456,11 @@ impl App {
         }
         match result {
             Ok(diff) => {
+                let keep = v.keep_row.take();
                 v.set_diff(diff);
+                if let Some(row) = keep {
+                    v.goto_row(row.min(v.rows.len().saturating_sub(1)));
+                }
                 let pick = v.goto_comment.take();
                 // A search typed while loading saw no rows.
                 self.refresh_search();
@@ -345,9 +479,7 @@ impl App {
 
     /// Esc / q: back to the log, the cursor on the same commit.
     pub(super) fn close_commit(&mut self) {
-        if let Some(id) = self.commit.take().map(|v| v.commit)
-            && let Some(i) = self.rows.iter().position(|r| r.info.commit == id)
-        {
+        if let Some(i) = self.commit.take().and_then(|v| self.view_index(&v)) {
             self.cursor = i;
         }
         self.screen = Screen::Log;
@@ -380,13 +512,24 @@ impl App {
     pub(super) fn commit_reindex(&mut self) {
         if let (Screen::Commit(_), Some(v)) = (self.screen, &self.commit) {
             let i = self
-                .rows
-                .iter()
-                .position(|r| r.info.commit == v.commit)
+                .view_index(v)
                 .unwrap_or_else(|| self.cursor.min(self.rows.len().saturating_sub(1)));
             self.cursor = i;
             self.screen = Screen::Commit(i);
         }
+    }
+
+    /// The log row of view `v`: the working copy's row, else its commit's.
+    fn view_index(&self, v: &CommitView) -> Option<usize> {
+        if v.working {
+            return self.working_index();
+        }
+        self.rows.iter().position(|r| r.info.commit == v.commit)
+    }
+
+    /// Whether the open view is the working copy.
+    pub fn viewing_working_copy(&self) -> bool {
+        self.commit.as_ref().is_some_and(|v| v.working)
     }
 
     /// The diff rows of the open commit (empty while loading or on the log).

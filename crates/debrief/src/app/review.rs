@@ -6,6 +6,10 @@
 //! No re-anchoring (spec Q11): a comment marks rows only when its revision
 //! is the displayed commit. A comment on an earlier version of a jj change
 //! stays in the batch with its own revision and excerpt.
+//!
+//! On the working copy (spec Q23) the markers are working-copy comments
+//! (no revision, ramble's too) on the new side, and comments on the base
+//! commit's old side.
 
 use std::time::{Duration, Instant};
 
@@ -69,9 +73,19 @@ impl App {
         let (Some(r), Some(id)) = (&self.review, self.commit_id()) else {
             return Vec::new();
         };
+        let working = self.viewing_working_copy();
+        let base = working
+            .then(|| self.working_base().ok().map(|b| b.commit))
+            .flatten();
         r.comments()
             .iter()
-            .filter(|c| c.rev.as_ref().is_some_and(|rev| rev.commit == id))
+            .filter(|c| match &c.rev {
+                None => working,
+                Some(rev) if rev.commit == id => true,
+                Some(rev) => {
+                    working && c.side == Some(Side::Old) && base.as_deref() == Some(&rev.commit)
+                }
+            })
             .collect()
     }
 
@@ -92,11 +106,17 @@ impl App {
         let Some(line) = diff.files[f].hunks.get(h).and_then(|h| h.lines.get(l)) else {
             return false;
         };
-        if file_path(&diff.files[f]) != c.path {
+        let fd = &diff.files[f];
+        // The side's own path (K11), or the display path older comments use.
+        let side_path = match c.side {
+            Some(Side::Old) => fd.old_path.as_deref(),
+            _ => fd.new_path.as_deref(),
+        };
+        if side_path != Some(c.path.as_str()) && file_path(fd) != c.path {
             return false;
         }
         let n = match (c.side, kind) {
-            (Some(Side::New), LineKind::Added | LineKind::Context) => line.new,
+            (Some(Side::New) | None, LineKind::Added | LineKind::Context) => line.new,
             (Some(Side::Old), LineKind::Removed | LineKind::Context) => line.old,
             _ => None,
         };

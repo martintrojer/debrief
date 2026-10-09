@@ -234,7 +234,11 @@ impl App {
     /// stays where it was.
     pub fn run_pending_effect(&mut self) {
         match self.effect.take() {
-            Some(Effect::Launch(cmd)) => self.run_launch(&cmd),
+            Some(Effect::Launch(cmd)) => {
+                self.run_launch(&cmd);
+                // The command may have changed files (spec K6, Q24).
+                self.after_launch();
+            }
             Some(Effect::EditComment(d)) => self.run_comment_editor(d),
             Some(Effect::EditReviewComment { id, initial }) => {
                 self.run_review_comment_editor(id, &initial);
@@ -245,6 +249,22 @@ impl App {
         }
         self.review_reload();
         self.picker_refresh();
+    }
+
+    /// After a launcher: reload as `r` does, keeping its status message.
+    fn after_launch(&mut self) {
+        let status = std::mem::take(&mut self.status);
+        match self.screen {
+            Screen::Commit(_) => self.reload_view(),
+            Screen::Log => self.reload(true),
+        }
+        if !status.is_empty() {
+            self.status = if self.status.is_empty() {
+                status
+            } else {
+                format!("{status}; {}", self.status)
+            };
+        }
     }
 
     /// The working-copy file and line for `<leader>o` and `${file}`:
@@ -269,6 +289,7 @@ impl App {
                 }
             }
         };
+        self.inside_root(&path)?;
         let abs = self.vcs.root().join(&path);
         if !abs.exists() {
             return Err(not_in_working_copy(&path));
@@ -279,10 +300,13 @@ impl App {
     /// The log's target: the commit's first file still in the working copy.
     fn log_target(&self) -> Result<(String, u32), String> {
         let info = self.rows.get(self.cursor).ok_or(NO_FILES)?;
-        let diff = self
-            .vcs
-            .show(&info.info.commit)
-            .map_err(|e| format!("cannot show the commit: {e:#}"))?;
+        let diff = match (&self.working, info.info.commit == super::WORKING_ID) {
+            (Some(w), true) => w.diff.clone(),
+            _ => self
+                .vcs
+                .show(&info.info.commit)
+                .map_err(|e| format!("cannot show the commit: {e:#}"))?,
+        };
         let Some(first) = diff.files.first() else {
             return Err(NO_FILES.into());
         };

@@ -43,6 +43,15 @@ impl Jj {
         }
     }
 
+    /// Reads pinned to operation `op` (a reopened handle).
+    pub fn pinned(root: PathBuf, opts: OpenOptions, op: String) -> Self {
+        Jj {
+            root,
+            opts,
+            pin: RefCell::new(Some(op)),
+        }
+    }
+
     /// The operation reads use: the snapshot's pin when there is one,
     /// else the current single op head.
     fn at_op(&self) -> Result<String> {
@@ -167,6 +176,10 @@ impl Vcs for Jj {
             Err(e) if had_pin => Err(e.context("jj snapshot failed; showing the last snapshot")),
             Err(e) => Err(e.context("jj snapshot failed")),
         }
+    }
+
+    fn pinned_op(&self) -> Option<String> {
+        self.pin.borrow().clone()
     }
 
     fn working_copy_commit(&self) -> Result<Option<String>> {

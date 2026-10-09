@@ -2,6 +2,12 @@
 //! row, visual `c` on the selection. Side, lines and excerpt are frozen
 //! when `c` is pressed; a one-line prompt takes the body (Enter saves, Esc
 //! cancels, `C-e` moves it into `$EDITOR`), as in ramble.
+//!
+//! On the working copy (spec Q23, K11) new and context lines make
+//! ramble-style comments: no revision, the new path, the line numbers of
+//! the file on disk. Removed lines anchor to the base (git `HEAD`, jj
+//! `@-`) on its old side and old path; a jj merge `@` has no single base,
+//! so those are refused.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief_review::{Comment, Rev, Side};
@@ -10,7 +16,16 @@ use super::commit::{RowKind, file_path};
 use super::keys::{Action, KeyResult};
 use super::launch::Effect;
 use super::{App, Mode};
-use crate::vcs::{DiffLine, LineKind};
+use crate::vcs::{CommitInfo, DiffLine, FileDiff, LineKind};
+
+/// The revision a comment on `info` records.
+fn rev_of(info: &CommitInfo) -> Rev {
+    Rev {
+        commit: info.commit.clone(),
+        change: info.change.clone(),
+        summary: Some(info.summary.clone()),
+    }
+}
 
 /// The prompt's label.
 pub const COMMENT_PROMPT: &str = "comment: ";
@@ -20,6 +35,10 @@ pub const EMPTY_COMMENT: &str = "Empty comment not saved";
 pub const NOT_A_LINE: &str = "Comment on a diff line";
 /// Status when the selection's diff lines are in more than one file.
 pub const SPANS_FILES: &str = "Selection spans files";
+/// Status for removed lines of a jj `@` with several parents.
+pub const MERGE_OLD_SIDE: &str = "This working copy is a merge; comment on the new side";
+/// Status for a path that resolves outside the repo (a symlinked dir).
+pub const OUTSIDE_ROOT: &str = "The file is outside the repository";
 /// The excerpt keeps at most this many selected diff lines.
 pub const EXCERPT_LINES: usize = 40;
 
@@ -42,8 +61,10 @@ pub enum CommentAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Draft {
     pub path: String,
-    pub rev: Rev,
-    pub side: Side,
+    /// `None`: a working-copy comment (as ramble makes them).
+    pub rev: Option<Rev>,
+    /// `None` with `rev`: lines of the file on disk.
+    pub side: Option<Side>,
     pub lines: (u32, u32),
     pub excerpt: String,
     pub text: String,
@@ -177,6 +198,11 @@ impl App {
                 format!("{sign}{}", l.text)
             })
             .collect();
+        let f = &diff.files[file];
+        let excerpt = excerpt.join("\n");
+        if v.working {
+            return self.working_draft(f, side, (a, b), excerpt);
+        }
         let info = self
             .rows
             .iter()
@@ -184,17 +210,83 @@ impl App {
             .map(|r| &r.info)
             .ok_or("The commit is no longer in the log")?;
         Ok(Draft {
-            path: file_path(&diff.files[file]).to_string(),
-            rev: Rev {
-                commit: info.commit.clone(),
-                change: info.change.clone(),
-                summary: Some(info.summary.clone()),
-            },
-            side,
+            path: file_path(f).to_string(),
+            rev: Some(rev_of(info)),
+            side: Some(side),
             lines: (a, b),
-            excerpt: excerpt.join("\n"),
+            excerpt,
             text: String::new(),
         })
+    }
+
+    /// A draft on the working copy (Q23, K11).
+    fn working_draft(
+        &self,
+        f: &FileDiff,
+        side: Side,
+        lines: (u32, u32),
+        excerpt: String,
+    ) -> Result<Draft, String> {
+        let draft = |path: &str, rev, side| Draft {
+            path: path.to_string(),
+            rev,
+            side,
+            lines,
+            excerpt: excerpt.clone(),
+            text: String::new(),
+        };
+        if side == Side::New {
+            let path = f.new_path.as_deref().ok_or(NOT_A_LINE)?;
+            self.inside_root(path)?;
+            return Ok(draft(path, None, None));
+        }
+        let path = f.old_path.as_deref().ok_or(NOT_A_LINE)?;
+        let base = self.working_base()?;
+        Ok(draft(path, Some(rev_of(&base)), Some(Side::Old)))
+    }
+
+    /// The working copy's base commit: git's `HEAD`, jj's single `@-`.
+    pub(super) fn working_base(&self) -> Result<CommitInfo, String> {
+        let v = self.commit.as_ref().ok_or(NOT_A_LINE)?;
+        if let Some(b) = &v.base {
+            return Ok(b.clone());
+        }
+        let at = self
+            .rows
+            .iter()
+            .find(|r| r.working && r.info.commit == v.commit)
+            .ok_or("The working copy is no longer in the log")?;
+        let parent = match &at.info.parents[..] {
+            [one] => one.clone(),
+            [] => return Err("The working copy has no parent".into()),
+            _ => return Err(MERGE_OLD_SIDE.into()),
+        };
+        if let Some(r) = self.rows.iter().find(|r| r.info.commit == parent) {
+            return Ok(r.info.clone());
+        }
+        self.vcs
+            .log(Some(&parent), 1)
+            .ok()
+            .and_then(|l| l.into_iter().next())
+            .ok_or_else(|| "Cannot read the working copy's parent".to_string())
+    }
+
+    /// `Err` when `path` (repo-relative) resolves outside the repo root.
+    pub(super) fn inside_root(&self, path: &str) -> Result<(), String> {
+        let root = self.vcs.root();
+        let abs = root.join(path);
+        // The deepest existing ancestor decides (the file may be gone).
+        let Some(existing) = abs.ancestors().find(|p| p.exists()) else {
+            return Ok(());
+        };
+        let (Ok(c), Ok(r)) = (existing.canonicalize(), root.canonicalize()) else {
+            return Ok(());
+        };
+        if c.starts_with(&r) {
+            Ok(())
+        } else {
+            Err(OUTSIDE_ROOT.into())
+        }
     }
 
     /// Save `d` with its text (trimmed); an empty body saves nothing.
@@ -207,7 +299,10 @@ impl App {
             return self.set_status(super::review::NO_BATCH);
         };
         let (a, b) = d.lines;
-        let c = Comment::on_diff(d.path, d.rev, d.side, a..=b, d.excerpt, body);
+        let c = match (d.rev, d.side) {
+            (Some(rev), Some(side)) => Comment::on_diff(d.path, rev, side, a..=b, d.excerpt, body),
+            _ => Comment::on_file(d.path, a..=b, d.excerpt, body),
+        };
         let msg = match review.add(c) {
             Ok(_) => format!("Comment added ({} in batch)", review.comments().len()),
             Err(e) => format!("comment not saved: {e}"),

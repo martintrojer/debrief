@@ -1,4 +1,5 @@
-//! Command line: `debrief [PATH] [--revset R] [--limit N] [--cache-dir DIR] [--config PATH]`.
+//! Command line: `debrief [PATH] [--revset R] [--limit N] [--cache-dir DIR]
+//! [--config PATH] [--no-snapshot]`.
 
 use std::path::PathBuf;
 
@@ -6,6 +7,7 @@ use clap::Parser;
 
 use crate::app::config::Config;
 use crate::app::{DEFAULT_LIMIT, StartOptions};
+use crate::vcs::OpenOptions;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,6 +32,10 @@ pub struct Cli {
     /// `~/.config/debrief/config.toml`).
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
+    /// jj: don't snapshot the working copy; `@` shows as of the last jj
+    /// command and debrief writes nothing to the repo.
+    #[arg(long)]
+    pub no_snapshot: bool,
 }
 
 /// A startup failure: the message for stderr, and exit code 2.
@@ -39,6 +45,13 @@ pub struct StartError(pub String);
 impl Cli {
     pub fn path(&self) -> PathBuf {
         self.path.clone().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    /// How to open the repository.
+    pub fn open_options(&self) -> OpenOptions {
+        OpenOptions {
+            snapshot: !self.no_snapshot,
+        }
     }
 
     /// The start options; `default_cache` is `debrief_review::cache_dir()`,
@@ -93,6 +106,9 @@ mod tests {
         assert_eq!(o.cache_dir, PathBuf::from("/c"));
         assert_eq!(o.revset.as_deref(), Some("main.."));
         assert_eq!(o.limit, 5);
+        assert!(c.open_options().snapshot);
+        let c = Cli::try_parse_from(["debrief", "--no-snapshot"]).unwrap();
+        assert!(!c.open_options().snapshot);
     }
 
     #[test]

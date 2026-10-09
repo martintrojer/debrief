@@ -1,0 +1,15 @@
+[package]
+name = "debrief"
+description = "Catch up with what the agents committed, and answer back"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+debrief-review = { path = "../debrief-review", version = "0.1.0" }
+
+[lints]
+workspace = true

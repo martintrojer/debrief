@@ -1,6 +1,7 @@
 //! Review comments on files and diffs, batched per repo root and handed back to an agent.
 
 mod comment;
+mod export;
 mod store;
 
 pub use comment::{Comment, Rev, Side};

@@ -78,7 +78,7 @@ impl App {
 
     /// git: re-read the uncommitted changes.
     fn load_working(&mut self) {
-        match self.vcs.working_copy(crate::vcs::Context::Default) {
+        match self.vcs.working_copy(self.context) {
             Ok(w) => self.working = w,
             Err(e) => {
                 self.working = None;

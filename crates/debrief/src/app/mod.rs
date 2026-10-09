@@ -202,6 +202,8 @@ pub struct App {
     focus: Focus,
     /// `<leader>e` state of the file list.
     sidebar_on: bool,
+    /// `T`: hunks or the full file, for every commit opened this session.
+    context: crate::vcs::Context,
     /// Bytes for the terminal (OSC 52).
     output: Vec<u8>,
     config: config::Config,
@@ -276,6 +278,7 @@ impl App {
             next_request: 0,
             focus: Focus::Diff,
             sidebar_on: true,
+            context: crate::vcs::Context::Default,
             output: Vec::new(),
             config: config::Config::default(),
             launch_keys: Vec::new(),
@@ -294,6 +297,7 @@ impl App {
         app.review_open();
         app.config = app.opts.config.clone();
         app.stat.on = app.config.view.stats;
+        app.context = app.config.view.context;
         let (keys, mut errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;
         errors.extend(app.config.warnings.iter().cloned());

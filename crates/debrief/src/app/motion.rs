@@ -5,6 +5,7 @@
 
 use super::commit::{CommitView, RowKind};
 use super::display::{self, Glyph};
+use crate::vcs::LineKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Class {
@@ -308,6 +309,43 @@ impl CommitView {
                 (row + 1..self.rows.len()).find(|&r| self.rows[r].kind == kind)
             } else {
                 (0..row).rev().find(|&r| self.rows[r].kind == kind)
+            };
+            match found {
+                Some(r) => {
+                    row = r;
+                    moved = true;
+                }
+                None => break,
+            }
+        }
+        if moved {
+            self.goto_row(row);
+        }
+        moved
+    }
+
+    /// `]c` `[c` in the full file: the first row of the `n`th change
+    /// block (a run of added and removed lines) after (or before) the
+    /// cursor's; stays put when there is none. Returns whether it moved.
+    pub(super) fn jump_change(&mut self, forward: bool, n: usize) -> bool {
+        let edit = |r: usize| {
+            matches!(
+                self.rows[r].kind,
+                RowKind::Line(LineKind::Added | LineKind::Removed)
+            )
+        };
+        // A no-newline row belongs to the line above it.
+        let changed =
+            |r: usize| edit(r) || (self.rows[r].kind == RowKind::NoNewline && r > 0 && edit(r - 1));
+        // A block starts at a changed row whose previous row is not one.
+        let start = |r: usize| changed(r) && (r == 0 || !changed(r - 1));
+        let mut row = self.cur.row;
+        let mut moved = false;
+        for _ in 0..n.max(1) {
+            let found = if forward {
+                (row + 1..self.rows.len()).find(|&r| start(r))
+            } else {
+                (0..row).rev().find(|&r| start(r))
             };
             match found {
                 Some(r) => {

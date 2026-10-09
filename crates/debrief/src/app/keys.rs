@@ -69,8 +69,10 @@ pub enum Action {
     CursorBottom,
     /// `]f` / `[f`.
     File(bool, Option<usize>),
-    /// `]c` / `[c`.
+    /// `]c` / `[c`: hunk headers, or change blocks in the full file.
     Hunk(bool, Option<usize>),
+    /// `T`: hunks / the full file.
+    ToggleContext,
     /// `]]` / `[[`: the next (older) / previous commit of the log.
     Commit(bool),
     /// `/` (true) or `?`.
@@ -332,6 +334,7 @@ impl App {
             KeyCode::Enter => A::DiffEnter,
             KeyCode::Char('K') => A::Hover,
             KeyCode::Char('r') => A::Reload,
+            KeyCode::Char('T') => A::ToggleContext,
             _ => return KeyResult::None,
         };
         KeyResult::Action(action)
@@ -492,6 +495,7 @@ impl App {
         match action {
             A::Back => return self.close_commit(),
             A::Reload => return self.reload_view(),
+            A::ToggleContext => return self.toggle_context(),
             A::Commit(forward) => return self.step_commit(forward),
             A::SearchStart(f) => return self.search_start(f),
             A::SearchNext(same, c) => return self.search_next(same, n(c)),
@@ -526,6 +530,7 @@ impl App {
             }
             _ => {}
         }
+        let full = self.context == crate::vcs::Context::Full;
         let Some(v) = &mut self.commit else { return };
         let mut missing = None;
         match action {
@@ -565,7 +570,14 @@ impl App {
                     "no previous file"
                 });
             }
-            A::Hunk(f, c) if !v.jump_kind(RowKind::HunkHeader, f, n(c)) => {
+            A::Hunk(f, c) if full && !v.jump_change(f, n(c)) => {
+                missing = Some(if f {
+                    "no next change"
+                } else {
+                    "no previous change"
+                });
+            }
+            A::Hunk(f, c) if !full && !v.jump_kind(RowKind::HunkHeader, f, n(c)) => {
                 missing = Some(if f {
                     "no next hunk"
                 } else {
@@ -587,6 +599,7 @@ fn visual_ok(a: Action) -> bool {
         a,
         A::Back
             | A::Commit(_)
+            | A::ToggleContext
             | A::ToggleSidebar
             | A::Focus(_)
             | A::Help(_)

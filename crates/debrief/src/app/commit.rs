@@ -263,6 +263,21 @@ pub struct CommitView {
     pub(super) base: Option<CommitInfo>,
     /// A reload in place: the cursor row to keep once the diff loads.
     pub(super) keep_row: Option<usize>,
+    /// A `T` reload: the line to put the cursor back on once it loads,
+    /// and the cursor's row on screen to keep.
+    pub(super) keep_anchor: Option<(Anchor, usize)>,
+}
+
+/// Where the cursor was, in terms that survive a change of context
+/// (`T`): message rows by index, everything else by file and line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Anchor {
+    /// A message row (the message is the same in both modes).
+    Row(usize),
+    /// A file's header, placeholder or hunk header: the file's header.
+    File(String),
+    /// A diff line: the new-side line when it has one, else the old.
+    Line { path: String, new: bool, line: u32 },
 }
 
 impl CommitView {
@@ -290,6 +305,7 @@ impl CommitView {
             working: false,
             base: None,
             keep_row: None,
+            keep_anchor: None,
         }
     }
 
@@ -321,6 +337,66 @@ impl CommitView {
             .position(|r| r.kind == RowKind::FileHeader && r.file == Some(file))
     }
 
+    /// The cursor row as an [`Anchor`].
+    fn anchor(&self) -> Option<Anchor> {
+        let diff = self.diff.as_ref()?;
+        let r = self.rows.get(self.cur.row)?;
+        let Some(fi) = r.file.or_else(|| self.file_at(self.cur.row)) else {
+            return Some(Anchor::Row(self.cur.row));
+        };
+        let f = diff.files.get(fi)?;
+        let path = file_path(f).to_string();
+        let line = match (r.hunk, r.line) {
+            (Some(h), Some(l)) => f.hunks.get(h)?.lines.get(l),
+            _ => None,
+        };
+        Some(match line {
+            Some(l) => match (l.new, l.old) {
+                (Some(n), _) => Anchor::Line {
+                    path,
+                    new: true,
+                    line: n,
+                },
+                (None, Some(o)) => Anchor::Line {
+                    path,
+                    new: false,
+                    line: o,
+                },
+                (None, None) => Anchor::File(path),
+            },
+            None => Anchor::File(path),
+        })
+    }
+
+    /// The row of `a` in the current rows: the same line when it is still
+    /// shown, else the nearest line of the same file (by that side's line
+    /// number), else the file's header.
+    fn anchor_row(&self, a: &Anchor) -> Option<usize> {
+        let diff = self.diff.as_ref()?;
+        let (path, new, line) = match a {
+            Anchor::Row(r) => return Some(*r),
+            Anchor::File(p) => (p, true, None),
+            Anchor::Line { path, new, line } => (path, *new, Some(*line)),
+        };
+        let fi = diff.files.iter().position(|f| file_path(f) == path)?;
+        let header = self.header_row(fi);
+        let Some(want) = line else { return header };
+        let side = |r: &Row| -> Option<u32> {
+            if !matches!(r.kind, RowKind::Line(_)) || r.file != Some(fi) {
+                return None;
+            }
+            let l = diff.files[fi].hunks.get(r.hunk?)?.lines.get(r.line?)?;
+            if new { l.new } else { l.old }
+        };
+        self.rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| side(r).map(|n| (i, n.abs_diff(want))))
+            .min_by_key(|&(_, d)| d)
+            .map(|(i, _)| i)
+            .or(header)
+    }
+
     pub(super) fn file_count(&self) -> usize {
         self.diff.as_ref().map_or(0, |d| d.files.len())
     }
@@ -333,13 +409,14 @@ impl CommitView {
 fn spawn_show(
     (root, opts, pin): (PathBuf, OpenOptions, Option<String>),
     commit: String,
+    context: Context,
     request: u64,
     colour: bool,
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
-            .and_then(|v| v.show(&commit, Context::Default))
+            .and_then(|v| v.show(&commit, context))
             .map_err(|e| format!("{e:#}"));
         let diff = result.as_ref().ok().filter(|_| colour).cloned();
         if tx.send(AppEvent::Loaded { request, result }).is_err() {
@@ -428,12 +505,12 @@ impl App {
                     self.vcs.pinned_op(),
                 );
                 let colour = self.config.render.highlight;
-                spawn_show(at, id, request, colour, tx)
+                spawn_show(at, id, self.context, request, colour, tx)
             }
             None => {
                 let result = self
                     .vcs
-                    .show(&id, Context::Default)
+                    .show(&id, self.context)
                     .map_err(|e| format!("{e:#}"));
                 let diff = result.as_ref().ok().cloned();
                 self.loaded(request, result);
@@ -527,6 +604,52 @@ impl App {
         }
     }
 
+    /// `T`: switch between hunks and the full file for this session and
+    /// reload the open commit in that mode, the cursor kept on its line.
+    pub(super) fn toggle_context(&mut self) {
+        self.context = match self.context {
+            Context::Default => Context::Full,
+            Context::Full => Context::Default,
+        };
+        self.set_status(match self.context {
+            Context::Full => "full file",
+            Context::Default => "hunks",
+        });
+        let Some(v) = &self.commit else { return };
+        let anchor = v.anchor().map(|a| (a, v.cur.row.saturating_sub(v.scroll)));
+        let working = v.working;
+        self.next_request += 1;
+        let request = self.next_request;
+        if let Some(v) = &mut self.commit {
+            v.request = request;
+            v.keep_anchor = anchor;
+            v.keep_row = None;
+        }
+        if working && self.vcs.kind() == Kind::Git {
+            // git's working copy is read here, as `r` does.
+            self.working_changed();
+            let Some(w) = self.working.clone() else {
+                self.close_commit();
+                return self.set_status("The working copy is clean");
+            };
+            if let Some(v) = &mut self.commit {
+                v.base = w.base.clone();
+            }
+            let diff = working_diff(&w);
+            self.loaded(request, Ok(diff.clone()));
+            return self.highlight_later(request, diff);
+        }
+        if let Some(v) = &mut self.commit {
+            v.loading = true;
+        }
+        self.start_show(request);
+    }
+
+    /// The session's context: hunks or the full file (`T`).
+    pub fn context(&self) -> Context {
+        self.context
+    }
+
     /// A worker's answer: show it if its view is still open.
     pub(super) fn loaded(&mut self, request: u64, result: Result<CommitDiff, String>) {
         let Some(v) = self.commit.as_mut().filter(|v| v.request == request) else {
@@ -538,9 +661,16 @@ impl App {
         match result {
             Ok(diff) => {
                 let keep = v.keep_row.take();
+                let anchor = v.keep_anchor.take();
                 v.set_diff(diff);
                 if let Some(row) = keep {
                     v.goto_row(row.min(v.rows.len().saturating_sub(1)));
+                }
+                if let Some((row, on_screen)) =
+                    anchor.and_then(|(a, y)| Some((v.anchor_row(&a)?, y)))
+                {
+                    v.goto_row(row.min(v.rows.len().saturating_sub(1)));
+                    v.scroll = v.cur.row.saturating_sub(on_screen).min(v.max_scroll());
                 }
                 let pick = v.goto_comment.take();
                 // A search typed while loading saw no rows.

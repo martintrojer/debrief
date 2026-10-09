@@ -304,6 +304,7 @@ impl App {
             (Some(w), true) => w.diff.clone(),
             _ => self
                 .vcs
+                // Hunks whatever `T` says: the line is the first change's.
                 .show(&info.info.commit, crate::vcs::Context::Default)
                 .map_err(|e| format!("cannot show the commit: {e:#}"))?,
         };

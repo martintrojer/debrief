@@ -189,7 +189,7 @@ mod tests {
         a.key(ch(']'));
         let rows = a.clue_rows();
         let keys: Vec<_> = rows.iter().map(|r| r.key.as_str()).collect();
-        assert_eq!(keys, ["]", "c", "f"]);
+        assert_eq!(keys, ["]", "c", "f", "r"]);
         assert_eq!(rows[2].desc, "next file");
     }
 

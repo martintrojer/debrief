@@ -3,6 +3,7 @@
 //! `keys`, its rows in `help::BINDINGS` and one draw call in `ui`.
 
 mod clue;
+pub mod comment;
 pub mod commit;
 pub mod config;
 mod help;
@@ -10,6 +11,7 @@ mod keys;
 pub mod launch;
 mod log;
 mod motion;
+pub mod review;
 pub mod run;
 mod search;
 pub mod sidebar;
@@ -27,6 +29,7 @@ use crate::seen::{Seen, Status};
 use crate::vcs::{CommitDiff, CommitInfo, Kind, Vcs};
 
 pub use clue::{CLUE_DELAY, ClueRow};
+pub use comment::{CommentAction, Draft};
 pub use commit::{Focus, Row as DiffRow, RowKind};
 pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::LEADER;
@@ -93,6 +96,10 @@ pub enum Mode {
     Search,
     /// Line-wise selection in the commit view.
     Visual,
+    /// Typing a comment's body.
+    Comment,
+    /// The `K` popup.
+    Popup,
 }
 
 /// One log row: the commit and how it shows.
@@ -141,6 +148,14 @@ pub struct App {
     effect: Option<Effect>,
     runner: Box<launch::Runner>,
     env: Box<launch::EnvLookup>,
+    /// The review batch for `vcs.root()`, shared with ramble.
+    review: Option<debrief_review::Review>,
+    /// When the batch was last re-read.
+    review_polled: Option<Instant>,
+    /// The comment being typed.
+    draft: Option<comment::Draft>,
+    /// The `K` popup's text.
+    popup: Option<String>,
 }
 
 impl App {
@@ -179,7 +194,12 @@ impl App {
             effect: None,
             runner: Box::new(launch::system_run),
             env: Box::new(|k| std::env::var(k).ok()),
+            review: None,
+            review_polled: None,
+            draft: None,
+            popup: None,
         };
+        app.review_open();
         app.config = app.opts.config.clone();
         let (keys, errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;
@@ -210,9 +230,11 @@ impl App {
         }
     }
 
-    /// Time passes: the key clue opens after a pause.
+    /// Time passes: the key clue opens after a pause; the review batch
+    /// is re-read at most once a second.
     pub fn tick(&mut self, now: Instant) {
         self.clue_tick(now);
+        self.review_tick(now);
     }
 
     /// Draw the whole screen.

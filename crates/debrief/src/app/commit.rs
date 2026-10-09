@@ -421,10 +421,11 @@ impl App {
     pub(super) fn commit_follow(&mut self) {
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
         let diff = self.commit_layout(area).diff;
+        let marks = self.review_gutter();
         if let Some(v) = &mut self.commit {
             v.view_h = (diff.height as usize).max(1);
             v.text_w = (diff.width as usize)
-                .saturating_sub(gutter_width(v.num_w))
+                .saturating_sub(gutter_width(v.num_w) + marks)
                 .max(1);
             v.keep_visible();
         }

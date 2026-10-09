@@ -26,6 +26,10 @@ pub(crate) enum Ctx {
     Visual,
     /// Typing a search pattern.
     Search,
+    /// Typing a comment.
+    Comment,
+    /// The `K` popup is open.
+    Popup,
     /// The help overlay is open.
     Help,
 }
@@ -40,12 +44,13 @@ pub(crate) enum Group {
     Files,
     Search,
     Visual,
+    Review,
     Launch,
     Help,
 }
 
 impl Group {
-    const ALL: [Group; 9] = [
+    const ALL: [Group; 10] = [
         Group::General,
         Group::Motions,
         Group::Log,
@@ -53,6 +58,7 @@ impl Group {
         Group::Files,
         Group::Search,
         Group::Visual,
+        Group::Review,
         Group::Launch,
         Group::Help,
     ];
@@ -66,6 +72,7 @@ impl Group {
             Group::Files => "File list",
             Group::Search => "Search",
             Group::Visual => "Visual",
+            Group::Review => "Review",
             Group::Launch => "Launchers",
             Group::Help => "Help",
         }
@@ -95,7 +102,10 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 
 /// Every key binding, as the help overlay and the key clue list them.
 pub(crate) const BINDINGS: &[Binding] = {
-    use Ctx::{Commit as C, Files as F, Help as H, Log as L, Search as S, Visual as V};
+    use Ctx::{
+        Comment as P, Commit as C, Files as F, Help as H, Log as L, Popup as K, Search as S,
+        Visual as V,
+    };
     use Group as G;
     &[
         b("q", L, G::General, "quit"),
@@ -178,6 +188,21 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("y", V, G::Visual, "copy the rows as diff text"),
         b("v, V", V, G::Visual, "leave visual mode"),
         b("Esc", V, G::Visual, "cancel"),
+        b("c", V, G::Review, "comment on the selected diff lines"),
+        b("cc", C, G::Review, "comment on the diff line"),
+        b("]r", C, G::Review, "next commented line"),
+        b("[r", C, G::Review, "previous commented line"),
+        b("K", C, G::Review, "show the comments on this line"),
+        b("Enter", P, G::Review, "in a comment: save"),
+        b("Esc", P, G::Review, "in a comment: cancel"),
+        b("C-e", P, G::Review, "in a comment: edit in $EDITOR"),
+        b(
+            "Backspace",
+            P,
+            G::Review,
+            "in a comment: delete a character",
+        ),
+        b("q, K, Esc", K, G::Review, "in the comment popup: close"),
         b("j, Down", H, G::Help, "in help: scroll down"),
         b("k, Up", H, G::Help, "in help: scroll up"),
         b("C-d, C-u", H, G::Help, "in help: half page"),
@@ -395,7 +420,7 @@ impl App {
     pub(super) fn ctx_shown(&self, ctx: Ctx) -> bool {
         match ctx {
             Ctx::Log => self.screen == Screen::Log,
-            Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Search => {
+            Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Search | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }
             Ctx::Help => true,
@@ -407,10 +432,14 @@ impl App {
         let commit = matches!(self.screen, Screen::Commit(_));
         match ctx {
             Ctx::Log => self.screen == Screen::Log,
-            Ctx::Commit => commit && !self.files_focused() && self.mode != Mode::Search,
+            Ctx::Commit => {
+                commit && !self.files_focused() && matches!(self.mode, Mode::Normal | Mode::Visual)
+            }
             Ctx::Files => commit && self.files_focused() && self.mode == Mode::Normal,
             Ctx::Visual => commit && self.mode == Mode::Visual,
             Ctx::Search => commit && self.mode == Mode::Search,
+            Ctx::Comment => commit && self.mode == Mode::Comment,
+            Ctx::Popup => commit && self.mode == Mode::Popup,
             Ctx::Help => false,
         }
     }
@@ -555,6 +584,9 @@ pub(super) mod tests {
             Ctx::Files => a.focus_pane(crate::app::Focus::Files),
             Ctx::Visual => a.visual_start(),
             Ctx::Search => a.search_start(true),
+            // The keymaps depend only on the mode.
+            Ctx::Comment => a.mode = Mode::Comment,
+            Ctx::Popup => a.mode = Mode::Popup,
             Ctx::Log | Ctx::Commit => {}
         }
         (t, a)
@@ -568,6 +600,8 @@ pub(super) mod tests {
             Ctx::Files,
             Ctx::Visual,
             Ctx::Search,
+            Ctx::Comment,
+            Ctx::Popup,
             Ctx::Help,
         ];
         let apps: Vec<_> = ctxs.iter().map(|&c| (c, in_ctx(c))).collect();
@@ -589,7 +623,7 @@ pub(super) mod tests {
     /// binds in each context has a help row there.
     #[test]
     fn every_key_has_a_row() {
-        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Visual] {
+        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Visual, Ctx::Popup] {
             let (_t, a) = in_ctx(ctx);
             every_key_has_a_row_in(&a, ctx);
         }

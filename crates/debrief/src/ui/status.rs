@@ -29,7 +29,7 @@ fn elide_left(s: &str, max: usize) -> String {
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
-    if let Some(p) = app.search_prompt() {
+    if let Some(p) = app.search_prompt().or_else(|| app.comment_prompt()) {
         let x = area.x + Span::raw(p.as_str()).width() as u16;
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
         frame.render_widget(Paragraph::new(p).style(base), area);
@@ -97,10 +97,13 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
         ));
     }
     spans.push(Span::styled(format!(" {id}"), base.fg(palette::MAUVE)));
+    let preview = app.review_preview();
     let msg = if app.commit_loading() {
         "loading…"
-    } else {
+    } else if !app.status().is_empty() {
         app.status()
+    } else {
+        preview.as_deref().unwrap_or("")
     };
     if !msg.is_empty() {
         spans.push(Span::styled(format!("  {msg}"), base.fg(palette::YELLOW)));

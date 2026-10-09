@@ -1,4 +1,5 @@
-//! The commit view's diff pane: a `oooo nnnn ±` gutter then the row text,
+//! The commit view's diff pane: a `●` review gutter (while the commit has
+//! comments), a `oooo nnnn ±` gutter, then the row text,
 //! cut at the pane's width and scrolled horizontally with the cursor.
 
 use ratatui::Frame;
@@ -11,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::palette;
 use crate::app::commit::gutter_width;
+use crate::app::review::MARKER;
 use crate::app::{App, DiffRow, Focus, Mode, RowKind};
 use crate::vcs::LineKind;
 
@@ -95,7 +97,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let hits = app.search_hits();
     let focused = app.focus() == Focus::Diff || app.mode() != Mode::Normal;
     let num_w = app.commit_num_width();
-    let text_w = (area.width as usize).saturating_sub(gutter_width(num_w));
+    let marks = app.review_gutter();
+    let marked = app.review_marked_rows();
+    let text_w = (area.width as usize).saturating_sub(gutter_width(num_w) + marks);
     let lines: Vec<Line> = rows
         .iter()
         .enumerate()
@@ -109,10 +113,19 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             } else if i == cur.row {
                 base = base.bg(palette::SURFACE);
             }
-            let mut spans = vec![Span::styled(
+            let mut spans = Vec::new();
+            if marks > 0 {
+                let m = if marked.binary_search(&i).is_ok() {
+                    MARKER.to_string()
+                } else {
+                    " ".to_string()
+                };
+                spans.push(Span::styled(m, base.fg(palette::YELLOW)));
+            }
+            spans.push(Span::styled(
                 gutter(app, r, num_w),
                 base.fg(palette::OVERLAY),
-            )];
+            ));
             let mut col = hscroll;
             for (c, g) in visible(&r.text, hscroll, text_w) {
                 if c > col {

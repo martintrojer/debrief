@@ -102,6 +102,14 @@ pub enum Action {
     Launch(usize),
     /// Enter in the diff: a `.md` file header goes to ramble.
     DiffEnter,
+    /// `cc`, visual `c`, and the comment prompt's keys.
+    Comment(super::comment::CommentAction),
+    /// `]r` / `[r`.
+    ReviewJump(bool, Option<usize>),
+    /// `K`: the comments on the cursor row.
+    Hover,
+    /// Closes the `K` popup.
+    PopupClose,
 }
 
 /// What a key sequence means so far.
@@ -170,6 +178,8 @@ impl App {
             (Mode::Help, _) => super::help::help_keymap(self, keys),
             (_, Screen::Log) => self.log_keymap(keys),
             (Mode::Search, Screen::Commit(_)) => search_keymap(keys),
+            (Mode::Comment, Screen::Commit(_)) => super::comment::comment_keymap(keys),
+            (Mode::Popup, Screen::Commit(_)) => popup_keymap(keys),
             (Mode::Visual, Screen::Commit(_)) => self.visual_keymap(keys),
             (Mode::Normal, Screen::Commit(_)) if self.files_focused() => self.files_keymap(keys),
             (Mode::Normal, Screen::Commit(_)) => self.commit_keymap(keys),
@@ -250,6 +260,9 @@ impl App {
                 ('[', 'c') => A::Hunk(false, count),
                 (']', ']') => A::Commit(true),
                 ('[', '[') => A::Commit(false),
+                (']', 'r') => A::ReviewJump(true, count),
+                ('[', 'r') => A::ReviewJump(false, count),
+                ('c', 'c') => A::Comment(super::comment::CommentAction::Start(false)),
                 _ => return KeyResult::None,
             };
             return KeyResult::Action(action);
@@ -269,7 +282,7 @@ impl App {
             KeyCode::Char(c @ '0'..='9') if c != '0' || count.is_some() => {
                 return KeyResult::Count(c as usize - '0' as usize);
             }
-            KeyCode::Char('g' | 'z' | ']' | '[') => return KeyResult::Pending,
+            KeyCode::Char('g' | 'z' | ']' | '[' | 'c') => return KeyResult::Pending,
             KeyCode::Char('q') | KeyCode::Esc => A::Back,
             KeyCode::Char('j') | KeyCode::Down => A::Down(count),
             KeyCode::Char('k') | KeyCode::Up => A::Up(count),
@@ -292,6 +305,7 @@ impl App {
             KeyCode::Char('N') => A::SearchNext(false, count),
             KeyCode::Char('v' | 'V') => A::Visual,
             KeyCode::Enter => A::DiffEnter,
+            KeyCode::Char('K') => A::Hover,
             _ => return KeyResult::None,
         };
         KeyResult::Action(action)
@@ -304,6 +318,11 @@ impl App {
             match (k.code, plain(k)) {
                 (KeyCode::Esc, _) => return KeyResult::Action(A::VisualCancel),
                 (_, Some('y')) => return KeyResult::Action(A::Yank),
+                (_, Some('c')) => {
+                    return KeyResult::Action(A::Comment(super::comment::CommentAction::Start(
+                        true,
+                    )));
+                }
                 _ => {}
             }
         }
@@ -433,6 +452,10 @@ impl App {
             }
             A::Yank => return self.yank(),
             A::DiffEnter => return self.diff_enter(),
+            A::Comment(a) => return self.comment_action(a),
+            A::ReviewJump(f, c) => return self.review_jump(f, n(c)),
+            A::Hover => return self.review_hover(),
+            A::PopupClose => return self.popup_close(),
             A::ToggleSidebar => return self.toggle_sidebar(),
             A::Focus(f) => return self.focus_pane(f),
             A::FileDown(c) => return self.select_file(self.sidebar_selected() + n(c)),
@@ -515,6 +538,8 @@ fn visual_ok(a: Action) -> bool {
             | A::SearchStart(_)
             | A::DiffEnter
             | A::Launch(_)
+            | A::Hover
+            | A::PopupClose
     )
 }
 
@@ -531,4 +556,14 @@ fn search_keymap(keys: &[KeyEvent]) -> KeyResult {
         KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => A::SearchInput(c),
         _ => return KeyResult::None,
     })
+}
+
+/// The `K` popup: Esc, q or K close it.
+fn popup_keymap(keys: &[KeyEvent]) -> KeyResult {
+    match keys {
+        [k] if matches!(k.code, KeyCode::Esc) || matches!(plain(k), Some('q' | 'K')) => {
+            KeyResult::Action(Action::PopupClose)
+        }
+        _ => KeyResult::None,
+    }
 }

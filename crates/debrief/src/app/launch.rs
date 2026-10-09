@@ -43,6 +43,8 @@ pub type EnvLookup = dyn Fn(&str) -> Option<String>;
 pub enum Effect {
     /// Run a launcher.
     Launch(LaunchCommand),
+    /// `C-e` in the comment prompt: edit the draft in the editor, then save.
+    EditComment(super::comment::Draft),
 }
 
 /// Values for the `${...}` variables of a launcher command.
@@ -224,11 +226,15 @@ impl App {
     }
 
     /// Run the queued side effect (if any). The caller has suspended the
-    /// TUI; `run` does this. The view stays where it was.
+    /// TUI; `run` does this. Afterwards the batch is re-read; the view
+    /// stays where it was.
     pub fn run_pending_effect(&mut self) {
-        if let Some(Effect::Launch(cmd)) = self.effect.take() {
-            self.run_launch(&cmd);
+        match self.effect.take() {
+            Some(Effect::Launch(cmd)) => self.run_launch(&cmd),
+            Some(Effect::EditComment(d)) => self.run_comment_editor(d),
+            None => return,
         }
+        self.review_reload();
     }
 
     /// The working-copy file and line for `<leader>o` and `${file}`:
@@ -383,6 +389,33 @@ impl App {
             Ok(Exit::Code(n)) => self.set_status(format!("{}: exited with status {n}", cmd.name)),
             Ok(Exit::Signal(n)) => self.set_status(format!("{}: killed by signal {n}", cmd.name)),
             Err(e) => self.set_status(format!("{}: {e:#}", cmd.name)),
+        }
+    }
+
+    /// Write `initial` to a temp file, run the editor on it through the
+    /// runner, and return what it leaves. `Err` says why nothing came back.
+    pub(super) fn edit_in_editor(&mut self, initial: &str) -> Result<String, String> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let file =
+            std::env::temp_dir().join(format!("debrief-comment-{}-{nanos}.md", std::process::id()));
+        std::fs::write(&file, initial).map_err(|e| e.to_string())?;
+        let mut argv = editor_words(self.env.as_ref());
+        argv.push(file.display().to_string());
+        let cmd = LaunchCommand {
+            name: "editor".into(),
+            argv,
+            cwd: self.vcs.root().to_path_buf(),
+        };
+        let result = (self.runner)(&cmd);
+        let text = std::fs::read_to_string(&file);
+        let _ = std::fs::remove_file(&file);
+        match result {
+            Ok(Exit::Code(0)) => text.map_err(|e| e.to_string()),
+            Ok(Exit::Code(n)) => Err(format!("exited with status {n}")),
+            Ok(Exit::Signal(n)) => Err(format!("killed by signal {n}")),
+            Err(e) => Err(format!("{e:#}")),
         }
     }
 }

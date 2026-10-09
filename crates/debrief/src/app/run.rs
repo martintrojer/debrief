@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
 use ratatui::DefaultTerminal;
 
 use super::{App, AppEvent};
@@ -18,9 +18,26 @@ const POLL: Duration = Duration::from_millis(100);
 pub fn run(mut app: App) -> anyhow::Result<()> {
     // Installs a panic hook that restores the terminal before unwinding.
     let mut terminal = ratatui::try_init().context("initialising terminal")?;
+    paste_on()?;
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = paste_off();
+        hook(info);
+    }));
     let result = event_loop(&mut terminal, &mut app);
+    let _ = paste_off();
     ratatui::restore();
     result
+}
+
+/// Bracketed paste: a paste arrives as one [`Event::Paste`], not as keys
+/// (a pasted newline would otherwise be Enter).
+fn paste_on() -> std::io::Result<()> {
+    crossterm::execute!(std::io::stdout(), EnableBracketedPaste)
+}
+
+fn paste_off() -> std::io::Result<()> {
+    crossterm::execute!(std::io::stdout(), DisableBracketedPaste)
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<()> {
@@ -38,6 +55,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
             match event::read()? {
                 Event::Key(key) => app.event(AppEvent::Key(key)),
                 Event::Resize(cols, rows) => app.event(AppEvent::Resize(cols, rows)),
+                Event::Paste(text) => app.event(AppEvent::Paste(text)),
                 _ => {}
             }
         }
@@ -64,18 +82,20 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
     Ok(())
 }
 
-/// Leave raw mode and the alternate screen, run `f` (which may use the
-/// terminal), then re-enter and clear so the next draw repaints fully
-/// (ramble's `suspend_and_run`; debrief captures no mouse).
+/// Leave raw mode, bracketed paste and the alternate screen, run `f`
+/// (which may use the terminal), then re-enter and clear so the next draw
+/// repaints fully (ramble's `suspend_and_run`; debrief captures no mouse).
 pub fn suspend_and_run<R>(
     terminal: &mut DefaultTerminal,
     f: impl FnOnce() -> R,
 ) -> anyhow::Result<R> {
+    paste_off()?;
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     let r = f();
     crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
     crossterm::terminal::enable_raw_mode()?;
+    paste_on()?;
     terminal.clear()?;
     Ok(r)
 }

@@ -11,7 +11,7 @@ use common::{JjEnv, commit, git, have_jj};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::comment::{EMPTY_COMMENT, EXCERPT_LINES, NOT_A_LINE, SPANS_FILES};
 use debrief::app::review::{MARKER, REVIEW_POLL};
-use debrief::app::{App, Mode, RowKind, Screen, StartOptions};
+use debrief::app::{App, AppEvent, Mode, RowKind, Screen, StartOptions};
 use debrief::vcs::{self, LineKind};
 use debrief_review::{Comment, Rev, Review, Side};
 use ratatui::Terminal;
@@ -738,4 +738,70 @@ fn an_open_picker_follows_the_batch_on_the_tick() {
     let v = app.picker().unwrap();
     assert_eq!(v.items.len(), 1);
     assert_eq!(v.items[0].detail, "arrived");
+}
+
+// Bracketed paste.
+
+fn paste(app: &mut App, text: &str) {
+    app.event(AppEvent::Paste(text.into()));
+}
+
+#[test]
+fn a_multi_line_paste_lands_in_the_comment_prompt_as_one_line() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    keys(&mut app, "see ");
+    paste(&mut app, "first\r\nsecond\tthird\nG");
+    assert_eq!(app.mode(), Mode::Comment, "the newline ran no Enter");
+    assert_eq!(
+        app.comment_prompt().as_deref(),
+        Some("comment: see first second third G")
+    );
+    assert_eq!(app.commit_cursor().row, r, "no key ran");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(f.comments()[0].body, "see first second third G");
+}
+
+#[test]
+fn a_paste_lands_in_the_search_prompt_and_the_picker_filter() {
+    let f = fixture();
+    let mut app = f.open();
+    keys(&mut app, "/");
+    paste(&mut app, "a40\nnew");
+    assert_eq!(app.search_prompt().as_deref(), Some("/a40 new"));
+    assert_eq!(app.mode(), Mode::Search);
+    assert!(!app.search_hits().is_empty());
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_cursor().row, added(&app, "a40 new"));
+
+    f.review()
+        .add(Comment::on_file("notes.txt", 1..=1, "x", "from ramble"))
+        .unwrap();
+    f.review()
+        .add(Comment::on_file("other.txt", 1..=1, "x", "else"))
+        .unwrap();
+    keys(&mut app, " rl");
+    paste(&mut app, "from\nramble");
+    let v = app.picker().unwrap();
+    assert_eq!(v.input, "from ramble");
+    assert_eq!(v.items.len(), 1);
+    assert_eq!(app.mode(), Mode::Picker);
+}
+
+#[test]
+fn a_paste_outside_a_prompt_does_nothing() {
+    let f = fixture();
+    let mut app = f.open();
+    let row = app.commit_cursor().row;
+    paste(&mut app, "Gcc\rq");
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.screen(), Screen::Commit(0));
+    assert_eq!(app.commit_cursor().row, row);
+    press(&mut app, KeyCode::Esc);
+    paste(&mut app, "q\n");
+    assert!(!app.should_quit());
+    assert_eq!(app.screen(), Screen::Log);
 }

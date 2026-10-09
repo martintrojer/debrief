@@ -71,6 +71,8 @@ impl StartOptions {
 pub enum AppEvent {
     Key(KeyEvent),
     Resize(u16, u16),
+    /// Text pasted into the terminal (bracketed paste).
+    Paste(String),
     /// The repository's refs or jj operations changed (from the watcher).
     Reload,
     /// git: a file in the working tree changed (from the tree watcher).
@@ -80,6 +82,19 @@ pub enum AppEvent {
         request: u64,
         result: Result<CommitDiff, String>,
     },
+}
+
+/// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
+/// tab becomes a space; other control characters are dropped.
+fn paste_line(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .chars()
+        .filter_map(|c| match c {
+            '\n' | '\r' | '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
 }
 
 /// The main view.
@@ -266,9 +281,23 @@ impl App {
                 self.size = (c, r);
                 self.commit_follow();
             }
+            AppEvent::Paste(text) => self.paste(&text),
             AppEvent::Reload => self.reload(false),
             AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
+        }
+    }
+
+    /// A bracketed paste: typed into the open prompt (comment, `/` `?`
+    /// search, picker filter) as one line, newlines and tabs as spaces.
+    /// Anywhere else it is dropped, never replayed as keys.
+    pub fn paste(&mut self, text: &str) {
+        let text = paste_line(text);
+        match self.mode {
+            Mode::Comment => self.comment_insert(&text),
+            Mode::Search => self.search_insert(&text),
+            Mode::Picker => self.picker_insert(&text),
+            _ => {}
         }
     }
 

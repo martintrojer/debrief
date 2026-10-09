@@ -115,6 +115,17 @@ impl App {
         self.refresh_search();
     }
 
+    /// Pasted text (one line) appended to the prompt; the hits follow.
+    pub(super) fn search_insert(&mut self, text: &str) {
+        let Some(v) = &mut self.commit else { return };
+        let Some(prompt) = &mut v.search.prompt else {
+            return;
+        };
+        prompt.push_str(text);
+        v.search.pattern = prompt.clone();
+        self.refresh_search();
+    }
+
     /// Enter: commit the pattern and jump to the first hit.
     pub(super) fn search_commit(&mut self) {
         self.mode = Mode::Normal;

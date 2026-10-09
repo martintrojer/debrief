@@ -174,6 +174,15 @@ impl App {
         }
     }
 
+    /// Pasted text (one line) appended to the filter.
+    pub(super) fn picker_insert(&mut self, text: &str) {
+        if let Some(p) = &mut self.picker {
+            p.input.push_str(text);
+            p.selected = 0;
+            p.refilter();
+        }
+    }
+
     pub(super) fn picker_action(&mut self, a: PickerAction) {
         let Some(p) = &mut self.picker else {
             self.mode = Mode::Normal;

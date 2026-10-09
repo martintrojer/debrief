@@ -99,6 +99,13 @@ impl App {
         self.draft.as_ref()
     }
 
+    /// Pasted text (one line) appended to the draft.
+    pub(super) fn comment_insert(&mut self, text: &str) {
+        if let Some(d) = &mut self.draft {
+            d.text.push_str(text);
+        }
+    }
+
     pub(super) fn comment_action(&mut self, a: CommentAction) {
         match a {
             CommentAction::Start(visual) => self.comment_start(visual),

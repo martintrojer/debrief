@@ -2,6 +2,7 @@
 
 mod comment;
 mod export;
+pub mod handback;
 mod store;
 
 pub use comment::{Comment, Rev, Side};

@@ -160,6 +160,8 @@ pub struct App {
     draft: Option<comment::Draft>,
     /// The `K` popup's text.
     popup: Option<String>,
+    /// The `K` popup's first visible wrapped line.
+    popup_scroll: usize,
     /// The `<leader>rl` picker.
     picker: Option<picker::Picker>,
     /// Test hook between a send's export and its removal.
@@ -219,6 +221,7 @@ impl App {
             review_polled: None,
             draft: None,
             popup: None,
+            popup_scroll: 0,
             picker: None,
             after_export: None,
             terminal: Box::new(stdout_write),

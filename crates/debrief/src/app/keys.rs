@@ -110,6 +110,8 @@ pub enum Action {
     Hover,
     /// Closes the `K` popup.
     PopupClose,
+    /// Scrolls the `K` popup.
+    PopupMove(super::review::PopupMove),
     /// `<leader>rl`.
     ReviewList,
     /// `<leader>rr`.
@@ -472,6 +474,7 @@ impl App {
             A::ReviewJump(f, c) => return self.review_jump(f, n(c)),
             A::Hover => return self.review_hover(),
             A::PopupClose => return self.popup_close(),
+            A::PopupMove(m) => return self.popup_move(m),
             A::ToggleSidebar => return self.toggle_sidebar(),
             A::Focus(f) => return self.focus_pane(f),
             A::FileDown(c) => return self.select_file(self.sidebar_selected() + n(c)),
@@ -556,6 +559,7 @@ fn visual_ok(a: Action) -> bool {
             | A::Launch(_)
             | A::Hover
             | A::PopupClose
+            | A::PopupMove(_)
             | A::ReviewList
             | A::ReviewSend
     )
@@ -576,12 +580,27 @@ fn search_keymap(keys: &[KeyEvent]) -> KeyResult {
     })
 }
 
-/// The `K` popup: Esc, q or K close it.
+/// The `K` popup: Esc, q or K close it; j/k, C-d/C-u, gg/G scroll it.
 fn popup_keymap(keys: &[KeyEvent]) -> KeyResult {
+    use super::review::PopupMove as P;
+    let act = |m| KeyResult::Action(Action::PopupMove(m));
     match keys {
         [k] if matches!(k.code, KeyCode::Esc) || matches!(plain(k), Some('q' | 'K')) => {
             KeyResult::Action(Action::PopupClose)
         }
+        [k] if k.modifiers.contains(KeyModifiers::CONTROL) => match k.code {
+            KeyCode::Char('d') => act(P::HalfDown),
+            KeyCode::Char('u') => act(P::HalfUp),
+            _ => KeyResult::None,
+        },
+        [k] => match k.code {
+            KeyCode::Char('j') | KeyCode::Down => act(P::Down),
+            KeyCode::Char('k') | KeyCode::Up => act(P::Up),
+            KeyCode::Char('G') => act(P::Bottom),
+            KeyCode::Char('g') => KeyResult::Pending,
+            _ => KeyResult::None,
+        },
+        [a, b] if plain(a) == Some('g') && plain(b) == Some('g') => act(P::Top),
         _ => KeyResult::None,
     }
 }

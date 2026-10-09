@@ -314,6 +314,44 @@ fn ctrl_e_moves_the_draft_into_the_editor() {
 }
 
 #[test]
+fn a_long_comment_in_the_popup_wraps_and_scrolls_to_its_tail() {
+    let f = fixture();
+    let mut app = f.open();
+    let row = added(&app, "a40 new");
+    goto(&mut app, row);
+    keys(&mut app, "cc");
+    let body = format!("{}TAIL_SENTINEL", "word ".repeat(600));
+    type_and_save(&mut app, &body);
+    keys(&mut app, "K");
+    let s = screen(&mut app);
+    let v = app.popup_view().unwrap();
+    // 29 rows above the status line.
+    assert_eq!(v.rect.height, 29 - 2, "capped at the screen height minus 2");
+    assert!(v.max_scroll > 0);
+    assert!(!s.iter().any(|l| l.contains("TAIL_SENTINEL")), "{s:#?}");
+    keys(&mut app, "G");
+    let s = screen(&mut app);
+    assert!(s.iter().any(|l| l.contains("TAIL_SENTINEL")), "{s:#?}");
+    keys(&mut app, "gg");
+    assert_eq!(app.popup_view().unwrap().scroll, 0);
+    keys(&mut app, "j");
+    assert_eq!(app.popup_view().unwrap().scroll, 1);
+    press_ctrl(&mut app, 'd');
+    let half = app.popup_view().unwrap().scroll;
+    assert!(half > 1);
+    press_ctrl(&mut app, 'u');
+    assert_eq!(app.popup_view().unwrap().scroll, 1);
+    keys(&mut app, "k");
+    assert_eq!(app.popup_view().unwrap().scroll, 0);
+    keys(&mut app, "q");
+    assert_eq!(app.mode(), Mode::Normal);
+}
+
+fn press_ctrl(app: &mut App, c: char) {
+    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+}
+
+#[test]
 fn gutter_marker_jump_preview_and_popup() {
     let f = fixture();
     let mut app = f.open();

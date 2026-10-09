@@ -81,7 +81,7 @@ a file list on the left (hidden below 80 columns).
 | `v`/`V` … `c` | comment on the selected diff lines (one file) |
 | prompt: `Enter` / `Esc` / `C-e` | save / cancel / finish in `$EDITOR` |
 | `]r` `[r` | next / previous commented line (`●` in the gutter) |
-| `K` | show the comments on this line |
+| `K` | show the comments on this line (j/k, C-d/C-u, gg/G scroll a long one; q or Esc closes) |
 | `<leader>rl` | list the batch: type to filter, `Enter` go, `C-d` remove, `C-e` edit |
 | `<leader>rr` | send the batch |
 

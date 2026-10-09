@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 use debrief_review::{Comment, Review, Side};
 
+use ratatui::layout::Rect;
+use unicode_width::UnicodeWidthChar;
+
 use super::commit::{RowKind, file_path};
 use super::{App, Mode};
 use crate::vcs::LineKind;
@@ -194,6 +197,7 @@ impl App {
             })
             .collect();
         self.popup = Some(parts.join("\n\n"));
+        self.popup_scroll = 0;
         self.mode = Mode::Popup;
     }
 
@@ -202,10 +206,116 @@ impl App {
         self.popup.as_deref()
     }
 
+    /// The `K` popup laid out for the current screen: its box, its text
+    /// wrapped to the box, and the first visible line. The box grows with
+    /// the wrapped line count up to the screen height minus 2 (one row of
+    /// margin above and below).
+    pub fn popup_view(&self) -> Option<PopupView> {
+        let text = self.popup.as_deref()?;
+        let (sw, sh) = (self.size.0, self.size.1.saturating_sub(1));
+        if sw < 6 || sh < 3 {
+            return None;
+        }
+        let w = sw.saturating_sub(4).clamp(1, 72);
+        let lines = wrap(text, w.saturating_sub(2).max(1) as usize);
+        let body = (lines.len() as u16).min(sh.saturating_sub(4)).max(1);
+        let h = body + 2;
+        let rect = Rect::new((sw - w) / 2, (sh - h) / 2, w, h);
+        let max = lines.len().saturating_sub(body as usize);
+        Some(PopupView {
+            rect,
+            scroll: self.popup_scroll.min(max),
+            max_scroll: max,
+            lines,
+        })
+    }
+
+    /// `j` / `k` / `C-d` / `C-u` / `gg` / `G` in an overflowing popup.
+    pub(super) fn popup_move(&mut self, m: PopupMove) {
+        let Some(v) = self.popup_view() else { return };
+        let half = ((v.rect.height as usize).saturating_sub(2) / 2).max(1);
+        let s = v.scroll;
+        self.popup_scroll = match m {
+            PopupMove::Down => s + 1,
+            PopupMove::Up => s.saturating_sub(1),
+            PopupMove::HalfDown => s + half,
+            PopupMove::HalfUp => s.saturating_sub(half),
+            PopupMove::Top => 0,
+            PopupMove::Bottom => v.max_scroll,
+        }
+        .min(v.max_scroll);
+    }
+
     pub(super) fn popup_close(&mut self) {
         self.popup = None;
+        self.popup_scroll = 0;
         if self.mode == Mode::Popup {
             self.mode = Mode::Normal;
         }
+    }
+}
+
+/// Scrolling in the `K` popup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopupMove {
+    Down,
+    Up,
+    HalfDown,
+    HalfUp,
+    Top,
+    Bottom,
+}
+
+/// The `K` popup laid out (see [`App::popup_view`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopupView {
+    /// The box, borders included.
+    pub rect: Rect,
+    /// `text` wrapped to the inside of the box.
+    pub lines: Vec<String>,
+    /// The first visible line.
+    pub scroll: usize,
+    pub max_scroll: usize,
+}
+
+/// Word-wrap `text` to `width` columns, keeping its line breaks; a word
+/// wider than `width` is split.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut cur = String::new();
+        let mut w = 0;
+        for word in line.split_inclusive(' ') {
+            let ww: usize = word.chars().map(|c| c.width().unwrap_or(0)).sum();
+            let fits = w + ww.min(width + 1) <= width + usize::from(word.ends_with(' '));
+            if !fits && !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+                w = 0;
+            }
+            for c in word.chars() {
+                let cw = c.width().unwrap_or(0);
+                if w + cw > width && !cur.is_empty() && c != ' ' {
+                    out.push(std::mem::take(&mut cur));
+                    w = 0;
+                }
+                cur.push(c);
+                w += cw;
+            }
+        }
+        out.push(cur);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap;
+
+    #[test]
+    fn wrap_breaks_between_words_and_splits_long_ones() {
+        assert_eq!(wrap("aa bb cc", 5), ["aa bb ", "cc"]);
+        assert_eq!(wrap("abcdefg", 3), ["abc", "def", "g"]);
+        assert_eq!(wrap("a\n\nb", 3), ["a", "", "b"]);
+        assert_eq!(wrap("", 3), Vec::<String>::new());
     }
 }

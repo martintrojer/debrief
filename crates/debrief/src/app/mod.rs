@@ -6,6 +6,7 @@ mod clue;
 pub mod comment;
 pub mod commit;
 pub mod config;
+pub mod display;
 mod help;
 mod keys;
 pub mod launch;

@@ -3,10 +3,8 @@
 //! scroll.rs). The view follows the cursor both ways: rows scroll
 //! vertically, columns horizontally (no wrapping).
 
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
-
 use super::commit::{CommitView, RowKind};
+use super::display::{self, Glyph};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Class {
@@ -38,27 +36,33 @@ pub(super) struct Pos {
     idx: usize,
 }
 
-/// Grapheme cells of `text`; zero-width graphemes are skipped.
+/// Grapheme cells of `text`, laid out by [`display::cells`] (tabs to the
+/// next stop, a trailing `\r` hidden, zero-width graphemes skipped).
 pub(super) fn row_cells(text: &str) -> Vec<Cell> {
-    let mut col = 0;
-    let mut cells = Vec::new();
-    for g in text.graphemes(true) {
-        let width = g.width();
-        if width == 0 {
-            continue;
-        }
-        let ch = g.chars().next().unwrap_or(' ');
-        let class = if ch.is_whitespace() {
-            Class::Blank
-        } else if ch.is_alphanumeric() || ch == '_' {
-            Class::Word
-        } else {
-            Class::Punct
-        };
-        cells.push(Cell { col, width, class });
-        col += width;
-    }
-    cells
+    display::cells(text)
+        .into_iter()
+        .map(|c| {
+            let class = match c.glyph {
+                Glyph::Tab => Class::Blank,
+                Glyph::Control => Class::Punct,
+                Glyph::Text(g) => {
+                    let ch = g.chars().next().unwrap_or(' ');
+                    if ch.is_whitespace() {
+                        Class::Blank
+                    } else if ch.is_alphanumeric() || ch == '_' {
+                        Class::Word
+                    } else {
+                        Class::Punct
+                    }
+                }
+            };
+            Cell {
+                col: c.col,
+                width: c.width,
+                class,
+            }
+        })
+        .collect()
 }
 
 impl CommitView {
@@ -452,5 +456,8 @@ mod tests {
         let c = row_cells("a日e\u{301}x");
         let cols: Vec<_> = c.iter().map(|c| (c.col, c.width)).collect();
         assert_eq!(cols, [(0, 1), (1, 2), (3, 1), (4, 1)]);
+        let c = row_cells("\tx\r");
+        let cols: Vec<_> = c.iter().map(|c| (c.col, c.width, c.class)).collect();
+        assert_eq!(cols, [(0, 4, Class::Blank), (4, 1, Class::Word)]);
     }
 }

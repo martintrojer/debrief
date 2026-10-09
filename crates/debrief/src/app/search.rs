@@ -3,8 +3,7 @@
 
 use std::ops::Range;
 
-use unicode_width::UnicodeWidthStr;
-
+use super::display::col_of;
 use super::{App, Mode};
 
 /// Search state of the open commit.
@@ -47,11 +46,6 @@ pub fn find_all(text: &str, pat: &str) -> Vec<Range<usize>> {
         }
     }
     out
-}
-
-/// Display column of byte `b` in `text`.
-fn col_of(text: &str, b: usize) -> usize {
-    text[..b].width()
 }
 
 impl App {

@@ -3,11 +3,15 @@
 //! [`display::cells`], cut at the pane's width and scrolled horizontally
 //! with the cursor. Added, removed, hunk-header, cursor and selected rows
 //! are coloured across the whole pane; a file header's rule runs to the
-//! right edge.
+//! right edge. Syntax colours, once they arrive, set the foreground of a
+//! line's cells (an expanded tab takes its span's colour); the row
+//! background, search hits, the cursor and the dimmed `?` of a control
+//! character stay on top.
 
 use super::palette;
 use crate::app::commit::gutter_width;
 use crate::app::display::{self, DisplayCell, Glyph};
+use crate::app::highlight::style_at;
 use crate::app::review::MARKER;
 use crate::app::{App, DiffRow, Focus, Mode, RowKind};
 use crate::vcs::LineKind;
@@ -148,12 +152,16 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         if let Some((c, fg)) = sign {
             spans.push(Span::styled(format!("{c} "), base.fg(fg)));
         }
+        let syntax = app.commit_spans(r);
         let mut col = hscroll;
         for (c, start, end) in visible(&r.text, hscroll, text_w) {
             if start > col {
                 spans.push(Span::styled(" ".repeat(start - col), base));
             }
             let mut s = base;
+            if let Some(st) = syntax.and_then(|sp| style_at(sp, c.byte)) {
+                s = s.patch(st);
+            }
             if hits
                 .iter()
                 .any(|&(hr, a, b)| hr == i && (a..b).contains(&c.col))

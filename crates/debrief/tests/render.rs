@@ -1,5 +1,5 @@
 //! Commit-view rendering (spec Q25): tabs, CR and control characters,
-//! full-width row backgrounds, sidebar status letters. A fake `Vcs`
+//! full-width row backgrounds, sidebar status letters, syntax colours. A fake `Vcs`
 //! serves one commit with a hand-built diff.
 
 use std::path::{Path, PathBuf};
@@ -85,6 +85,11 @@ fn line(kind: LineKind, n: u32, text: &str) -> DiffLine {
 /// The app with the fake commit open (no message, so row 0 is the first
 /// file header).
 fn open(files: Vec<FileDiff>) -> (tempfile::TempDir, App) {
+    open_with(files, true)
+}
+
+/// [`open`] with `[render] highlight` set to `highlight`.
+fn open_with(files: Vec<FileDiff>, highlight: bool) -> (tempfile::TempDir, App) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
     std::fs::create_dir(&root).unwrap();
@@ -95,7 +100,9 @@ fn open(files: Vec<FileDiff>) -> (tempfile::TempDir, App) {
             files,
         },
     };
-    let mut app = App::new(Box::new(fake), StartOptions::new(tmp.path().join("cache"))).unwrap();
+    let mut opts = StartOptions::new(tmp.path().join("cache"));
+    opts.config.render.highlight = highlight;
+    let mut app = App::new(Box::new(fake), opts).unwrap();
     app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(app.screen(), Screen::Commit(_)));
     (tmp, app)
@@ -430,4 +437,83 @@ fn a_real_mode_change_is_labelled() {
         Some(("100644".to_string(), "100755".to_string()))
     );
     assert!(f.hunks.is_empty());
+}
+
+fn rust_file(path: &str) -> FileDiff {
+    file(
+        Some(path),
+        Some(path),
+        vec![
+            line(LineKind::Removed, 1, "fn old() {}"),
+            line(LineKind::Added, 1, "fn new() {}"),
+            line(LineKind::Context, 2, "\tlet s = \"a\tb\x1b\";"),
+        ],
+    )
+}
+
+#[test]
+fn a_rust_hunk_gets_keyword_colours_under_the_row_backgrounds() {
+    let (_tmp, mut app) = open(vec![rust_file("src/a.rs")]);
+    let buf = draw(&mut app, 100, 12);
+    let del = row_of(&buf, "fn old");
+    let add = row_of(&buf, "fn new");
+    let (xd, xa) = (text_x(&buf, del, "fn old"), text_x(&buf, add, "fn new"));
+    let kw = buf[(xa, add)].style().fg;
+    assert!(kw.is_some());
+    assert_ne!(kw, Some(palette::GREEN), "a syntax colour, not the row's");
+    assert_eq!(buf[(xd, del)].style().fg, kw, "the removed side too");
+    assert_ne!(buf[(xa + 3, add)].style().fg, kw, "the name differs");
+    assert_eq!(buf[(xa, add)].style().bg, Some(palette::ADD_BG));
+    assert_eq!(buf[(xd, del)].style().bg, Some(palette::DEL_BG));
+
+    // t9's display rules stay: a tab's cells share its span's colour; a
+    // control character is still a dimmed `?`.
+    let y = row_of(&buf, "let s");
+    let x0 = text_x(&buf, y, "let s") - 4;
+    let tab = buf[(x0, y)].style().fg;
+    assert!(tab.is_some());
+    for x in 1..4 {
+        assert_eq!(buf[(x0 + x, y)].style().fg, tab, "tab cell {x}");
+    }
+    let s = text(&buf, y);
+    let q = s.chars().position(|c| c == '?').unwrap() as u16;
+    let qs = buf[(q, y)].style();
+    assert_eq!(qs.fg, Some(palette::OVERLAY));
+    assert!(qs.add_modifier.contains(Modifier::DIM));
+    // The tab inside the string takes the string's colour.
+    let chars: Vec<char> = s.chars().collect();
+    let a = chars.windows(2).position(|w| w == ['"', 'a']).unwrap() as u16 + 1;
+    let b = chars.iter().position(|&c| c == 'b').unwrap() as u16;
+    assert!(b > a + 1, "the tab spans cells");
+    let string = buf[(a, y)].style().fg;
+    assert_ne!(string, tab);
+    for x in a..=b {
+        assert_eq!(buf[(x, y)].style().fg, string, "string cell {x}");
+    }
+
+    // The cursor row keeps its background and reversed cell.
+    let r = diff_row(&app, "fn new() {}");
+    goto(&mut app, r);
+    let buf = draw(&mut app, 100, 12);
+    assert_eq!(buf[(xa + 3, add)].style().bg, Some(palette::SURFACE));
+    assert!(
+        buf[(xa, add)]
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED)
+    );
+}
+
+#[test]
+fn highlight_false_and_unknown_extensions_render_plain() {
+    for (path, on) in [("src/a.rs", false), ("notes.zzzz", true)] {
+        let (_tmp, mut app) = open_with(vec![rust_file(path)], on);
+        let buf = draw(&mut app, 100, 12);
+        let add = row_of(&buf, "fn new");
+        let xa = text_x(&buf, add, "fn new");
+        assert_eq!(buf[(xa, add)].style().fg, Some(palette::GREEN), "{path}");
+        let del = row_of(&buf, "fn old");
+        let xd = text_x(&buf, del, "fn old");
+        assert_eq!(buf[(xd, del)].style().fg, Some(palette::RED), "{path}");
+    }
 }

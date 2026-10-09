@@ -1,4 +1,4 @@
-use debrief_review::{Comment, Rev, Review, Side};
+use debrief_review::{Comment, Kind, Rev, Review, Side, builtin_kinds};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -21,12 +21,17 @@ fn review(comments: Vec<Comment>) -> Fixture {
 }
 
 fn md(comments: Vec<Comment>) -> String {
-    review(comments).review.to_markdown(Some(""))
+    review(comments)
+        .review
+        .to_markdown(Some(""), &builtin_kinds())
 }
 
 #[test]
 fn empty_review_is_empty() {
-    assert_eq!(review(vec![]).review.to_markdown(None), "");
+    assert_eq!(
+        review(vec![]).review.to_markdown(None, &builtin_kinds()),
+        ""
+    );
 }
 
 #[test]
@@ -34,7 +39,7 @@ fn default_preamble_names_the_root() {
     let f = review(vec![Comment::on_file("a.md", 3..=3, "x", "b")]);
     let root = f.review.root().display();
     assert_eq!(
-        f.review.to_markdown(None),
+        f.review.to_markdown(None, &builtin_kinds()),
         format!(
             "# Review feedback\n\n\
              The reviewer left these comments on your work in {root}.\n\
@@ -48,7 +53,8 @@ fn default_preamble_names_the_root() {
 fn custom_preamble_replaces_default() {
     let f = review(vec![Comment::on_file("a.md", 3..=3, "x", "b")]);
     assert_eq!(
-        f.review.to_markdown(Some("Fix these, please.")),
+        f.review
+            .to_markdown(Some("Fix these, please."), &builtin_kinds()),
         "# Review feedback\n\nFix these, please.\n\n\
          ## Item 1\n- File: a.md\n- Line: 3\n- Revision: (working copy)\n```\nx\n```\nb\n\n"
     );
@@ -153,4 +159,63 @@ fn items_numbered_in_comment_order() {
     let first = out.find("## Item 1\n- File: a.md").unwrap();
     let second = out.find("## Item 2\n- File: b.md").unwrap();
     assert!(first < second);
+}
+
+fn typed(path: &str, kind: Option<&str>) -> Comment {
+    Comment::on_file(path, 1..=1, "x", "b").with_kind(kind.map(str::to_owned))
+}
+
+#[test]
+fn typed_items_get_a_label_and_a_legend_of_used_kinds_only() {
+    assert_eq!(
+        md(vec![
+            typed("a.md", Some("question")),
+            typed("b.md", None),
+            typed("c.md", Some("issue")),
+            typed("d.md", Some("issue")),
+        ]),
+        "# Review feedback\n\n\
+         Items are tagged with a type:\n\
+         - ISSUE: Something is wrong. Fix it.\n\
+         - QUESTION: The reviewer wants an answer. Answer in your reply; \
+         change code only if the answer shows a problem.\n\n\
+         ## Item 1 [QUESTION]\n- File: a.md\n- Line: 1\n- Revision: (working copy)\n```\nx\n```\nb\n\n\
+         ## Item 2\n- File: b.md\n- Line: 1\n- Revision: (working copy)\n```\nx\n```\nb\n\n\
+         ## Item 3 [ISSUE]\n- File: c.md\n- Line: 1\n- Revision: (working copy)\n```\nx\n```\nb\n\n\
+         ## Item 4 [ISSUE]\n- File: d.md\n- Line: 1\n- Revision: (working copy)\n```\nx\n```\nb\n\n"
+    );
+}
+
+#[test]
+fn legend_follows_the_preamble() {
+    let f = review(vec![typed("a.md", Some("nit"))]);
+    assert_eq!(
+        f.review.to_markdown(Some("Fix these."), &builtin_kinds()),
+        "# Review feedback\n\nFix these.\n\n\
+         Items are tagged with a type:\n- NIT: Minor or cosmetic. Fix it if it's cheap.\n\n\
+         ## Item 1 [NIT]\n- File: a.md\n- Line: 1\n- Revision: (working copy)\n```\nx\n```\nb\n\n"
+    );
+}
+
+#[test]
+fn undefined_kind_is_labelled_but_not_in_the_legend() {
+    let kinds = [Kind {
+        id: "praise".into(),
+        definition: None,
+    }];
+    let out = review(vec![
+        typed("a.md", Some("praise")),
+        typed("b.md", Some("gone")),
+    ])
+    .review
+    .to_markdown(Some(""), &kinds);
+    assert!(!out.contains("Items are tagged"));
+    assert!(out.contains("## Item 1 [PRAISE]\n"));
+    assert!(out.contains("## Item 2 [GONE]\n"));
+}
+
+#[test]
+fn untyped_batch_has_no_legend() {
+    let out = md(vec![typed("a.md", None)]);
+    assert!(!out.contains("Items are tagged"));
 }

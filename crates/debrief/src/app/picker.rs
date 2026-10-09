@@ -325,7 +325,10 @@ impl App {
             return self.set_status(NOTHING_TO_SEND);
         }
         let n = ids.len();
-        let md = r.to_markdown(self.config.send.preamble.as_deref());
+        let md = r.to_markdown(
+            self.config.send.preamble.as_deref(),
+            &debrief_review::builtin_kinds(),
+        );
         let root = r.root().to_path_buf();
         let terminal = &mut self.terminal;
         let mut copy =

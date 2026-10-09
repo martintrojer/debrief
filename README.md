@@ -175,6 +175,13 @@ kinds = [
   { id = "question", definition = "Answer in your reply." },
 ]
 
+# Syntax highlighting of diff lines (catppuccin-mocha), on by default.
+# Each hunk is coloured on its own, the old and new side apart; files over
+# 10k diff lines and lines over 2k bytes stay plain. The diff shows at
+# once and the colours follow.
+[render]
+highlight = true
+
 # Launchers run with the TUI suspended, as in ramble. Arguments are not
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}
 # (an argument that is exactly "${editor}" expands to $VISUAL / $EDITOR /

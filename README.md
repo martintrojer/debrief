@@ -136,23 +136,31 @@ a file list on the left (hidden below 80 columns).
 |---|---|
 | `cc` | comment on the diff line under the cursor |
 | `v`/`V` … `c` | comment on the selected diff lines (one file) |
-| prompt: `Enter` / `Esc` / `C-e` | save / cancel / finish in `$EDITOR` |
-| prompt: `Tab` / `S-Tab` | next / previous kind (`comment [ISSUE]: `), back round to untyped |
+| box: `Enter` / `Esc` / `C-e` | save / cancel / finish in `$EDITOR` |
+| box: `C-j` or `Alt-Enter` | new line |
+| box: `Tab` / `S-Tab` | next / previous kind (`comment [ISSUE] L3`), back round to untyped |
 | `]r` `[r` | next / previous commented line (`●` in the gutter) |
 | `K` | show the comments on this line (j/k, C-d/C-u, gg/G scroll a long one; q or Esc closes) |
 | `<leader>rl` | list the batch: type to filter, `Enter` go, `C-d` remove, `C-e` edit |
 | `<leader>rr` | send the batch |
 
+`cc` and `c` open a comment box directly below the commented lines (above
+them when there's no room), so the lines stay in view and stay
+highlighted. Its title shows the kind and the lines (`comment [ISSUE]
+L12-18`). It grows with the text up to 8 rows, then scrolls; the usual
+readline keys and Up/Down edit it.
+
 A new comment starts untyped. `Tab` steps through the kinds in
 `[review] kinds` (by default `issue`, `suggestion`, `question`, `nit`)
 and back to untyped; `S-Tab` goes the other way. The kind shows as
-`[ISSUE]` in the prompt, the `<leader>rl` list, the `K` popup and the
+`[ISSUE]` in the box's title, the `<leader>rl` list, the `K` popup and the
 status-line preview. The sent review tags each item (`## Item 1 [ISSUE]`)
 and adds a legend of the kinds it uses, with their definitions.
 
-Pasting (bracketed paste) types into the comment prompt, the `/` `?`
-search prompt, the log's filter or the `<leader>rl` filter as one line: newlines and tabs
-become spaces. A paste anywhere else is ignored, never run as keys.
+Pasting (bracketed paste) types into the comment box with its newlines,
+or into the `/` `?` search prompt, the log's filter or the `<leader>rl`
+filter as one line (newlines and tabs become spaces). A paste anywhere
+else is ignored, never run as keys.
 
 A comment uses the new-side line numbers of the selected lines. If you
 select only removed lines it uses the old side. A selection that mixes

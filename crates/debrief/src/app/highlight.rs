@@ -102,9 +102,12 @@ fn first_line(f: &FileDiff) -> Option<&str> {
         .map(|l| l.text.as_str())
 }
 
-/// Colours for every line of `diff`.
-pub fn highlight_diff(diff: &CommitDiff) -> DiffSpans {
-    diff.files.iter().map(highlight_file).collect()
+/// Colours for every line of `diff`; `None` when no line has any (all
+/// plain text, or too large), so there is nothing to send.
+pub fn highlight_diff(diff: &CommitDiff) -> Option<DiffSpans> {
+    let spans: DiffSpans = diff.files.iter().map(highlight_file).collect();
+    let any = spans.iter().flatten().flatten().any(Option::is_some);
+    any.then_some(spans)
 }
 
 /// Colours for one file's hunks; all `None` for plain text and for files

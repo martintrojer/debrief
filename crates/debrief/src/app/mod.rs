@@ -85,6 +85,12 @@ pub enum AppEvent {
         request: u64,
         result: Result<CommitDiff, String>,
     },
+    /// The syntax colours of a loaded diff, tagged with the same request;
+    /// they follow its [`AppEvent::Loaded`].
+    Highlighted {
+        request: u64,
+        spans: highlight::DiffSpans,
+    },
 }
 
 /// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
@@ -289,6 +295,7 @@ impl App {
             AppEvent::Reload => self.reload(false),
             AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
+            AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
         }
     }
 

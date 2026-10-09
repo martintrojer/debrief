@@ -611,3 +611,82 @@ fn a_search_typed_while_loading_finds_the_loaded_rows() {
     keys(&mut app, "n");
     assert!(app.commit_rows()[row(&app)].text.contains("line"));
 }
+
+/// The next `n` events from the loader.
+fn take(rx: &mpsc::Receiver<AppEvent>, n: usize) -> Vec<AppEvent> {
+    (0..n)
+        .map(|_| rx.recv_timeout(Duration::from_secs(20)).unwrap())
+        .collect()
+}
+
+#[test]
+fn colours_follow_the_diff_and_stale_ones_are_dropped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    for (i, body) in ["fn a() {}\n", "fn b() {}\n", "fn c() {}\n"]
+        .iter()
+        .enumerate()
+    {
+        std::fs::write(root.join("a.rs"), body).unwrap();
+        commit(&root, &format!("c{i}"));
+    }
+    let root = root.canonicalize().unwrap();
+    let mut app = open(&root, &tmp.path().join("cache"));
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    let evs = take(&rx, 2);
+    assert!(
+        matches!(
+            evs.as_slice(),
+            [AppEvent::Loaded { request: a, .. }, AppEvent::Highlighted { request: b, .. }] if a == b
+        ),
+        "the diff, then its colours: {evs:?}"
+    );
+    let added = |app: &App| {
+        app.commit_rows()
+            .iter()
+            .find(|r| r.kind == RowKind::Line(LineKind::Added))
+            .cloned()
+            .unwrap()
+    };
+    let mut evs = evs.into_iter();
+    app.event(evs.next().unwrap());
+    assert!(app.commit_spans(&added(&app)).is_none(), "plain at first");
+    app.event(evs.next().unwrap());
+    assert!(app.commit_spans(&added(&app)).is_some(), "coloured after");
+
+    // Colours for a commit no longer open are dropped.
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, "]]");
+    let evs = take(&rx, 4);
+    let newest = evs
+        .iter()
+        .filter_map(|e| match e {
+            AppEvent::Loaded { request, .. } => Some(*request),
+            _ => None,
+        })
+        .max()
+        .unwrap();
+    let (fresh, stale): (Vec<_>, Vec<_>) = evs.into_iter().partition(|e| {
+        matches!(e, AppEvent::Loaded { request, .. } | AppEvent::Highlighted { request, .. } if *request == newest)
+    });
+    let mut fresh = fresh.into_iter();
+    app.event(fresh.next().unwrap());
+    for ev in stale
+        .into_iter()
+        .filter(|e| matches!(e, AppEvent::Highlighted { .. }))
+    {
+        app.event(ev);
+    }
+    assert!(
+        app.commit_spans(&added(&app)).is_none(),
+        "stale colours dropped"
+    );
+    app.event(fresh.next().unwrap());
+    assert!(app.commit_spans(&added(&app)).is_some());
+}

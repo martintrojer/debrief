@@ -4,8 +4,10 @@
 //! `show()` runs on a worker thread: the [`Vcs`](crate::vcs::Vcs) handle is
 //! not `Send`, so the thread reopens the repository from its root (with
 //! the same options and jj operation pin) and
-//! sends the result back as a request-tagged [`AppEvent::Loaded`]; results
-//! for a view that is no longer open are dropped.
+//! sends the result back as a request-tagged [`AppEvent::Loaded`], then
+//! its syntax colours as an [`AppEvent::Highlighted`] with the same tag, so
+//! the diff shows at once and the colours follow. Results for a view that
+//! is no longer open are dropped.
 
 use std::path::PathBuf;
 
@@ -13,6 +15,7 @@ use ratatui::layout::Rect;
 
 use crate::vcs::{CommitDiff, CommitInfo, FileDiff, Kind, LineKind, OpenOptions, WorkingCopy};
 
+use super::highlight::{self, DiffSpans, Spans};
 use super::motion::{Cell, Cursor, row_cells};
 use super::search::Search;
 use super::{App, AppEvent, Mode, Screen};
@@ -227,6 +230,9 @@ pub struct CommitView {
     pub(super) loading: bool,
     pub(super) diff: Option<CommitDiff>,
     pub(super) rows: Vec<Row>,
+    /// Syntax colours of `diff`, `[file][hunk][line]`; empty until they
+    /// arrive (or with highlighting off).
+    pub(super) spans: DiffSpans,
     /// Digits per gutter line-number column, from [`num_width`].
     pub(super) num_w: usize,
     pub(super) cells: Vec<Vec<Cell>>,
@@ -262,6 +268,7 @@ impl CommitView {
             loading: true,
             diff: None,
             rows: Vec::new(),
+            spans: Vec::new(),
             num_w: MIN_NUM_W,
             cells: Vec::new(),
             cur: Cursor::default(),
@@ -282,6 +289,7 @@ impl CommitView {
 
     pub(super) fn set_diff(&mut self, diff: CommitDiff) {
         self.rows = flatten(&diff);
+        self.spans = Vec::new();
         self.num_w = num_width(&diff);
         self.cells = self.rows.iter().map(|r| row_cells(&r.text)).collect();
         self.diff = Some(diff);
@@ -312,20 +320,28 @@ impl CommitView {
     }
 }
 
-/// Load a commit on a worker thread; the result comes back on `tx`.
+/// Load a commit on a worker thread; the result comes back on `tx`,
+/// followed by its colours when `colour` is set and any line has some.
 /// `pin`: the jj operation the app reads at, so the worker sees the same
 /// snapshot.
 fn spawn_show(
     (root, opts, pin): (PathBuf, OpenOptions, Option<String>),
     commit: String,
     request: u64,
+    colour: bool,
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
             .and_then(|v| v.show(&commit))
             .map_err(|e| format!("{e:#}"));
-        let _ = tx.send(AppEvent::Loaded { request, result });
+        let diff = result.as_ref().ok().filter(|_| colour).cloned();
+        if tx.send(AppEvent::Loaded { request, result }).is_err() {
+            return;
+        }
+        if let Some(spans) = diff.as_ref().and_then(highlight::highlight_diff) {
+            let _ = tx.send(AppEvent::Highlighted { request, spans });
+        }
     });
 }
 
@@ -356,7 +372,9 @@ impl App {
                     v.working = true;
                     v.base = w.base.clone();
                 }
-                self.loaded(request, Ok(working_diff(&w)));
+                let diff = working_diff(&w);
+                self.loaded(request, Ok(diff.clone()));
+                self.highlight_later(request, diff);
             }
             Kind::Jj => {
                 self.reload(true);
@@ -403,12 +421,51 @@ impl App {
                     self.vcs.open_options(),
                     self.vcs.pinned_op(),
                 );
-                spawn_show(at, id, request, tx)
+                let colour = self.config.render.highlight;
+                spawn_show(at, id, request, colour, tx)
             }
             None => {
                 let result = self.vcs.show(&id).map_err(|e| format!("{e:#}"));
+                let diff = result.as_ref().ok().cloned();
                 self.loaded(request, result);
+                if let Some(diff) = diff {
+                    self.highlight_later(request, diff);
+                }
             }
+        }
+    }
+
+    /// Colour a diff shown without the loader thread (git's working copy,
+    /// or no event sender): on a thread of its own when there is a sender,
+    /// else here.
+    fn highlight_later(&mut self, request: u64, diff: CommitDiff) {
+        if !self.config.render.highlight {
+            return;
+        }
+        match self.sender.clone() {
+            Some(tx) => {
+                std::thread::spawn(move || {
+                    if let Some(spans) = highlight::highlight_diff(&diff) {
+                        let _ = tx.send(AppEvent::Highlighted { request, spans });
+                    }
+                });
+            }
+            None => {
+                if let Some(spans) = highlight::highlight_diff(&diff) {
+                    self.highlighted(request, spans);
+                }
+            }
+        }
+    }
+
+    /// A diff's colours: kept if its view is still open on that load.
+    pub(super) fn highlighted(&mut self, request: u64, spans: DiffSpans) {
+        if let Some(v) = self
+            .commit
+            .as_mut()
+            .filter(|v| v.request == request && !v.loading && v.diff.is_some())
+        {
+            v.spans = spans;
         }
     }
 
@@ -436,7 +493,9 @@ impl App {
                     v.base = w.base.clone();
                     v.keep_row = Some(row);
                 }
-                self.loaded(request, Ok(working_diff(&w)));
+                let diff = working_diff(&w);
+                self.loaded(request, Ok(diff.clone()));
+                self.highlight_later(request, diff);
             }
             Kind::Jj => {
                 let Some(id) = self
@@ -548,6 +607,17 @@ impl App {
     /// The diff rows of the open commit (empty while loading or on the log).
     pub fn commit_rows(&self) -> &[Row] {
         self.commit.as_ref().map_or(&[], |v| &v.rows)
+    }
+
+    /// The syntax colours of a Line row of the open commit, if it has any
+    /// (yet).
+    pub fn commit_spans(&self, r: &Row) -> Option<&Spans> {
+        let v = self.commit.as_ref()?;
+        let (f, h, l) = (r.file?, r.hunk?, r.line?);
+        if !matches!(r.kind, RowKind::Line(_)) {
+            return None;
+        }
+        v.spans.get(f)?.get(h)?.get(l)?.as_ref()
     }
 
     /// The diff flattened into [`App::commit_rows`].

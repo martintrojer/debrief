@@ -6,6 +6,7 @@
 
 mod diff;
 mod git;
+mod jj;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ use anyhow::{Context, Result, bail};
 
 pub use diff::parse_unified;
 pub use git::Git;
+pub use jj::Jj;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -102,6 +104,9 @@ pub fn open(path: &Path) -> Result<Box<dyn Vcs>> {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| canon.clone())
     };
+    if let Some(root) = find_up(&start, ".jj") {
+        return Ok(Box::new(Jj::new(root)));
+    }
     if find_up(&start, ".git").is_some() {
         return Ok(Box::new(Git::open(&start)?));
     }

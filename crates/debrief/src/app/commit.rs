@@ -404,7 +404,8 @@ impl App {
 
     /// `r` in the commit view, and a return from the editor or a launcher:
     /// reload the log (jj: snapshot first) and, on the working copy, its
-    /// diff in place, keeping the cursor row. Other commits stay as shown.
+    /// diff in place, keeping the cursor row; a clean git tree closes the
+    /// view. Other commits stay as shown.
     pub(super) fn reload_view(&mut self) {
         self.reload(true);
         let Some(v) = self.commit.as_ref().filter(|v| v.working) else {
@@ -414,6 +415,8 @@ impl App {
         match self.vcs.kind() {
             Kind::Git => {
                 let Some(w) = self.working.clone() else {
+                    // Never leave the obsolete diff open to comments.
+                    self.close_commit();
                     return self.set_status("The working copy is clean");
                 };
                 self.next_request += 1;

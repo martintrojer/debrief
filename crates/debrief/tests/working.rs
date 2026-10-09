@@ -275,12 +275,19 @@ fn r_reloads_the_working_copy_in_place() {
     keys(&mut app, "r");
     row_of(&app, "n3", RowKind::Line(LineKind::Added));
     assert_eq!(app.commit_cursor().row, r, "cursor row kept");
-    // A clean tree: the view stays, with a message.
+}
+
+#[test]
+fn r_on_a_clean_tree_leaves_the_working_copy_view() {
+    let f = fixture();
+    let mut app = f.open();
     git(&f.root, &["checkout", "-q", "--", "a.txt"]);
     std::fs::remove_file(f.root.join("new.txt")).unwrap();
     keys(&mut app, "r");
     assert_eq!(app.status(), "The working copy is clean");
-    keys(&mut app, "q");
+    assert_eq!(app.screen(), Screen::Log, "the obsolete diff is closed");
+    assert!(!app.viewing_working_copy());
+    assert!(app.commit_rows().is_empty(), "nothing left to comment on");
     assert_eq!(summaries(&app), ["second", "base"]);
 }
 

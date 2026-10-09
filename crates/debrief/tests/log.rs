@@ -693,3 +693,94 @@ fn stats_pane_shows_files_first_and_scrolls_with_j_k() {
     let s = screen_at(&mut app, 119, 20);
     assert!(s[14].trim_start().starts_with("long subject"), "{s:#?}");
 }
+
+/// The stats pane's rows at `w`x`h`, the border cut off.
+fn pane_at(app: &mut App, w: u16, h: u16) -> Vec<String> {
+    let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let buf = t.backend().buffer().clone();
+    let Some(p) = app
+        .log_layout(ratatui::layout::Rect::new(0, 0, w, h - 1))
+        .stats
+    else {
+        return Vec::new();
+    };
+    (p.y..p.y + p.height)
+        .map(|y| {
+            (p.x..p.x + p.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .trim_matches(|c: char| c == ' ' || c == '│' || c == '─')
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn stats_pane_message_is_whole_when_it_fits_and_every_line_is_reachable() {
+    let (tmp, root) = git_repo(0);
+    // Message k has k lines (subject, blank, k - 2 body lines) and one file.
+    let lens: Vec<usize> = (2..=13).collect();
+    for &n in &lens {
+        std::fs::write(root.join(format!("m{n}.txt")), "x\n").unwrap();
+        let body: String = (1..n - 1).map(|i| format!("m{n} line {i}\n")).collect();
+        commit(&root, &format!("m{n} subj\n\n{body}"));
+    }
+    let mut app = open_with_stats(&root, &tmp.path().join("cache"));
+    settle(&mut app);
+
+    // The repro: 119x26, a five-line message and one file fit, so all of
+    // it shows, uncut.
+    let at = |app: &mut App, n: usize| {
+        key(app, 'g');
+        key(app, 'g');
+        for _ in 0..(13 - n) {
+            key(app, 'j');
+        }
+        settle(app);
+    };
+    at(&mut app, 5);
+    let pane = pane_at(&mut app, 119, 26);
+    for want in [
+        "m5 subj",
+        "m5 line 1",
+        "m5 line 2",
+        "m5 line 3",
+        "m5.txt | 1 +",
+    ] {
+        assert!(
+            pane.iter().any(|r| r.starts_with(want)),
+            "{want}: {pane:#?}"
+        );
+    }
+    assert!(!pane.iter().any(|r| r.starts_with('…')), "{pane:#?}");
+
+    // The sweep: every message line and the file row show at some J count.
+    let mut failing = Vec::new();
+    for w in [119u16, 160] {
+        for h in 12u16..=39 {
+            for &n in &lens {
+                at(&mut app, n);
+                let mut want: Vec<String> = vec![format!("m{n} subj"), format!("m{n}.txt | 1 +")];
+                want.extend((1..n - 1).map(|i| format!("m{n} line {i}")));
+                loop {
+                    let pane = pane_at(&mut app, w, h);
+                    want.retain(|l| !pane.iter().any(|r| r.starts_with(l.as_str())));
+                    let before = app.stat_scroll();
+                    key(&mut app, 'J');
+                    if app.stat_scroll() == before {
+                        break;
+                    }
+                }
+                if !want.is_empty() {
+                    failing.push(format!("{w}x{h} n={n}: {want:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        failing.is_empty(),
+        "{} failing: {failing:#?}",
+        failing.len()
+    );
+}

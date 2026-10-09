@@ -233,9 +233,10 @@ fn stat_lines(app: &App, s: &CommitStat, width: usize, cap: Option<usize>) -> Ve
     lines
 }
 
-/// Draw the pane, scrolled by [`App::stat_scroll`]. At the top a long
-/// message is cut at half the pane so the files show; scrolled, the
-/// whole message is shown.
+/// Draw the pane, scrolled by [`App::stat_scroll`]. When it all fits it
+/// is shown whole. Otherwise, at the top a long message is cut at half
+/// the pane so the files show; scrolled, the whole message is shown, and
+/// the scroll range covers every line of it.
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool) {
     let block = Block::new()
         .borders(if side_by_side {
@@ -262,9 +263,12 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool)
             let w = inner.width as usize;
             let h = inner.height as usize;
             let all = wrap(stat_lines(app, &s, w, None));
-            app.set_stat_max_scroll(all.line_count(inner.width).saturating_sub(h));
+            let max_scroll = all.line_count(inner.width).saturating_sub(h);
+            app.set_stat_max_scroll(max_scroll);
             let scroll = app.stat_scroll();
-            let p = if scroll == 0 {
+            let p = if max_scroll == 0 {
+                all
+            } else if scroll == 0 {
                 wrap(stat_lines(app, &s, w, Some(h / 2)))
             } else {
                 all.scroll((scroll.min(u16::MAX as usize) as u16, 0))

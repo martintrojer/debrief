@@ -16,6 +16,7 @@ pub mod review;
 pub mod run;
 mod search;
 pub mod sidebar;
+pub mod textbox;
 mod visual;
 pub mod watch;
 

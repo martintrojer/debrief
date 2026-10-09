@@ -171,6 +171,26 @@ fn root_mismatch_is_an_error() {
 }
 
 #[test]
+fn clear_refuses_a_batch_for_another_root() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    r.add(note("x", 1, "b")).unwrap();
+    let file = fs::read_dir(cache.path().join("reviews"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().unwrap() == "json")
+        .unwrap();
+    let text = fs::read_to_string(&file).unwrap();
+    let canon = root.path().canonicalize().unwrap();
+    let canon = serde_json::to_string(canon.to_str().unwrap()).unwrap();
+    let other = text.replace(&canon, "\"/somewhere/else\"");
+    fs::write(&file, &other).unwrap();
+    let err = r.clear().unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(fs::read_to_string(&file).unwrap(), other);
+}
+
+#[test]
 fn threads_adding_concurrently_get_distinct_ids() {
     let (cache, root) = dirs();
     let handles: Vec<_> = (0..2)

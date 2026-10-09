@@ -94,9 +94,11 @@ impl Review {
         Ok(r.is_some())
     }
 
-    /// Drops every comment and removes the batch file.
+    /// Drops every comment and removes the batch file. Like every mutation it
+    /// re-reads the file first, so a batch for another root is an error, not deleted.
     pub fn clear(&mut self) -> io::Result<()> {
         let _lock = self.lock_exclusive()?;
+        self.read_file()?;
         match fs::remove_file(&self.file) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
             _ => {}

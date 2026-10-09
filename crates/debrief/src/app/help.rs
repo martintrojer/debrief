@@ -249,10 +249,19 @@ pub(crate) const BINDINGS: &[Binding] = {
 };
 
 impl App {
-    /// [`BINDINGS`] plus a row per `[[launch]]` key on the log, the diff
-    /// and the file list.
+    /// [`BINDINGS`], the comment prompt's Tab row when `[review] kinds`
+    /// lists some, and a row per `[[launch]]` key on the log, the diff and
+    /// the file list.
     pub(crate) fn bindings(&self) -> Vec<Binding> {
         let mut out: Vec<Binding> = BINDINGS.to_vec();
+        if self.has_comment_kinds() {
+            out.push(b(
+                "Tab, S-Tab",
+                Ctx::Comment,
+                Group::Review,
+                "in a comment: next, previous kind",
+            ));
+        }
         for &(_, i) in &self.launch_keys {
             let l = &self.config.launch[i];
             let Some(key) = &l.key else { continue };
@@ -275,7 +284,7 @@ impl App {
 }
 
 /// Named keys of the `keys` notation, as whole alternatives.
-pub(super) const NAMED: [(&str, KeyCode); 7] = [
+pub(super) const NAMED: [(&str, KeyCode); 9] = [
     ("Enter", KeyCode::Enter),
     ("Esc", KeyCode::Esc),
     ("Down", KeyCode::Down),
@@ -283,6 +292,8 @@ pub(super) const NAMED: [(&str, KeyCode); 7] = [
     ("Left", KeyCode::Left),
     ("Right", KeyCode::Right),
     ("Backspace", KeyCode::Backspace),
+    ("Tab", KeyCode::Tab),
+    ("S-Tab", KeyCode::BackTab),
 ];
 
 /// One token of a row's key alternative.

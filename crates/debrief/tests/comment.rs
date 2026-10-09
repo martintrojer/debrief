@@ -805,3 +805,102 @@ fn a_paste_outside_a_prompt_does_nothing() {
     assert!(!app.should_quit());
     assert_eq!(app.screen(), Screen::Log);
 }
+
+// Comment kinds.
+
+fn app_with_kinds(f: &Fixture, toml: &str) -> App {
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config = debrief::app::config::Config::parse(toml).unwrap();
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    app
+}
+
+#[test]
+fn tab_cycles_the_kind_and_the_comment_saves_it() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    let prompt = |app: &App| app.comment_prompt().unwrap();
+    assert_eq!(prompt(&app), "comment: ");
+    let labels: Vec<String> = (0..5)
+        .map(|_| {
+            press(&mut app, KeyCode::Tab);
+            prompt(&app)
+        })
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "comment [ISSUE]: ",
+            "comment [SUGGESTION]: ",
+            "comment [QUESTION]: ",
+            "comment [NIT]: ",
+            "comment: ",
+        ]
+    );
+    press(&mut app, KeyCode::BackTab);
+    assert_eq!(prompt(&app), "comment [NIT]: ");
+    press(&mut app, KeyCode::BackTab);
+    press(&mut app, KeyCode::BackTab);
+    assert_eq!(prompt(&app), "comment [SUGGESTION]: ");
+    keys(&mut app, "try this");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(f.comments()[0].kind.as_deref(), Some("suggestion"));
+    assert_eq!(f.comments()[0].body, "try this");
+
+    // The next comment starts untyped.
+    keys(&mut app, "cc");
+    assert_eq!(prompt(&app), "comment: ");
+    type_and_save(&mut app, "plain");
+    assert_eq!(f.comments()[1].kind, None);
+}
+
+#[test]
+fn configured_kinds_replace_the_builtins_and_none_make_tab_inert() {
+    let f = fixture();
+    let mut app = app_with_kinds(&f, "[review]\nkinds = [{ id = \"praise\" }]\n");
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.comment_prompt().unwrap(), "comment [PRAISE]: ");
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.comment_prompt().unwrap(), "comment: ");
+
+    let mut app = app_with_kinds(&f, "[review]\nkinds = []\n");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::BackTab);
+    assert_eq!(app.comment_prompt().unwrap(), "comment: ");
+    type_and_save(&mut app, "untyped");
+    assert_eq!(f.comments()[0].kind, None);
+}
+
+#[test]
+fn ctrl_e_keeps_the_kind() {
+    let f = fixture();
+    let script = f.root.parent().unwrap().join("ed.sh");
+    std::fs::write(&script, "#!/bin/sh\nprintf 'from the editor' > \"$1\"\n").unwrap();
+    let mut app = f.open().with_env({
+        let s = format!("sh {}", script.display());
+        move |k| (k == "EDITOR").then(|| s.clone())
+    });
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    press(&mut app, KeyCode::Tab);
+    press_ctrl(&mut app, 'e');
+    app.run_pending_effect();
+    let c = &f.comments()[0];
+    assert_eq!(c.body, "from the editor");
+    assert_eq!(c.kind.as_deref(), Some("issue"));
+}

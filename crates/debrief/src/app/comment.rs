@@ -1,7 +1,8 @@
 //! Comments on diff lines (spec §3 "Comments"): normal `cc` on the cursor
 //! row, visual `c` on the selection. Side, lines and excerpt are frozen
 //! when `c` is pressed; a one-line prompt takes the body (Enter saves, Esc
-//! cancels, `C-e` moves it into `$EDITOR`), as in ramble.
+//! cancels, `C-e` moves it into `$EDITOR`, Tab / S-Tab pick the kind from
+//! `[review] kinds`), as in ramble.
 //!
 //! On the working copy (spec Q23, K11) new and context lines make
 //! ramble-style comments: no revision, the new path, the line numbers of
@@ -10,7 +11,7 @@
 //! so those are refused.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use debrief_review::{Comment, Rev, Side};
+use debrief_review::{Comment, Kind, Rev, Side};
 
 use super::commit::{RowKind, file_path};
 use super::keys::{Action, KeyResult};
@@ -55,6 +56,8 @@ pub enum CommentAction {
     Cancel,
     /// `C-e`: edit the body in `$VISUAL` / `$EDITOR`.
     Editor,
+    /// Tab (true) / S-Tab: the next / previous kind, through untyped.
+    Kind(bool),
 }
 
 /// A comment being typed: where it goes, frozen at `c`.
@@ -68,6 +71,8 @@ pub struct Draft {
     pub lines: (u32, u32),
     pub excerpt: String,
     pub text: String,
+    /// The kind id; new comments start untyped.
+    pub kind: Option<String>,
 }
 
 /// Keys while typing a comment.
@@ -81,6 +86,8 @@ pub(super) fn comment_keymap(keys: &[KeyEvent]) -> KeyResult {
         KeyCode::Enter => CommentAction::Save,
         KeyCode::Esc => CommentAction::Cancel,
         KeyCode::Backspace => CommentAction::Backspace,
+        KeyCode::Tab | KeyCode::Char('\t') => CommentAction::Kind(true),
+        KeyCode::BackTab => CommentAction::Kind(false),
         KeyCode::Char(c) if !ctrl => CommentAction::Input(c),
         _ => return KeyResult::None,
     };
@@ -88,10 +95,42 @@ pub(super) fn comment_keymap(keys: &[KeyEvent]) -> KeyResult {
 }
 
 impl App {
-    /// The typed comment as the prompt shows it.
+    /// The typed comment as the prompt shows it, its kind in the label
+    /// (`comment [ISSUE]: `).
     pub fn comment_prompt(&self) -> Option<String> {
         let d = self.draft.as_ref()?;
-        Some(format!("{COMMENT_PROMPT}{}", d.text))
+        Some(match &d.kind {
+            Some(k) => format!("comment [{}]: {}", Kind::label(k), d.text),
+            None => format!("{COMMENT_PROMPT}{}", d.text),
+        })
+    }
+
+    /// `[review] kinds` lists some (Tab cycles them).
+    pub(super) fn has_comment_kinds(&self) -> bool {
+        !self.config.review.kinds.is_empty()
+    }
+
+    /// Tab (`forward`) / S-Tab: move the draft's kind along untyped ->
+    /// `[review] kinds` in order -> untyped. No kinds: nothing happens.
+    fn comment_cycle_kind(&mut self, forward: bool) {
+        let kinds = &self.config.review.kinds;
+        let Some(d) = &mut self.draft else { return };
+        if kinds.is_empty() {
+            return;
+        }
+        // Positions 0..n are the kinds, n is untyped.
+        let n = kinds.len();
+        let at = d
+            .kind
+            .as_deref()
+            .and_then(|k| kinds.iter().position(|i| i.id == k))
+            .unwrap_or(n);
+        let next = if forward {
+            (at + 1) % (n + 1)
+        } else {
+            (at + n) % (n + 1)
+        };
+        d.kind = kinds.get(next).map(|k| k.id.clone());
     }
 
     /// The comment being typed.
@@ -119,6 +158,7 @@ impl App {
                     d.text.pop();
                 }
             }
+            CommentAction::Kind(forward) => self.comment_cycle_kind(forward),
             CommentAction::Cancel => {
                 self.comment_end();
             }
@@ -223,6 +263,7 @@ impl App {
             lines: (a, b),
             excerpt,
             text: String::new(),
+            kind: None,
         })
     }
 
@@ -241,6 +282,7 @@ impl App {
             lines,
             excerpt: excerpt.clone(),
             text: String::new(),
+            kind: None,
         };
         if side == Side::New {
             let path = f.new_path.as_deref().ok_or(NOT_A_LINE)?;
@@ -309,7 +351,8 @@ impl App {
         let c = match (d.rev, d.side) {
             (Some(rev), Some(side)) => Comment::on_diff(d.path, rev, side, a..=b, d.excerpt, body),
             _ => Comment::on_file(d.path, a..=b, d.excerpt, body),
-        };
+        }
+        .with_kind(d.kind);
         let msg = match review.add(c) {
             Ok(_) => format!("Comment added ({} in batch)", review.comments().len()),
             Err(e) => format!("comment not saved: {e}"),

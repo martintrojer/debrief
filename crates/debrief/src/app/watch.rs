@@ -8,11 +8,12 @@
 //! replace files by rename.
 //!
 //! git's working tree (spec Q24, K9): [`tree_watcher`] watches the root
-//! recursively. Events in the git dir never count. An untracked path
-//! counts unless git ignores it (nested `.gitignore`s, `info/exclude`,
-//! `core.excludesFile`, via the `ignore` crate); a tracked path always
-//! counts. A change to an ignore file rebuilds the rules; a change to the
-//! index marks the tracked set stale.
+//! recursively, plus the dirs of `info/exclude` and `core.excludesFile`
+//! when they lie outside it. Events in the git dir never count. An
+//! untracked path counts unless git ignores it (nested `.gitignore`s,
+//! `info/exclude`, `core.excludesFile`, via the `ignore` crate); a tracked
+//! path always counts. A change to any ignore file rebuilds the rules and counts; a
+//! change to the index marks the tracked set stale.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -53,6 +54,18 @@ fn canon(p: &Path) -> PathBuf {
     }
     match (p.parent(), p.file_name()) {
         (Some(dir), Some(name)) => dir
+            .canonicalize()
+            .unwrap_or_else(|_| dir.to_path_buf())
+            .join(name),
+        _ => p.to_path_buf(),
+    }
+}
+
+/// `p` with its parent dir canonicalised but its last component kept as
+/// named, so a symlink stays the link and not its target.
+fn canon_parent(p: &Path) -> PathBuf {
+    match (p.parent(), p.file_name()) {
+        (Some(dir), Some(name)) if !dir.as_os_str().is_empty() => dir
             .canonicalize()
             .unwrap_or_else(|_| dir.to_path_buf())
             .join(name),
@@ -187,7 +200,16 @@ fn debounce(rx: mpsc::Receiver<()>, emit: impl Fn()) {
 /// burst of relevant changes (see [`TreeFilter`]).
 pub fn tree_watcher(root: &Path, emit: impl Fn() + Send + 'static) -> Result<RepoWatcher> {
     let mut filter = TreeFilter::new(root)?;
-    let dirs = [(root.to_path_buf(), RecursiveMode::Recursive)];
+    let mut dirs = vec![(filter.root.clone(), RecursiveMode::Recursive)];
+    // Ignore files outside the root: watch their dirs (editors replace
+    // files by rename). A dir that doesn't exist yet is skipped.
+    for g in &filter.global {
+        let Some(d) = g.parent() else { continue };
+        if d.starts_with(&filter.root) || !d.is_dir() || dirs.iter().any(|(x, _)| x == d) {
+            continue;
+        }
+        dirs.push((d.to_path_buf(), RecursiveMode::NonRecursive));
+    }
     RepoWatcher::with_filter(&dirs, move |p| filter.is_relevant(p), emit)
 }
 
@@ -196,7 +218,8 @@ pub struct TreeFilter {
     root: PathBuf,
     git_dir: PathBuf,
     index: PathBuf,
-    /// `info/exclude` and `core.excludesFile`: rooted at `root`.
+    /// `info/exclude` and `core.excludesFile` as named, and the targets
+    /// when they are symlinks: rooted at `root`.
     global: Vec<PathBuf>,
     rules: Rules,
     /// Tracked files and every directory holding one (absolute).
@@ -220,13 +243,23 @@ impl TreeFilter {
         );
         let git_dir = canon(&git_dir);
         let index = git_path(&root, "index")?;
-        let mut global = vec![git_path(&root, "info/exclude")?];
+        let mut sources = vec![git_path(&root, "info/exclude")?];
         match git_line(&root, &["config", "--path", "core.excludesFile"]) {
-            Ok(Some(p)) => global.push(PathBuf::from(p)),
+            // git reads a relative path from the top of the work tree.
+            Ok(Some(p)) => sources.push(root.join(p)),
             _ => {
                 if let Some(p) = default_excludes() {
-                    global.push(p);
+                    sources.push(p);
                 }
+            }
+        }
+        let mut global = Vec::new();
+        for s in sources {
+            let named = canon_parent(&s);
+            let target = canon(&s);
+            global.push(named.clone());
+            if target != named {
+                global.push(target);
             }
         }
         let mut f = TreeFilter {
@@ -281,15 +314,19 @@ impl TreeFilter {
     }
 
     fn is_ignore_file(&self, path: &Path) -> bool {
-        path.file_name().is_some_and(|n| n == ".gitignore") || self.global.iter().any(|g| g == path)
+        let nested = path.file_name().is_some_and(|n| n == ".gitignore")
+            && path.starts_with(&self.root)
+            && !path.starts_with(&self.git_dir);
+        nested || self.global.iter().any(|g| g == path)
     }
 
     /// Whether a change to `path` should refresh the working copy.
     pub fn is_relevant(&mut self, path: &Path) -> bool {
         let path = &canon(path);
         if self.is_ignore_file(path) {
+            // New rules may hide or reveal untracked files: refresh too.
             self.rules = Rules::build(&self.root, &self.git_dir, &self.global);
-            return path.starts_with(&self.root) && !path.starts_with(&self.git_dir);
+            return true;
         }
         if path.starts_with(&self.git_dir) {
             if path == &self.index {

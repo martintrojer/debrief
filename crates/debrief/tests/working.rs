@@ -517,6 +517,50 @@ fn tree_watcher_fires_on_edits_and_skips_ignored_and_git_dir() {
     assert!(!fires(&rx), "info/exclude applies");
 }
 
+#[test]
+fn an_external_excludes_file_rebuilds_the_rules_and_refreshes() {
+    let f = fixture();
+    let excludes = f._tmp.path().join("global-ignore");
+    std::fs::write(&excludes, "").unwrap();
+    git(
+        &f.root,
+        &["config", "core.excludesFile", excludes.to_str().unwrap()],
+    );
+    let (_w, rx) = watch(&f.root);
+
+    std::fs::write(&excludes, "*.tmp\n").unwrap();
+    assert!(fires(&rx), "an ignore-file change refreshes the row");
+    drain(&rx);
+    std::fs::write(f.root.join("ignored.tmp"), "i\n").unwrap();
+    assert!(!fires(&rx), "the rebuilt rules ignore *.tmp");
+
+    // Dropping the rule reveals the file: the row must come back.
+    std::fs::write(&excludes, "").unwrap();
+    assert!(fires(&rx));
+    drain(&rx);
+    std::fs::write(f.root.join("ignored.tmp"), "i2\n").unwrap();
+    assert!(fires(&rx), "no longer ignored");
+}
+
+#[test]
+fn an_info_exclude_change_updates_the_live_row() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    std::fs::write(f.root.join("scratch.tmp"), "s\n").unwrap();
+    let mut app = f.app();
+    assert_eq!(app.working_row_index(), Some(0));
+    let (_w, rx) = watch(&f.root);
+    std::fs::write(f.root.join(".git/info/exclude"), "scratch.tmp\n").unwrap();
+    assert!(fires(&rx), "info/exclude refreshes the row");
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(
+        app.working_row_index(),
+        None,
+        "only an ignored file is left"
+    );
+}
+
 // jj: @ is the working copy, after a snapshot (Q21, K5–K8).
 
 fn jj_app(e: &JjEnv, opts: OpenOptions, revset: Option<&str>) -> App {

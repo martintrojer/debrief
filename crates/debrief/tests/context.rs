@@ -335,3 +335,25 @@ fn full_file_highlighting_starts_at_line_one() {
     assert!(full.is_some());
     assert_ne!(hunks, full, "the full file knows it is in a comment");
 }
+
+#[test]
+fn the_working_copy_log_editor_target_ignores_t() {
+    let f = fixture();
+    let text = std::fs::read_to_string(f.root.join("a.txt")).unwrap();
+    std::fs::write(f.root.join("a.txt"), text.replace("a50\n", "a50 wip\n")).unwrap();
+    let a = f.root.join("a.txt");
+    let mut app = f.app_with("");
+    keys(&mut app, "gg");
+    // The first hunk's first line: three lines of context above a50,
+    // now new line 47 (a20-22 were dropped).
+    assert_eq!(app.edit_target(), Ok((a.clone(), 44)));
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, "T");
+    assert_eq!(app.context(), Context::Full);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.edit_target(), Ok((a.clone(), 44)), "after T");
+    // Full from the start too.
+    let mut app = f.app_with("[view]\ncontext = \"full\"\n");
+    keys(&mut app, "gg");
+    assert_eq!(app.edit_target(), Ok((a, 44)), "[view] context = full");
+}

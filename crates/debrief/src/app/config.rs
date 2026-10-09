@@ -1,7 +1,7 @@
 //! `~/.config/debrief/config.toml` over built-in defaults: `[send]` (how
 //! `<leader>rr` hands the review back, shared in meaning with ramble's),
 //! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
-//! (syntax highlighting) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
+//! (syntax highlighting), `[view]` (what shows at start) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one.
@@ -17,6 +17,7 @@ pub struct Config {
     pub send: SendConfig,
     pub review: ReviewConfig,
     pub render: RenderConfig,
+    pub view: ViewConfig,
     pub launch: Vec<Launcher>,
     /// Problems the file had that didn't stop it loading (dropped comment
     /// kinds); the app shows them in the status line at start.
@@ -42,6 +43,19 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     fn default() -> Self {
         RenderConfig { highlight: true }
+    }
+}
+
+/// `[view]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewConfig {
+    /// The log's stats pane at start (on by default; `<leader>e` toggles).
+    pub stats: bool,
+}
+
+impl Default for ViewConfig {
+    fn default() -> Self {
+        ViewConfig { stats: true }
     }
 }
 
@@ -82,6 +96,7 @@ impl Config {
         Config {
             send: SendConfig::default(),
             render: RenderConfig::default(),
+            view: ViewConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
             },
@@ -135,6 +150,9 @@ impl Config {
         if let Some(h) = raw.render.and_then(|r| r.highlight) {
             c.render.highlight = h;
         }
+        if let Some(v) = raw.view.and_then(|v| v.stats) {
+            c.view.stats = v;
+        }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
         }
@@ -178,6 +196,7 @@ struct RawConfig {
     send: Option<RawSend>,
     review: Option<RawReview>,
     render: Option<RawRender>,
+    view: Option<RawView>,
     launch: Option<Vec<RawLauncher>>,
 }
 
@@ -191,6 +210,12 @@ struct RawReview {
 #[serde(deny_unknown_fields)]
 struct RawRender {
     highlight: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawView {
+    stats: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -335,6 +360,13 @@ kinds = [
         );
         assert!(Config::parse("[render]\nhighlight = \"no\"\n").is_err());
         assert!(Config::parse("[render]\nwrap = true\n").is_err());
+    }
+
+    #[test]
+    fn view_stats_defaults_on() {
+        assert!(Config::defaults().view.stats);
+        assert!(!Config::parse("[view]\nstats = false\n").unwrap().view.stats);
+        assert!(Config::parse("[view]\nnope = 1\n").is_err());
     }
 
     #[test]

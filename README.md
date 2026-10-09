@@ -123,7 +123,8 @@ a file list on the left (hidden below 80 columns).
 |---|---|
 | `j` `k` `h` `l` `w` `b` `e` `0` `$` `{` `}` | move |
 | `gg` `G` `C-d` `C-u` `C-f` `C-b` `C-e` `C-y` `H` `M` `L` `zz` `zt` `zb` | jump and scroll |
-| `]f` `[f` / `]c` `[c` | next / previous file / hunk |
+| `]f` `[f` / `]c` `[c` | next / previous file / hunk (full file: change) |
+| `T` | hunks / full file (for the rest of the session) |
 | `]]` `[[` | open the next / previous commit |
 | `r` | on the working copy: reload its diff in place |
 | `/` `?` `n` `N` | search |
@@ -132,6 +133,13 @@ a file list on the left (hidden below 80 columns).
 | `Enter` | on a `.md` file header: open it in ramble |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
 | `q` `Esc` | back to the log |
+
+`T` shows each file whole: the diff is reloaded with unlimited context, so
+every row is still a diff line and comments, markers, `<leader>o`, search
+and copy work as before. The cursor stays on its line (or the nearest
+shown line of its file). Each file keeps one hunk header; `]c` `[c` jump
+between runs of added and removed lines instead. Highlighting then starts
+at the file's first line. The start mode is `[view] context`.
 
 **Comments**
 
@@ -214,6 +222,7 @@ highlight = true
 
 [view]
 stats = true                 # the log's stats pane at start (<leader>e toggles)
+context = "hunks"            # the commit view: "hunks" or "full" (whole files; T toggles)
 
 # Launchers run with the TUI suspended, as in ramble. Arguments are not
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}

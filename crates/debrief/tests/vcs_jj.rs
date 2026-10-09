@@ -1,7 +1,10 @@
 mod common;
 
 use common::{JjEnv as Env, assert_same, have_jj, snapshot};
-use debrief::vcs::{self, Kind, LineKind};
+use debrief::vcs::{self, Kind, LineKind, OpenOptions};
+
+/// The strict read-only tests open without snapshots (K7).
+const NO_SNAPSHOT: OpenOptions = OpenOptions { snapshot: false };
 
 fn sample() -> Env {
     let e = Env::new(false);
@@ -19,7 +22,7 @@ fn log_has_change_ids_and_parents() {
         return;
     }
     let e = sample();
-    let v = vcs::open(&e.root.join("a.txt")).unwrap();
+    let v = vcs::open(&e.root.join("a.txt"), NO_SNAPSHOT).unwrap();
     assert_eq!(v.kind(), Kind::Jj);
     assert_eq!(v.root(), e.root);
     let log = v.log(Some("::@ ~ root()"), 200).unwrap();
@@ -46,7 +49,7 @@ fn show_parses_message_and_diff() {
         return;
     }
     let e = sample();
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let log = v.log(Some("::@ ~ root()"), 200).unwrap();
     let second = v.show(&log[1].commit).unwrap();
     assert_eq!(second.message, "second");
@@ -79,7 +82,7 @@ fn colocated_repo_opens_as_jj() {
     assert!(e.root.join(".git").exists());
     e.write("a.txt", "a\n");
     e.jj(&["--quiet", "commit", "-m", "one"]);
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     assert_eq!(v.kind(), Kind::Jj);
     assert_eq!(v.root(), e.root);
     let log = v.log(Some("::@ ~ root()"), 10).unwrap();
@@ -96,7 +99,7 @@ fn log_and_show_do_not_write() {
     e.write("dirty.txt", "dirty\n");
     let ops = e.op_count();
     let before = snapshot(&e.root.join(".jj"));
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     for c in v.log(None, 200).unwrap() {
         v.show(&c.commit).unwrap();
     }
@@ -139,7 +142,7 @@ fn divergent_op_heads_are_left_alone() {
     let heads = e.op_heads();
     assert_eq!(heads.len(), 2, "expected divergent op heads");
     let before = snapshot(&e.root.join(".jj"));
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     // We refuse rather than let jj merge (or lock) the op heads.
     let err = format!("{:#}", v.log(None, 10).err().unwrap());
     assert!(err.contains("divergent jj operation heads"), "{err}");
@@ -156,7 +159,7 @@ fn secondary_workspace_reads_the_shared_repo() {
     let e = sample();
     let ws = e.root.parent().unwrap().join("ws2");
     e.jj(&["--quiet", "workspace", "add", ws.to_str().unwrap()]);
-    let v = vcs::open(&ws).unwrap();
+    let v = vcs::open(&ws, NO_SNAPSHOT).unwrap();
     assert_eq!(v.kind(), Kind::Jj);
     assert_eq!(v.root(), ws.canonicalize().unwrap());
     let log = v.log(Some("all() ~ root()"), 200).unwrap();
@@ -169,7 +172,7 @@ fn option_like_revsets_are_rejected() {
         return;
     }
     let e = sample();
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let out = e.root.parent().unwrap().join("x");
     let flag = format!("--output={}", out.display());
     assert!(v.log(Some(&flag), 10).is_err());
@@ -184,7 +187,129 @@ fn failed_command_carries_stderr() {
         return;
     }
     let e = sample();
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let err = format!("{:#}", v.log(Some("nosuchbookmark"), 10).err().unwrap());
     assert!(err.contains("nosuchbookmark"), "{err}");
+}
+
+// Snapshots (spec Q21, K4).
+
+/// The text of `a.txt`'s added lines in `@`'s diff.
+fn at_added(v: &dyn vcs::Vcs) -> Vec<String> {
+    let at = v.working_copy_commit().unwrap().unwrap();
+    v.show(&at)
+        .unwrap()
+        .files
+        .iter()
+        .flat_map(|f| f.hunks.iter().flat_map(|h| &h.lines))
+        .filter(|l| l.kind == LineKind::Added)
+        .map(|l| l.text.clone())
+        .collect()
+}
+
+#[test]
+fn snapshot_makes_an_edit_visible_in_at() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    e.write("a.txt", "one\nTWO\nedited\n");
+    let ops = e.op_count();
+    let v = vcs::open(&e.root, OpenOptions::default()).unwrap();
+    // Before the snapshot, reads are as of the last jj command.
+    assert!(at_added(v.as_ref()).is_empty());
+    v.refresh(true).unwrap();
+    assert_eq!(at_added(v.as_ref()), ["edited"]);
+    assert_eq!(e.op_count(), ops + 1, "one snapshot operation");
+    // Nothing new to record: no further operation.
+    v.refresh(true).unwrap();
+    assert_eq!(e.op_count(), ops + 1);
+    // The edit is on disk untouched.
+    let text = std::fs::read_to_string(e.root.join("a.txt")).unwrap();
+    assert_eq!(text, "one\nTWO\nedited\n");
+}
+
+#[test]
+fn no_snapshot_leaves_the_repo_alone() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    e.write("a.txt", "one\nTWO\nedited\n");
+    let ops = e.op_count();
+    let before = snapshot(&e.root.join(".jj"));
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    v.refresh(true).unwrap();
+    assert!(at_added(v.as_ref()).is_empty());
+    assert_eq!(e.op_count(), ops);
+    assert_same(&before, &snapshot(&e.root.join(".jj")));
+}
+
+/// Make jj unable to write operations (as if another process held it).
+fn lock_op_store(e: &Env, locked: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = if locked { 0o555 } else { 0o755 };
+    for d in ["op_store", "op_store/operations"] {
+        let p = e.root.join(".jj/repo").join(d);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+}
+
+#[test]
+fn a_failed_snapshot_keeps_the_last_pin() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    e.write("a.txt", "one\nTWO\nfirst edit\n");
+    let v = vcs::open(&e.root, OpenOptions::default()).unwrap();
+    v.refresh(true).unwrap();
+    assert_eq!(at_added(v.as_ref()), ["first edit"]);
+    e.write("a.txt", "one\nTWO\nsecond edit\n");
+    lock_op_store(&e, true);
+    let err = format!("{:#}", v.refresh(true).unwrap_err());
+    lock_op_store(&e, false);
+    assert!(
+        err.contains("jj snapshot failed; showing the last snapshot"),
+        "{err}"
+    );
+    assert_eq!(at_added(v.as_ref()), ["first edit"], "still on the pin");
+    assert!(!v.log(None, 10).unwrap().is_empty());
+}
+
+#[test]
+fn a_failed_first_snapshot_reports_and_reads_the_op_head() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    e.write("a.txt", "one\nTWO\nedit\n");
+    let v = vcs::open(&e.root, OpenOptions::default()).unwrap();
+    lock_op_store(&e, true);
+    let err = format!("{:#}", v.refresh(true).unwrap_err());
+    lock_op_store(&e, false);
+    assert!(err.starts_with("jj snapshot failed: "), "{err}");
+    assert!(!err.contains("last snapshot"), "{err}");
+    // Reads still work, as of the last jj command.
+    assert!(at_added(v.as_ref()).is_empty());
+}
+
+#[test]
+fn working_copy_commit_is_this_workspaces_at() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let at = e.jj(&[
+        "--ignore-working-copy",
+        "log",
+        "--no-graph",
+        "-r",
+        "@",
+        "-T",
+        "commit_id",
+    ]);
+    assert_eq!(v.working_copy_commit().unwrap().as_deref(), Some(at.trim()));
+    assert_eq!(v.working_copy().unwrap(), None, "jj has no extra row");
 }

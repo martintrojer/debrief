@@ -6,29 +6,55 @@
 //! operation heads, and even `--at-op=@` takes a lock file in
 //! `op_heads/heads` when the heads diverge. So we read the heads
 //! ourselves, refuse when they diverge, and pass the single head's ID.
+//!
+//! With snapshots on (spec Q21, the default), [`Vcs::refresh`] runs
+//! `jj util snapshot` through its own command builder, with neither
+//! `--ignore-working-copy` nor `--at-op`, then pins reads to the one op
+//! head it leaves. That pin is kept: when a later snapshot fails (another
+//! jj holding the lock, say) reads stay on it and the error is returned.
+//! `refresh(false)` (the op-heads watcher) only moves the pin to the
+//! current head. With `--no-snapshot` there is no pin: every call reads
+//! the op head, as before.
 
+use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::{CommitDiff, CommitInfo, Kind, Vcs, parse_unified, run};
+use super::{CommitDiff, CommitInfo, Kind, OpenOptions, Vcs, parse_unified, run};
 
 const LOG_TEMPLATE: &str = r#"commit_id ++ "\x1f" ++ change_id ++ "\x1f" ++ author.name() ++ "\x1f" ++ author.timestamp().format("%s") ++ "\x1f" ++ description.first_line() ++ "\x1f" ++ parents.map(|c| c.commit_id()).join(" ") ++ "\x1e""#;
 
 pub struct Jj {
     root: PathBuf,
+    opts: OpenOptions,
+    /// The operation reads are pinned to after the last good snapshot.
+    pin: RefCell<Option<String>>,
 }
 
 impl Jj {
     /// `root` is the directory holding `.jj`.
-    pub fn new(root: PathBuf) -> Self {
-        Jj { root }
+    pub fn new(root: PathBuf, opts: OpenOptions) -> Self {
+        Jj {
+            root,
+            opts,
+            pin: RefCell::new(None),
+        }
+    }
+
+    /// The operation reads use: the snapshot's pin when there is one,
+    /// else the current single op head.
+    fn at_op(&self) -> Result<String> {
+        if let Some(op) = self.pin.borrow().clone() {
+            return Ok(op);
+        }
+        self.op_head()
     }
 
     /// The `--at-op` value: the one operation head, or `@` when the op
     /// heads store is not the plain directory jj uses by default.
-    fn at_op(&self) -> Result<String> {
+    fn op_head(&self) -> Result<String> {
         let mut repo = self.root.join(".jj/repo");
         if repo.is_file() {
             // A secondary workspace: `.jj/repo` holds the repo path.
@@ -59,6 +85,21 @@ impl Jj {
                 heads.len()
             ),
         }
+    }
+
+    /// `jj util snapshot`, without the read-only flags (Q21).
+    fn snapshot(&self) -> Result<()> {
+        let argv: Vec<&OsStr> = vec![
+            "--no-pager".as_ref(),
+            "--color".as_ref(),
+            "never".as_ref(),
+            "--quiet".as_ref(),
+            "-R".as_ref(),
+            self.root.as_os_str(),
+            "util".as_ref(),
+            "snapshot".as_ref(),
+        ];
+        run("jj", argv).map(|_| ())
     }
 
     fn jj(&self, at_op: &str, args: &[&str]) -> Result<String> {
@@ -101,6 +142,45 @@ impl Vcs for Jj {
 
     fn root(&self) -> &Path {
         &self.root
+    }
+
+    fn open_options(&self) -> OpenOptions {
+        self.opts
+    }
+
+    fn refresh(&self, snapshot: bool) -> Result<()> {
+        if !self.opts.snapshot {
+            return Ok(());
+        }
+        let had_pin = self.pin.borrow().is_some();
+        let pinned = if snapshot {
+            self.snapshot().and_then(|()| self.op_head())
+        } else {
+            self.op_head()
+        };
+        match pinned {
+            Ok(op) => {
+                *self.pin.borrow_mut() = Some(op);
+                Ok(())
+            }
+            Err(e) if !snapshot => Err(e),
+            Err(e) if had_pin => Err(e.context("jj snapshot failed; showing the last snapshot")),
+            Err(e) => Err(e.context("jj snapshot failed")),
+        }
+    }
+
+    fn working_copy_commit(&self) -> Result<Option<String>> {
+        let out = self.jj(
+            &self.at_op()?,
+            &[
+                "log",
+                "--no-graph",
+                "--revisions=@",
+                "-T",
+                r#"commit_id ++ "\n""#,
+            ],
+        )?;
+        Ok(out.lines().find(|l| !l.is_empty()).map(str::to_string))
     }
 
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {

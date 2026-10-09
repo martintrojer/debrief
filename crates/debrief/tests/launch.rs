@@ -72,9 +72,12 @@ impl Fixture {
             ..StartOptions::new(self.cache.clone())
         };
         let script = self.script.display().to_string();
-        App::new(vcs::open(&self.root).unwrap(), opts)
-            .unwrap()
-            .with_env(move |k| (k == "VISUAL").then(|| format!("{script} --wait")))
+        App::new(
+            vcs::open(&self.root, vcs::OpenOptions::default()).unwrap(),
+            opts,
+        )
+        .unwrap()
+        .with_env(move |k| (k == "VISUAL").then(|| format!("{script} --wait")))
     }
 
     fn app(&self) -> App {

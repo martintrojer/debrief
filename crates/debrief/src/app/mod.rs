@@ -384,7 +384,7 @@ pub(crate) mod test_support {
             git(&root, &["add", "-A"]);
             git(&root, &["commit", "-q", "-m", &format!("c{i}")]);
         }
-        let vcs = crate::vcs::open(&root).unwrap();
+        let vcs = crate::vcs::open(&root, crate::vcs::OpenOptions::default()).unwrap();
         let app = App::new(vcs, StartOptions::new(tmp.path().join("cache"))).unwrap();
         (tmp, app)
     }

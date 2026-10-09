@@ -58,6 +58,22 @@ fn walk(base: &Path, dir: &Path, out: &mut Snapshot) {
     }
 }
 
+/// [`snapshot`] of a `.git` dir, without the mtimes of split-index
+/// `sharedindex.*` files: git itself refreshes those on any read (K2).
+/// Their contents still count.
+pub fn git_dir_snapshot(dir: &Path) -> Snapshot {
+    let mut s = snapshot(dir);
+    for (p, v) in s.iter_mut() {
+        let shared = p
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("sharedindex."));
+        if shared {
+            v.2 = SystemTime::UNIX_EPOCH;
+        }
+    }
+    s
+}
+
 pub fn assert_same(before: &Snapshot, after: &Snapshot) {
     if before != after {
         let changed: Vec<_> = before

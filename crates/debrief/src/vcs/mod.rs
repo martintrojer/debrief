@@ -1,8 +1,11 @@
 //! Read-only access to git and jj repositories through their CLIs.
 //!
-//! Every command is run with flags that stop the tool from writing to the
+//! Every read runs with flags that stop the tool from writing to the
 //! repository (no optional locks, no working-copy snapshot, no op-head
-//! merge, no textconv cache).
+//! merge, no textconv cache). The one exception is jj's snapshot
+//! ([`Vcs::refresh`], spec Q21): it leaves files alone but records the
+//! working copy as a new operation, as any jj command does;
+//! [`OpenOptions::snapshot`] turns it off.
 
 mod diff;
 mod git;
@@ -15,7 +18,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 pub use diff::parse_unified;
-pub use git::Git;
+pub use git::{Git, MAX_UNTRACKED, SPECIAL_FILE, TOO_LARGE, untracked_file};
 pub use jj::Jj;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +53,9 @@ pub struct FileDiff {
     pub new_path: Option<String>,
     pub binary: bool,
     pub hunks: Vec<Hunk>,
+    /// Shown instead of hunks when set: why there is no diff text (an
+    /// untracked file that is too large, or not a regular file).
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,9 +85,54 @@ pub enum LineKind {
     Removed,
 }
 
+/// How a repository is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenOptions {
+    /// jj: snapshot the working copy on [`Vcs::refresh`] (default on;
+    /// `--no-snapshot` turns it off). git ignores it.
+    pub snapshot: bool,
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        OpenOptions { snapshot: true }
+    }
+}
+
+/// git's uncommitted changes (spec §3 "Working copy").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkingCopy {
+    /// `HEAD`; `None` before the first commit.
+    pub base: Option<CommitInfo>,
+    /// Tracked changes against `base`, and untracked files as added.
+    /// `message` is empty.
+    pub diff: CommitDiff,
+    /// Number of changed files.
+    pub files: usize,
+}
+
 pub trait Vcs {
     fn kind(&self) -> Kind;
     fn root(&self) -> &Path;
+    /// The options it was opened with (to reopen it on another thread).
+    fn open_options(&self) -> OpenOptions;
+    /// Bring later reads up to date. jj with [`OpenOptions::snapshot`]:
+    /// `snapshot` snapshots the working copy first; then reads are pinned
+    /// to the current operation. On failure reads stay on the last good
+    /// pin and the error is returned. git, or jj with `--no-snapshot`:
+    /// nothing (every read is current).
+    fn refresh(&self, _snapshot: bool) -> Result<()> {
+        Ok(())
+    }
+    /// git: the uncommitted changes, `None` when the tree is clean.
+    /// jj: always `None` (`@` is the working copy).
+    fn working_copy(&self) -> Result<Option<WorkingCopy>> {
+        Ok(None)
+    }
+    /// jj: the commit ID of this workspace's `@`. git: `None`.
+    fn working_copy_commit(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// Newest first. `None` uses the default: `HEAD` for git, the user's
     /// `revsets.log` for jj.
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>>;
@@ -92,7 +143,7 @@ pub trait Vcs {
 
 /// Find the repository holding `path`: the nearest directory with `.jj`
 /// (jj wins in a colocated repo), else the nearest with `.git`.
-pub fn open(path: &Path) -> Result<Box<dyn Vcs>> {
+pub fn open(path: &Path, opts: OpenOptions) -> Result<Box<dyn Vcs>> {
     let canon = path
         .canonicalize()
         .with_context(|| format!("cannot open {}", path.display()))?;
@@ -105,7 +156,7 @@ pub fn open(path: &Path) -> Result<Box<dyn Vcs>> {
             .unwrap_or_else(|| canon.clone())
     };
     if let Some(root) = find_up(&start, ".jj") {
-        return Ok(Box::new(Jj::new(root)));
+        return Ok(Box::new(Jj::new(root, opts)));
     }
     if find_up(&start, ".git").is_some() {
         return Ok(Box::new(Git::open(&start)?));

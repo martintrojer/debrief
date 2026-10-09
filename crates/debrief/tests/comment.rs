@@ -52,7 +52,7 @@ fn fixture() -> Fixture {
 
 fn app_on(root: &Path, cache: &Path) -> App {
     App::new(
-        vcs::open(root).unwrap(),
+        vcs::open(root, vcs::OpenOptions::default()).unwrap(),
         StartOptions::new(cache.to_path_buf()),
     )
     .unwrap()
@@ -445,7 +445,11 @@ fn a_jj_rewrite_keeps_the_anchor_and_draws_no_marker() {
         revset: Some("::@- ~ root()".into()),
         ..StartOptions::new(cache.clone())
     };
-    let mut app = App::new(vcs::open(&e.root).unwrap(), opts()).unwrap();
+    let mut app = App::new(
+        vcs::open(&e.root, vcs::OpenOptions::default()).unwrap(),
+        opts(),
+    )
+    .unwrap();
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
     let info = app.rows()[0].info.clone();
@@ -458,7 +462,11 @@ fn a_jj_rewrite_keeps_the_anchor_and_draws_no_marker() {
     drop(app);
 
     e.jj(&["--quiet", "describe", "-r", "@-", "-m", "second, reworded"]);
-    let mut app = App::new(vcs::open(&e.root).unwrap(), opts()).unwrap();
+    let mut app = App::new(
+        vcs::open(&e.root, vcs::OpenOptions::default()).unwrap(),
+        opts(),
+    )
+    .unwrap();
     let now = app.rows()[0].info.clone();
     assert_eq!(now.change, info.change, "same change");
     assert_ne!(now.commit, info.commit, "rewritten");
@@ -479,7 +487,11 @@ fn a_jj_rewrite_keeps_the_anchor_and_draws_no_marker() {
 fn app_with_send(f: &Fixture, command: &[&str]) -> App {
     let mut opts = StartOptions::new(f.cache.clone());
     opts.config.send.command = command.iter().map(|s| s.to_string()).collect();
-    App::new(vcs::open(&f.root).unwrap(), opts).unwrap()
+    App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap()
 }
 
 /// A diff comment on `commit` from another handle.

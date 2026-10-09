@@ -26,6 +26,7 @@ fn start(cli: &Cli) -> Result<App, StartError> {
         debrief_review::cache_dir(),
         debrief::app::config::Config::default_path(),
     )?;
-    let vcs = debrief::vcs::open(&cli.path()).map_err(|e| open_error(&e))?;
+    let vcs = debrief::vcs::open(&cli.path(), debrief::vcs::OpenOptions::default())
+        .map_err(|e| open_error(&e))?;
     App::new(vcs, opts).map_err(|e| open_error(&e))
 }

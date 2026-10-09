@@ -32,7 +32,7 @@ fn add_commit(root: &Path, i: usize) {
 
 fn open(root: &Path, cache: &Path) -> App {
     App::new(
-        vcs::open(root).unwrap(),
+        vcs::open(root, vcs::OpenOptions::default()).unwrap(),
         StartOptions::new(cache.to_path_buf()),
     )
     .unwrap()
@@ -68,7 +68,10 @@ fn markers(app: &App) -> Vec<Status> {
 
 /// Mark only the oldest commit seen, as if debrief saw the repo then.
 fn seed_oldest(root: &Path, cache: &Path) {
-    let log = vcs::open(root).unwrap().log(None, 200).unwrap();
+    let log = vcs::open(root, vcs::OpenOptions::default())
+        .unwrap()
+        .log(None, 200)
+        .unwrap();
     Seen::open(cache, root)
         .unwrap()
         .mark(log.last().unwrap())
@@ -104,7 +107,10 @@ fn git_log_markers_cursor_mark_and_reload() {
     assert_eq!(markers(&app), [Status::New, Status::New, Status::Seen]);
     assert_eq!(app.cursor(), 1, "the oldest new commit");
     let s = screen(&mut app);
-    let log = vcs::open(&root).unwrap().log(None, 10).unwrap();
+    let log = vcs::open(&root, vcs::OpenOptions::default())
+        .unwrap()
+        .log(None, 10)
+        .unwrap();
     assert!(
         s[0].starts_with(&format!("● {} ", &log[0].commit[..8])),
         "{s:#?}"
@@ -235,7 +241,11 @@ fn jj_log_markers_updated_and_reload() {
         revset: Some("::@".into()),
         ..StartOptions::new(cache.clone())
     };
-    let app = App::new(vcs::open(&e.root).unwrap(), opts()).unwrap();
+    let app = App::new(
+        vcs::open(&e.root, vcs::OpenOptions::default()).unwrap(),
+        opts(),
+    )
+    .unwrap();
     // The root commit is not listed: @ (empty), two, one.
     let sums: Vec<_> = app.rows().iter().map(|r| r.info.summary.as_str()).collect();
     assert_eq!(sums, ["", "two", "one"]);
@@ -248,7 +258,11 @@ fn jj_log_markers_updated_and_reload() {
     drop(app);
 
     e.jj(&["--quiet", "describe", "-r", "@-", "-m", "two, reworded"]);
-    let mut app = App::new(vcs::open(&e.root).unwrap(), opts()).unwrap();
+    let mut app = App::new(
+        vcs::open(&e.root, vcs::OpenOptions::default()).unwrap(),
+        opts(),
+    )
+    .unwrap();
     // Rewriting @- rebases @: both are updated.
     assert_eq!(
         markers(&app),
@@ -295,7 +309,7 @@ fn git_watcher_fires_on_commit_in_a_linked_worktree() {
     let wt = tmp.path().join("wt");
     git(&root, &["worktree", "add", "-q", wt.to_str().unwrap()]);
     let wt = wt.canonicalize().unwrap();
-    let v = vcs::open(&wt).unwrap();
+    let v = vcs::open(&wt, vcs::OpenOptions::default()).unwrap();
     let t = watch_targets(v.as_ref()).unwrap();
     let common = root.join(".git");
     let head = common.join("worktrees/wt/HEAD");
@@ -318,7 +332,7 @@ fn git_watcher_fires_on_commit_in_a_linked_worktree() {
 #[test]
 fn git_watcher_fires_on_commit() {
     let (_tmp, root) = git_repo(1);
-    let v = vcs::open(&root).unwrap();
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let (tx, rx) = mpsc::channel();
     let _w = RepoWatcher::start(watch_targets(v.as_ref()).unwrap(), move || {
         let _ = tx.send(());
@@ -341,7 +355,7 @@ fn git_watcher_fires_on_commit_in_a_root_ending_in_newline() {
     git(&root, &["init", "-q"]);
     add_commit(&root, 0);
     let root = root.canonicalize().unwrap();
-    let v = vcs::open(&root).unwrap();
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let t = watch_targets(v.as_ref()).unwrap();
     assert!(t.is_relevant(&root.join(".git/HEAD")), "{t:?}");
     let (tx, rx) = mpsc::channel();
@@ -365,7 +379,7 @@ fn jj_watcher_follows_a_secondary_workspace() {
     e.jj(&["--quiet", "commit", "-m", "one"]);
     let ws = e.root.parent().unwrap().join("ws2");
     e.jj(&["--quiet", "workspace", "add", ws.to_str().unwrap()]);
-    let v = vcs::open(&ws).unwrap();
+    let v = vcs::open(&ws, vcs::OpenOptions::default()).unwrap();
     let t = watch_targets(v.as_ref()).unwrap();
     let heads = e.root.join(".jj/repo/op_heads/heads");
     assert!(t.is_relevant(&heads.join("abc")), "{t:?}");

@@ -24,7 +24,10 @@ fn add_commit(root: &Path, i: usize) {
 }
 
 fn log(root: &Path) -> Vec<CommitInfo> {
-    vcs::open(root).unwrap().log(None, 200).unwrap()
+    vcs::open(root, vcs::OpenOptions::default())
+        .unwrap()
+        .log(None, 200)
+        .unwrap()
 }
 
 #[test]
@@ -98,7 +101,7 @@ fn jj_rewrite_is_updated() {
     e.write("a.txt", "a\n");
     e.jj(&["--quiet", "commit", "-m", "one"]);
     let cache = e.root.parent().unwrap().join("cache");
-    let v = vcs::open(&e.root).unwrap();
+    let v = vcs::open(&e.root, vcs::OpenOptions::default()).unwrap();
     let before = v.log(Some("@-"), 10).unwrap();
     let mut s = Seen::open(&cache, &e.root).unwrap();
     s.mark_all(&before).unwrap();

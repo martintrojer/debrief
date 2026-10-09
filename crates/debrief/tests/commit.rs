@@ -42,14 +42,17 @@ fn repo() -> (tempfile::TempDir, PathBuf, PathBuf) {
     commit(&root, "top");
     let root = root.canonicalize().unwrap();
     let cache = tmp.path().join("cache");
-    let log = vcs::open(&root).unwrap().log(None, 10).unwrap();
+    let log = vcs::open(&root, vcs::OpenOptions::default())
+        .unwrap()
+        .log(None, 10)
+        .unwrap();
     Seen::open(&cache, &root).unwrap().mark(&log[0]).unwrap();
     (tmp, root, cache)
 }
 
 fn open(root: &Path, cache: &Path) -> App {
     App::new(
-        vcs::open(root).unwrap(),
+        vcs::open(root, vcs::OpenOptions::default()).unwrap(),
         StartOptions::new(cache.to_path_buf()),
     )
     .unwrap()

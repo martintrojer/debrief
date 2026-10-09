@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use ratatui::layout::Rect;
 
-use crate::vcs::{CommitDiff, FileDiff, LineKind};
+use crate::vcs::{CommitDiff, FileDiff, LineKind, OpenOptions};
 
 use super::motion::{Cell, Cursor, row_cells};
 use super::search::Search;
@@ -271,9 +271,15 @@ impl CommitView {
 }
 
 /// Load a commit on a worker thread; the result comes back on `tx`.
-fn spawn_show(root: PathBuf, commit: String, request: u64, tx: std::sync::mpsc::Sender<AppEvent>) {
+fn spawn_show(
+    root: PathBuf,
+    opts: OpenOptions,
+    commit: String,
+    request: u64,
+    tx: std::sync::mpsc::Sender<AppEvent>,
+) {
     std::thread::spawn(move || {
-        let result = crate::vcs::open(&root)
+        let result = crate::vcs::open(&root, opts)
             .and_then(|v| v.show(&commit))
             .map_err(|e| format!("{e:#}"));
         let _ = tx.send(AppEvent::Loaded { request, result });
@@ -296,7 +302,13 @@ impl App {
         let request = self.next_request;
         self.commit = Some(CommitView::new(info.commit.clone(), request));
         match self.sender.clone() {
-            Some(tx) => spawn_show(self.vcs.root().to_path_buf(), info.commit, request, tx),
+            Some(tx) => spawn_show(
+                self.vcs.root().to_path_buf(),
+                self.vcs.open_options(),
+                info.commit,
+                request,
+                tx,
+            ),
             None => {
                 let result = self.vcs.show(&info.commit).map_err(|e| format!("{e:#}"));
                 self.loaded(request, result);
@@ -463,6 +475,7 @@ mod tests {
                     old_path: Some("a".into()),
                     new_path: Some("b".into()),
                     binary: false,
+                    note: None,
                     hunks: vec![Hunk {
                         header: "@@ -1 +1 @@".into(),
                         old_start: 1,
@@ -478,6 +491,7 @@ mod tests {
                     new_path: Some("bin".into()),
                     binary: true,
                     hunks: vec![],
+                    note: None,
                 },
             ],
         };

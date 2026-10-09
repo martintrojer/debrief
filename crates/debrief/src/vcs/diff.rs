@@ -183,6 +183,7 @@ impl Section {
             new_path: if self.deleted { None } else { self.new_path },
             binary: self.binary,
             hunks: self.hunks,
+            note: None,
         }
     }
 }

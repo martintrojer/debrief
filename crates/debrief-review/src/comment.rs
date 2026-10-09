@@ -36,6 +36,45 @@ pub struct Comment {
     pub body: String,
     /// Unix seconds.
     pub created: u64,
+    /// Lowercase kind id (`"issue"`, …); `None` is untyped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// A comment kind: a lowercase id and, optionally, what it asks of the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Kind {
+    pub id: String,
+    pub definition: Option<String>,
+}
+
+impl Kind {
+    /// The label shown for kind `id`: the id uppercased.
+    pub fn label(id: &str) -> String {
+        id.to_uppercase()
+    }
+}
+
+/// The built-in kinds, used when a tool's config doesn't list its own.
+pub fn builtin_kinds() -> Vec<Kind> {
+    [
+        ("issue", "Something is wrong. Fix it."),
+        (
+            "suggestion",
+            "A better way to do it. Apply it, or say in your reply why not.",
+        ),
+        (
+            "question",
+            "The reviewer wants an answer. Answer in your reply; change code only if the answer shows a problem.",
+        ),
+        ("nit", "Minor or cosmetic. Fix it if it's cheap."),
+    ]
+    .into_iter()
+    .map(|(id, def)| Kind {
+        id: id.to_owned(),
+        definition: Some(def.to_owned()),
+    })
+    .collect()
 }
 
 impl Comment {
@@ -55,7 +94,13 @@ impl Comment {
             excerpt: excerpt.into(),
             body: body.into(),
             created: 0,
+            kind: None,
         }
+    }
+
+    /// The same comment with kind `kind` (`None` is untyped).
+    pub fn with_kind(self, kind: Option<String>) -> Comment {
+        Comment { kind, ..self }
     }
 
     /// A comment on one side of a diff at `rev`. `id` and `created` are set by `Review::add`.

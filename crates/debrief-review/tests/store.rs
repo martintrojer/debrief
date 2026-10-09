@@ -364,3 +364,93 @@ fn repo_root_finds_nearest_vcs_dir() {
     // Canonicalised.
     assert_eq!(repo_root(&repo.join("docs/../docs")), repo);
 }
+
+fn json_file(cache: &Path) -> std::path::PathBuf {
+    fs::read_dir(cache.join("reviews"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().unwrap() == "json")
+        .unwrap()
+}
+
+#[test]
+fn kind_round_trips_and_untyped_is_not_stored() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let typed = r
+        .add(note("a", 1, "x").with_kind(Some("issue".into())))
+        .unwrap();
+    let untyped = r.add(note("b", 1, "y")).unwrap();
+    let json: serde_json::Value =
+        serde_json::from_slice(&fs::read(json_file(cache.path())).unwrap()).unwrap();
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["comments"][0]["kind"], "issue");
+    assert!(json["comments"][1].get("kind").is_none());
+    let fresh = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(fresh.comments(), r.comments());
+    let kind = |id| {
+        fresh
+            .comments()
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap()
+            .kind
+            .clone()
+    };
+    assert_eq!(kind(typed).as_deref(), Some("issue"));
+    assert_eq!(kind(untyped), None);
+}
+
+#[test]
+fn v1_batch_without_kind_loads() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    r.add(note("a", 1, "x")).unwrap();
+    let canon = root.path().canonicalize().unwrap();
+    let old = serde_json::json!({
+        "version": 1,
+        "root": canon,
+        "comments": [{
+            "id": 7,
+            "path": "docs/plan.md",
+            "rev": null,
+            "side": null,
+            "lines": [3, 4],
+            "excerpt": "e",
+            "body": "b",
+            "created": 1700000000
+        }]
+    });
+    fs::write(json_file(cache.path()), old.to_string()).unwrap();
+    let r = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(r.comments().len(), 1);
+    let c = &r.comments()[0];
+    assert_eq!((c.id, c.lines, c.kind.clone()), (7, (3, 4), None));
+}
+
+#[test]
+fn set_kind_sets_and_clears() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let id = r.add(note("a", 1, "x")).unwrap();
+    assert!(r.set_kind(id, Some("nit")).unwrap());
+    assert_eq!(r.comments()[0].kind.as_deref(), Some("nit"));
+    let fresh = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(fresh.comments()[0].kind.as_deref(), Some("nit"));
+    assert!(r.set_kind(id, None).unwrap());
+    assert_eq!(r.comments()[0].kind, None);
+    assert!(!r.set_kind(id + 1, Some("issue")).unwrap());
+}
+
+#[test]
+fn builtin_kinds_are_the_four_with_definitions() {
+    let ids: Vec<_> = debrief_review::builtin_kinds()
+        .into_iter()
+        .map(|k| {
+            assert!(k.definition.is_some());
+            k.id
+        })
+        .collect();
+    assert_eq!(ids, ["issue", "suggestion", "question", "nit"]);
+    assert_eq!(debrief_review::Kind::label("nit"), "NIT");
+}

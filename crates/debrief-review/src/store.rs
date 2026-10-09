@@ -91,6 +91,16 @@ impl Review {
         Ok(r.is_some())
     }
 
+    /// Sets the kind of comment `id` (`None` is untyped); false if there is no such comment.
+    pub fn set_kind(&mut self, id: u64, kind: Option<&str>) -> io::Result<bool> {
+        let r = self.mutate(|comments| {
+            let c = comments.iter_mut().find(|c| c.id == id)?;
+            c.kind = kind.map(str::to_owned);
+            Some(())
+        })?;
+        Ok(r.is_some())
+    }
+
     /// Removes comment `id`; false if there is no such comment.
     pub fn remove(&mut self, id: u64) -> io::Result<bool> {
         let r = self.mutate(|comments| {

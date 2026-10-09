@@ -190,6 +190,76 @@ fn clear_refuses_a_batch_for_another_root() {
     assert_eq!(fs::read_to_string(&file).unwrap(), other);
 }
 
+fn json_files(cache: &Path) -> usize {
+    fs::read_dir(cache.join("reviews"))
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().path().extension().unwrap() == "json")
+        .count()
+}
+
+#[test]
+fn remove_all_keeps_comments_added_after_export() {
+    let (cache, root) = dirs();
+    let mut sender = Review::open(cache.path(), root.path()).unwrap();
+    sender.add(note("a", 1, "one")).unwrap();
+    sender.add(note("b", 1, "two")).unwrap();
+    sender.reload().unwrap();
+    let sent: Vec<u64> = sender.comments().iter().map(|c| c.id).collect();
+
+    // Another handle adds a comment between the sender's export and its removal.
+    let mut other = Review::open(cache.path(), root.path()).unwrap();
+    let late = other.add(note("c", 1, "late")).unwrap();
+
+    assert_eq!(sender.remove_all(&sent).unwrap(), 2);
+    let ids: Vec<_> = sender.comments().iter().map(|c| c.id).collect();
+    assert_eq!(ids, [late]);
+    let fresh = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(fresh.comments().len(), 1);
+    assert_eq!(fresh.comments()[0].body, "late");
+}
+
+#[test]
+fn remove_all_ignores_missing_ids_and_deletes_empty_file() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    // Nothing on disk: removing is a no-op that creates no batch file.
+    assert_eq!(r.remove_all(&[1, 2]).unwrap(), 0);
+    let a = r.add(note("a", 1, "one")).unwrap();
+    let b = r.add(note("b", 1, "two")).unwrap();
+    assert!(r.remove(a).unwrap());
+    assert_eq!(r.remove_all(&[a, 99]).unwrap(), 0);
+    assert_eq!(json_files(cache.path()), 1);
+    assert_eq!(r.remove_all(&[a, b]).unwrap(), 1);
+    assert!(r.comments().is_empty());
+    assert_eq!(json_files(cache.path()), 0);
+    assert!(
+        Review::open(cache.path(), root.path())
+            .unwrap()
+            .comments()
+            .is_empty()
+    );
+}
+
+#[test]
+fn remove_all_refuses_a_batch_for_another_root() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let id = r.add(note("x", 1, "b")).unwrap();
+    let file = fs::read_dir(cache.path().join("reviews"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().unwrap() == "json")
+        .unwrap();
+    let text = fs::read_to_string(&file).unwrap();
+    let canon = root.path().canonicalize().unwrap();
+    let canon = serde_json::to_string(canon.to_str().unwrap()).unwrap();
+    let other = text.replace(&canon, "\"/somewhere/else\"");
+    fs::write(&file, &other).unwrap();
+    let err = r.remove_all(&[id]).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(fs::read_to_string(&file).unwrap(), other);
+}
+
 #[test]
 fn threads_adding_concurrently_get_distinct_ids() {
     let (cache, root) = dirs();

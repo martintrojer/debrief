@@ -94,15 +94,33 @@ impl Review {
         Ok(r.is_some())
     }
 
+    /// Removes the comments whose id is in `ids` (ids already gone are ignored)
+    /// and returns how many were removed. Comments added since this handle last
+    /// read the file survive, so a sender can drop exactly what it sent.
+    /// Deletes the batch file when nothing is left.
+    pub fn remove_all(&mut self, ids: &[u64]) -> io::Result<usize> {
+        let _lock = self.lock_exclusive()?;
+        let mut comments = self.read_file()?;
+        let before = comments.len();
+        comments.retain(|c| !ids.contains(&c.id));
+        let removed = before - comments.len();
+        if removed > 0 {
+            if comments.is_empty() {
+                remove_if_exists(&self.file)?;
+            } else {
+                self.write_file(&comments)?;
+            }
+        }
+        self.comments = comments;
+        Ok(removed)
+    }
+
     /// Drops every comment and removes the batch file. Like every mutation it
     /// re-reads the file first, so a batch for another root is an error, not deleted.
     pub fn clear(&mut self) -> io::Result<()> {
         let _lock = self.lock_exclusive()?;
         self.read_file()?;
-        match fs::remove_file(&self.file) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-            _ => {}
-        }
+        remove_if_exists(&self.file)?;
         self.comments.clear();
         Ok(())
     }
@@ -200,6 +218,13 @@ impl Review {
 
 fn sort(comments: &mut [Comment]) {
     comments.sort_by(|a, b| (&a.path, a.lines.0, a.id).cmp(&(&b.path, b.lines.0, b.id)));
+}
+
+fn remove_if_exists(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 fn invalid(e: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {

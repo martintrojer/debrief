@@ -784,3 +784,27 @@ fn jj_snapshot_failure_shows_in_the_status_line() {
     );
     assert_eq!(summaries(&app), ["", "first"], "the log still loads");
 }
+
+#[test]
+fn search_and_filter_highlight_the_working_copy_row() {
+    let f = fixture();
+    let mut app = f.app();
+    let yellow_at = |app: &mut App, needle: &str| {
+        let mut t = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        t.draw(|fr| app.render(fr)).unwrap();
+        let buf = t.backend().buffer();
+        let line: String = (0..80).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        let at = line.find(needle).unwrap();
+        let x = line[..at].chars().count() as u16;
+        buf[(x, 0)].bg == debrief::ui::palette::YELLOW
+    };
+    assert!(!yellow_at(&mut app, "Working"));
+    keys(&mut app, "fworking");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.rows().len(), 1);
+    assert!(yellow_at(&mut app, "Working"), "filter hit highlighted");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "/copy");
+    press(&mut app, KeyCode::Enter);
+    assert!(yellow_at(&mut app, "copy"), "search hit highlighted");
+}

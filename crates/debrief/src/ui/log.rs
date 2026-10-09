@@ -100,12 +100,11 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                     1 => "1 file".to_string(),
                     n => format!("{n} files"),
                 };
-                return Line::from(vec![
-                    Span::styled(format!("{m} "), base.fg(mc)),
-                    Span::styled("Working copy  ", base.fg(palette::YELLOW)),
-                    Span::styled(files, base.fg(palette::OVERLAY)),
-                ])
-                .style(base);
+                let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
+                spans.extend(hl(r.info.summary.clone(), base.fg(palette::YELLOW), &pats));
+                spans.push(Span::styled("  ", base));
+                spans.push(Span::styled(files, base.fg(palette::OVERLAY)));
+                return Line::from(spans).style(base);
             }
             let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
             spans.extend(hl(

@@ -88,8 +88,14 @@ pub enum AppEvent {
         request: u64,
         result: Result<CommitDiff, String>,
     },
+    /// git's working copy from the loader thread (`None`: clean), tagged
+    /// with its request.
+    WorkingLoaded {
+        request: u64,
+        result: Result<Option<WorkingCopy>, String>,
+    },
     /// The syntax colours of a loaded diff, tagged with the same request;
-    /// they follow its [`AppEvent::Loaded`].
+    /// they follow its [`AppEvent::Loaded`] or [`AppEvent::WorkingLoaded`].
     Highlighted {
         request: u64,
         spans: highlight::DiffSpans,
@@ -327,6 +333,7 @@ impl App {
             AppEvent::Reload => self.reload(false),
             AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
+            AppEvent::WorkingLoaded { request, result } => self.working_loaded(request, result),
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
             AppEvent::Wheel { col, row, down } if self.screen == Screen::Log => {

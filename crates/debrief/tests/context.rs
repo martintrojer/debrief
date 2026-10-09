@@ -357,3 +357,51 @@ fn the_working_copy_log_editor_target_ignores_t() {
     keys(&mut app, "gg");
     assert_eq!(app.edit_target(), Ok((a, 44)), "[view] context = full");
 }
+
+#[test]
+fn the_git_working_copy_loads_off_thread_on_open_t_and_r() {
+    let f = fixture();
+    let text = std::fs::read_to_string(f.root.join("a.txt")).unwrap();
+    std::fs::write(f.root.join("a.txt"), text.replace("a50\n", "a50 wip\n")).unwrap();
+    let mut app = f.app_with("");
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    let recv = || rx.recv_timeout(Duration::from_secs(20)).unwrap();
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.viewing_working_copy());
+    assert!(app.commit_loading(), "open returns before the diff");
+    app.event(recv());
+    assert!(!app.commit_loading());
+    let r = row_of(&app, "a50 wip", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+
+    keys(&mut app, "T");
+    assert!(app.commit_loading(), "T returns before the diff");
+    assert!(!has_row(&app, "a10"), "nothing applied yet");
+    // Toggling back before the answer: only the last load counts.
+    keys(&mut app, "T");
+    keys(&mut app, "T");
+    let mut events: Vec<_> = (0..3).map(|_| recv()).collect();
+    events.reverse();
+    for ev in events {
+        app.event(ev);
+    }
+    assert!(!app.commit_loading());
+    assert!(has_row(&app, "a10"), "the full file arrived");
+    assert_eq!(cursor_text(&app), "a50 wip");
+
+    // `r` too, keeping the cursor row.
+    let row = app.commit_cursor().row;
+    keys(&mut app, "r");
+    assert!(app.commit_loading(), "r returns before the diff");
+    app.event(recv());
+    assert!(!app.commit_loading());
+    assert_eq!(app.commit_cursor().row, row);
+
+    // A tree cleaned meanwhile closes the view.
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    keys(&mut app, "r");
+    assert_eq!(app.screen(), Screen::Log);
+    assert_eq!(app.status(), "The working copy is clean");
+}

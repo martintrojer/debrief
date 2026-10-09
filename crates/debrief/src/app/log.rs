@@ -7,7 +7,7 @@
 //! error goes to the status line and the log loads from the last pin.
 
 use crate::seen::Status;
-use crate::vcs::{CommitInfo, Kind};
+use crate::vcs::{CommitInfo, Context, Kind};
 
 use super::{App, Row, Screen};
 
@@ -76,9 +76,11 @@ impl App {
         Ok(commits)
     }
 
-    /// git: re-read the uncommitted changes.
+    /// git: re-read the uncommitted changes, in hunks whatever `T` says
+    /// (the row, its stats and the log's editor target need no more; the
+    /// commit view reads its own off the UI thread).
     fn load_working(&mut self) {
-        match self.vcs.working_copy(self.context) {
+        match self.vcs.working_copy(Context::Default) {
             Ok(w) => self.working = w,
             Err(e) => {
                 self.working = None;
@@ -186,11 +188,16 @@ impl App {
         if self.vcs.kind() != Kind::Git {
             return;
         }
+        self.load_working();
+        self.working_rows();
+    }
+
+    /// git: rebuild the rows around `self.working`, the cursor kept.
+    pub(super) fn working_rows(&mut self) {
         let current = self
             .rows
             .get(self.cursor)
             .map(|r| (r.info.commit.clone(), r.working));
-        self.load_working();
         let commits = self.commits();
         self.set_rows(commits);
         self.cursor_to(current);

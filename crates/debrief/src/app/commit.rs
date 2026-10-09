@@ -7,7 +7,8 @@
 //! sends the result back as a request-tagged [`AppEvent::Loaded`], then
 //! its syntax colours as an [`AppEvent::Highlighted`] with the same tag, so
 //! the diff shows at once and the colours follow. Results for a view that
-//! is no longer open are dropped.
+//! is no longer open are dropped. git's working copy loads the same way,
+//! as an [`AppEvent::WorkingLoaded`].
 
 use std::path::PathBuf;
 
@@ -428,6 +429,38 @@ fn spawn_show(
     });
 }
 
+/// Read git's working copy on a worker thread, as [`spawn_show`] does a
+/// commit: the result comes back as an [`AppEvent::WorkingLoaded`], then
+/// its colours.
+fn spawn_working(
+    (root, opts): (PathBuf, OpenOptions),
+    context: Context,
+    request: u64,
+    colour: bool,
+    tx: std::sync::mpsc::Sender<AppEvent>,
+) {
+    std::thread::spawn(move || {
+        let result = crate::vcs::reopen(&root, opts, None)
+            .and_then(|v| v.working_copy(context))
+            .map_err(|e| format!("{e:#}"));
+        let diff = result
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .filter(|_| colour)
+            .map(working_diff);
+        if tx
+            .send(AppEvent::WorkingLoaded { request, result })
+            .is_err()
+        {
+            return;
+        }
+        if let Some(spans) = diff.as_ref().and_then(highlight::highlight_diff) {
+            let _ = tx.send(AppEvent::Highlighted { request, spans });
+        }
+    });
+}
+
 impl App {
     /// Open the log's commit `i`: mark it seen, switch screens and start
     /// loading its diff. With no event sender (unit tests) it loads here.
@@ -446,18 +479,16 @@ impl App {
     fn open_working(&mut self) {
         match self.vcs.kind() {
             Kind::Git => {
-                self.working_changed();
-                let (Some(i), Some(w)) = (self.working_index(), self.working.clone()) else {
+                let Some(i) = self.working_index() else {
                     return self.set_status("The working copy is clean");
                 };
+                let base = self.working.as_ref().and_then(|w| w.base.clone());
                 let request = self.enter_view(i);
                 if let Some(v) = &mut self.commit {
                     v.working = true;
-                    v.base = w.base.clone();
+                    v.base = base;
                 }
-                let diff = working_diff(&w);
-                self.loaded(request, Ok(diff.clone()));
-                self.highlight_later(request, diff);
+                self.start_working(request);
             }
             Kind::Jj => {
                 self.reload(true);
@@ -521,8 +552,80 @@ impl App {
         }
     }
 
-    /// Colour a diff shown without the loader thread (git's working copy,
-    /// or no event sender): on a thread of its own when there is a sender,
+    /// Read git's working copy into the open view, in the session's
+    /// context (on the worker when there is a sender).
+    fn start_working(&mut self, request: u64) {
+        if let Some(v) = &mut self.commit {
+            v.loading = true;
+        }
+        match self.sender.clone() {
+            Some(tx) => {
+                let at = (self.vcs.root().to_path_buf(), self.vcs.open_options());
+                let colour = self.config.render.highlight;
+                spawn_working(at, self.context, request, colour, tx)
+            }
+            None => {
+                let result = self
+                    .vcs
+                    .working_copy(self.context)
+                    .map_err(|e| format!("{e:#}"));
+                let diff = result
+                    .as_ref()
+                    .ok()
+                    .and_then(Option::as_ref)
+                    .map(working_diff);
+                self.working_loaded(request, result);
+                if let Some(diff) = diff {
+                    self.highlight_later(request, diff);
+                }
+            }
+        }
+    }
+
+    /// The worker's git working copy: shown if its view is still open on
+    /// that load; a clean tree closes the view (and drops the row).
+    pub(super) fn working_loaded(
+        &mut self,
+        request: u64,
+        result: Result<Option<WorkingCopy>, String>,
+    ) {
+        if !self
+            .commit
+            .as_ref()
+            .is_some_and(|v| v.request == request && v.working)
+        {
+            return;
+        }
+        match result {
+            Ok(Some(w)) => {
+                if let Some(v) = &mut self.commit {
+                    v.base = w.base.clone();
+                }
+                let diff = working_diff(&w);
+                if self.context == Context::Default {
+                    // As fresh as the log's copy, and in its context.
+                    self.working = Some(w);
+                    self.working_rows();
+                }
+                self.loaded(request, Ok(diff));
+            }
+            Ok(None) => {
+                // Never leave the obsolete diff open to comments.
+                self.close_commit();
+                self.working = None;
+                self.working_rows();
+                self.set_status("The working copy is clean");
+            }
+            Err(e) => {
+                if let Some(v) = &mut self.commit {
+                    v.loading = false;
+                }
+                self.set_status(format!("cannot read the working copy: {e}"));
+            }
+        }
+    }
+
+    /// Colour a diff shown without the loader thread (no event sender): on a thread of its own when there is a sender,
     /// else here.
     fn highlight_later(&mut self, request: u64, diff: CommitDiff) {
         if !self.config.render.highlight {
@@ -567,21 +670,18 @@ impl App {
         let row = v.cur.row;
         match self.vcs.kind() {
             Kind::Git => {
-                let Some(w) = self.working.clone() else {
+                if self.working.is_none() {
                     // Never leave the obsolete diff open to comments.
                     self.close_commit();
                     return self.set_status("The working copy is clean");
-                };
+                }
                 self.next_request += 1;
                 let request = self.next_request;
                 if let Some(v) = &mut self.commit {
                     v.request = request;
-                    v.base = w.base.clone();
                     v.keep_row = Some(row);
                 }
-                let diff = working_diff(&w);
-                self.loaded(request, Ok(diff.clone()));
-                self.highlight_later(request, diff);
+                self.start_working(request);
             }
             Kind::Jj => {
                 let Some(id) = self
@@ -626,18 +726,7 @@ impl App {
             v.keep_row = None;
         }
         if working && self.vcs.kind() == Kind::Git {
-            // git's working copy is read here, as `r` does.
-            self.working_changed();
-            let Some(w) = self.working.clone() else {
-                self.close_commit();
-                return self.set_status("The working copy is clean");
-            };
-            if let Some(v) = &mut self.commit {
-                v.base = w.base.clone();
-            }
-            let diff = working_diff(&w);
-            self.loaded(request, Ok(diff.clone()));
-            return self.highlight_later(request, diff);
+            return self.start_working(request);
         }
         if let Some(v) = &mut self.commit {
             v.loading = true;

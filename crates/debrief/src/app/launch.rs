@@ -300,19 +300,13 @@ impl App {
     /// The log's target: the commit's first file still in the working copy.
     fn log_target(&self) -> Result<(String, u32), String> {
         let info = self.rows.get(self.cursor).ok_or(NO_FILES)?;
-        // Hunks whatever `T` says: the line is the first change's.
-        let hunks = crate::vcs::Context::Default;
+        // Hunks whatever `T` says: the line is the first change's (git's
+        // working copy is always read in hunks).
         let diff = match (&self.working, info.info.commit == super::WORKING_ID) {
-            (Some(w), true) if self.context == hunks => w.diff.clone(),
-            (Some(_), true) => self
-                .vcs
-                .working_copy(hunks)
-                .map_err(|e| format!("cannot read the working copy: {e:#}"))?
-                .map(|w| w.diff)
-                .ok_or(NO_FILES)?,
+            (Some(w), true) => w.diff.clone(),
             _ => self
                 .vcs
-                .show(&info.info.commit, hunks)
+                .show(&info.info.commit, crate::vcs::Context::Default)
                 .map_err(|e| format!("cannot show the commit: {e:#}"))?,
         };
         let Some(first) = diff.files.first() else {

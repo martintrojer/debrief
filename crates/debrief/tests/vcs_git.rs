@@ -231,6 +231,47 @@ fn hostile_config_still_parses_and_writes_nothing() {
 }
 
 #[test]
+fn show_and_log_shape_ignore_output_config() {
+    let (t, root) = repo();
+    let sub = t.path().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    git(&sub, &["init", "-q"]);
+    git(&sub, &["commit", "-q", "--allow-empty", "-m", "s"]);
+    let url = sub.to_str().unwrap();
+    git(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            url,
+            "sm",
+        ],
+    );
+    std::fs::write(root.join("z.txt"), "z\n").unwrap();
+    commit(&root, "é sub");
+    let order = t.path().join("order");
+    std::fs::write(&order, "z.txt\nsm\n").unwrap();
+    git(
+        &root,
+        &["config", "diff.orderFile", order.to_str().unwrap()],
+    );
+    git(&root, &["config", "diff.submodule", "log"]);
+    git(&root, &["config", "diff.ignoreSubmodules", "all"]);
+    git(&root, &["config", "i18n.logOutputEncoding", "ISO-8859-1"]);
+
+    let v = vcs::open(&root).unwrap();
+    let head = &v.log(None, 1).unwrap()[0];
+    assert_eq!(head.summary, "é sub");
+    let d = v.show(&head.commit).unwrap();
+    assert_eq!(d.message, "é sub");
+    let names: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
+    assert_eq!(names, [Some(".gitmodules"), Some("sm"), Some("z.txt")]);
+}
+
+#[test]
 fn option_like_revisions_are_rejected() {
     let (t, root) = repo();
     let v = vcs::open(&root).unwrap();

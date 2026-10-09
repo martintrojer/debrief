@@ -17,6 +17,7 @@ const CONFIG: &[&str] = &[
     "core.fsmonitor=false",
     "log.showSignature=false",
     "log.showRoot=true",
+    "i18n.logOutputEncoding=UTF-8",
     "color.ui=never",
 ];
 
@@ -26,6 +27,9 @@ const DIFF_FLAGS: &[&str] = &[
     "--no-ext-diff",
     "--no-color",
     "--default-prefix",
+    "--submodule=short",
+    "--ignore-submodules=none",
+    "-O/dev/null",
 ];
 
 pub struct Git {

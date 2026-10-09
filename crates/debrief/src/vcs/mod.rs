@@ -1,12 +1,20 @@
 //! Read-only access to git and jj repositories through their CLIs.
+//!
+//! Every command is run with flags that stop the tool from writing to the
+//! repository (no optional locks, no working-copy snapshot, no op-head
+//! merge, no textconv cache).
 
 mod diff;
+mod git;
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 
 pub use diff::parse_unified;
+pub use git::Git;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -78,4 +86,63 @@ pub trait Vcs {
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
     /// revision naming one commit.
     fn show(&self, commit: &str) -> Result<CommitDiff>;
+}
+
+/// Find the repository holding `path`: the nearest directory with `.jj`
+/// (jj wins in a colocated repo), else the nearest with `.git`.
+pub fn open(path: &Path) -> Result<Box<dyn Vcs>> {
+    let canon = path
+        .canonicalize()
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    let start = if canon.is_dir() {
+        canon.clone()
+    } else {
+        canon
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| canon.clone())
+    };
+    if find_up(&start, ".git").is_some() {
+        return Ok(Box::new(Git::open(&start)?));
+    }
+    bail!("not a git or jj repository: {}", path.display())
+}
+
+fn find_up(start: &Path, marker: &str) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|d| d.join(marker).exists())
+        .map(Path::to_path_buf)
+}
+
+/// Run a VCS command and return its stdout; a failure carries stderr.
+fn run<I, S>(program: &str, args: I) -> Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat")
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(std::process::Stdio::null());
+    let out = cmd
+        .output()
+        .with_context(|| format!("failed to run {program}"))?;
+    if !out.status.success() {
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        bail!(
+            "{program} {} failed ({}): {}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }

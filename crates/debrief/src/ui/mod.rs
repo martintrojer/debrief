@@ -5,6 +5,7 @@ mod clue;
 mod commit;
 mod help;
 mod log;
+mod picker;
 mod popup;
 mod sidebar;
 mod status;
@@ -51,5 +52,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
     status::draw(frame, app, status);
     clue::draw(frame, app, main);
     popup::draw(frame, app, main);
+    picker::draw(frame, app, main);
     help::draw(frame, app, main);
 }

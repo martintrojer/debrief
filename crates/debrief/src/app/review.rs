@@ -72,7 +72,7 @@ impl App {
     }
 
     /// Whether diff row `row` lies in comment `c` (its file, side and line).
-    fn row_in(&self, row: usize, c: &Comment) -> bool {
+    pub(super) fn row_in(&self, row: usize, c: &Comment) -> bool {
         let (Some(v), Some(diff)) = (&self.commit, self.commit_diff()) else {
             return false;
         };

@@ -30,6 +30,8 @@ pub(crate) enum Ctx {
     Comment,
     /// The `K` popup is open.
     Popup,
+    /// The `<leader>rl` picker is open.
+    Picker,
     /// The help overlay is open.
     Help,
 }
@@ -103,8 +105,8 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 /// Every key binding, as the help overlay and the key clue list them.
 pub(crate) const BINDINGS: &[Binding] = {
     use Ctx::{
-        Comment as P, Commit as C, Files as F, Help as H, Log as L, Popup as K, Search as S,
-        Visual as V,
+        Comment as P, Commit as C, Files as F, Help as H, Log as L, Picker as R, Popup as K,
+        Search as S, Visual as V,
     };
     use Group as G;
     &[
@@ -203,6 +205,33 @@ pub(crate) const BINDINGS: &[Binding] = {
             "in a comment: delete a character",
         ),
         b("q, K, Esc", K, G::Review, "in the comment popup: close"),
+        b("<leader>rl", L, G::Review, "list the review comments"),
+        b("<leader>rr", L, G::Review, "send the review"),
+        b("<leader>rl", C, G::Review, "list the review comments"),
+        b("<leader>rr", C, G::Review, "send the review"),
+        b("<leader>rl", F, G::Review, "list the review comments"),
+        b("<leader>rr", F, G::Review, "send the review"),
+        b("Enter", R, G::Review, "in the list: go to the comment"),
+        b("C-d", R, G::Review, "in the list: remove the comment"),
+        b(
+            "C-e",
+            R,
+            G::Review,
+            "in the list: edit the comment in $EDITOR",
+        ),
+        b(
+            "C-n, C-p, Down, Up",
+            R,
+            G::Review,
+            "in the list: next, previous",
+        ),
+        b("Esc", R, G::Review, "in the list: close"),
+        b(
+            "Backspace",
+            R,
+            G::Review,
+            "in the list: delete a filter character",
+        ),
         b("j, Down", H, G::Help, "in help: scroll down"),
         b("k, Up", H, G::Help, "in help: scroll up"),
         b("C-d, C-u", H, G::Help, "in help: half page"),
@@ -423,7 +452,7 @@ impl App {
             Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Search | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }
-            Ctx::Help => true,
+            Ctx::Picker | Ctx::Help => true,
         }
     }
 
@@ -431,7 +460,7 @@ impl App {
     pub(super) fn ctx_active(&self, ctx: Ctx) -> bool {
         let commit = matches!(self.screen, Screen::Commit(_));
         match ctx {
-            Ctx::Log => self.screen == Screen::Log,
+            Ctx::Log => self.screen == Screen::Log && self.mode == Mode::Normal,
             Ctx::Commit => {
                 commit && !self.files_focused() && matches!(self.mode, Mode::Normal | Mode::Visual)
             }
@@ -440,6 +469,7 @@ impl App {
             Ctx::Search => commit && self.mode == Mode::Search,
             Ctx::Comment => commit && self.mode == Mode::Comment,
             Ctx::Popup => commit && self.mode == Mode::Popup,
+            Ctx::Picker => self.mode == Mode::Picker,
             Ctx::Help => false,
         }
     }
@@ -575,7 +605,7 @@ pub(super) mod tests {
 
     pub(crate) fn in_ctx(ctx: Ctx) -> (tempfile::TempDir, App) {
         let (t, mut a) = app();
-        if ctx != Ctx::Log && ctx != Ctx::Help {
+        if !matches!(ctx, Ctx::Log | Ctx::Help | Ctx::Picker) {
             a.open_index(0);
             assert!(!a.commit_rows().is_empty());
         }
@@ -587,6 +617,7 @@ pub(super) mod tests {
             // The keymaps depend only on the mode.
             Ctx::Comment => a.mode = Mode::Comment,
             Ctx::Popup => a.mode = Mode::Popup,
+            Ctx::Picker => a.picker_open(),
             Ctx::Log | Ctx::Commit => {}
         }
         (t, a)
@@ -602,6 +633,7 @@ pub(super) mod tests {
             Ctx::Search,
             Ctx::Comment,
             Ctx::Popup,
+            Ctx::Picker,
             Ctx::Help,
         ];
         let apps: Vec<_> = ctxs.iter().map(|&c| (c, in_ctx(c))).collect();

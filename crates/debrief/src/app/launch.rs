@@ -45,6 +45,10 @@ pub enum Effect {
     Launch(LaunchCommand),
     /// `C-e` in the comment prompt: edit the draft in the editor, then save.
     EditComment(super::comment::Draft),
+    /// `C-e` in the review picker: edit comment `id`'s body.
+    EditReviewComment { id: u64, initial: String },
+    /// `<leader>rr`: export the batch and hand it back.
+    SendReview,
 }
 
 /// Values for the `${...}` variables of a launcher command.
@@ -232,9 +236,15 @@ impl App {
         match self.effect.take() {
             Some(Effect::Launch(cmd)) => self.run_launch(&cmd),
             Some(Effect::EditComment(d)) => self.run_comment_editor(d),
+            Some(Effect::EditReviewComment { id, initial }) => {
+                self.run_review_comment_editor(id, &initial);
+            }
+            // Its status says how it went; reloading would only repeat it.
+            Some(Effect::SendReview) => return self.run_review_send(),
             None => return,
         }
         self.review_reload();
+        self.picker_refresh();
     }
 
     /// The working-copy file and line for `<leader>o` and `${file}`:

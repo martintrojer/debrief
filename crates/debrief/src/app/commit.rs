@@ -211,6 +211,8 @@ pub struct CommitView {
     pub(super) anchor: usize,
     /// Selected file in the sidebar.
     pub(super) side_sel: usize,
+    /// A picked comment to put the cursor on once the diff loads.
+    pub(super) goto_comment: Option<debrief_review::Comment>,
 }
 
 impl CommitView {
@@ -232,6 +234,7 @@ impl CommitView {
             search: Search::default(),
             anchor: 0,
             side_sel: 0,
+            goto_comment: None,
         }
     }
 
@@ -312,9 +315,13 @@ impl App {
         match result {
             Ok(diff) => {
                 v.set_diff(diff);
+                let pick = v.goto_comment.take();
                 // A search typed while loading saw no rows.
                 self.refresh_search();
                 self.commit_follow();
+                if let Some(c) = pick {
+                    self.goto_comment(&c);
+                }
             }
             Err(e) => {
                 v.loading = false;

@@ -110,6 +110,12 @@ pub enum Action {
     Hover,
     /// Closes the `K` popup.
     PopupClose,
+    /// `<leader>rl`.
+    ReviewList,
+    /// `<leader>rr`.
+    ReviewSend,
+    /// Keys in the `<leader>rl` picker.
+    Picker(super::picker::PickerAction),
 }
 
 /// What a key sequence means so far.
@@ -176,6 +182,7 @@ impl App {
     pub fn keymap(&self, keys: &[KeyEvent]) -> KeyResult {
         match (self.mode, self.screen) {
             (Mode::Help, _) => super::help::help_keymap(self, keys),
+            (Mode::Picker, _) => super::picker::picker_keymap(keys),
             (_, Screen::Log) => self.log_keymap(keys),
             (Mode::Search, Screen::Commit(_)) => search_keymap(keys),
             (Mode::Comment, Screen::Commit(_)) => super::comment::comment_keymap(keys),
@@ -222,8 +229,11 @@ impl App {
             return KeyResult::None;
         };
         match typed.as_slice() {
-            [] => return KeyResult::Pending,
+            [] | ['r'] => return KeyResult::Pending,
             ['e'] if commit => return KeyResult::Action(Action::ToggleSidebar),
+            ['r', 'l'] => return KeyResult::Action(Action::ReviewList),
+            ['r', 'r'] => return KeyResult::Action(Action::ReviewSend),
+            ['r', _] => return KeyResult::None,
             _ => {}
         }
         use super::launch::LeaderMatch;
@@ -411,7 +421,10 @@ impl App {
     pub fn apply(&mut self, action: Action) {
         use Action as A;
         let n = |c: Option<usize>| c.unwrap_or(1).max(1) as isize;
-        let shared = matches!(action, A::Quit | A::Help(_) | A::Launch(_));
+        let shared = matches!(
+            action,
+            A::Quit | A::Help(_) | A::Launch(_) | A::ReviewList | A::ReviewSend | A::Picker(_)
+        );
         if matches!(self.screen, Screen::Commit(_)) && !shared {
             return self.apply_commit(action);
         }
@@ -428,6 +441,9 @@ impl App {
             A::Reload => self.reload(),
             A::Help(a) => self.help_action(a),
             A::Launch(i) => self.launch_index(i),
+            A::ReviewList => self.picker_open(),
+            A::ReviewSend => self.review_send(),
+            A::Picker(a) => self.picker_action(a),
             other => self.apply_commit(other),
         }
     }
@@ -540,6 +556,8 @@ fn visual_ok(a: Action) -> bool {
             | A::Launch(_)
             | A::Hover
             | A::PopupClose
+            | A::ReviewList
+            | A::ReviewSend
     )
 }
 

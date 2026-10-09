@@ -11,6 +11,7 @@ mod keys;
 pub mod launch;
 mod log;
 mod motion;
+pub mod picker;
 pub mod review;
 pub mod run;
 mod search;
@@ -37,6 +38,7 @@ pub use keys::{Action, KeyResult};
 pub use launch::{Effect, Exit, LaunchCommand};
 pub use log::{age, is_zero_id, short_id};
 pub use motion::Cursor;
+pub use picker::{PickerAction, PickerItem, PickerView};
 pub use visual::osc52;
 
 /// Default number of commits listed.
@@ -100,6 +102,8 @@ pub enum Mode {
     Comment,
     /// The `K` popup.
     Popup,
+    /// The `<leader>rl` picker.
+    Picker,
 }
 
 /// One log row: the commit and how it shows.
@@ -156,6 +160,10 @@ pub struct App {
     draft: Option<comment::Draft>,
     /// The `K` popup's text.
     popup: Option<String>,
+    /// The `<leader>rl` picker.
+    picker: Option<picker::Picker>,
+    /// Test hook between a send's export and its removal.
+    after_export: Option<Box<dyn FnMut()>>,
 }
 
 impl App {
@@ -198,6 +206,8 @@ impl App {
             review_polled: None,
             draft: None,
             popup: None,
+            picker: None,
+            after_export: None,
         };
         app.review_open();
         app.config = app.opts.config.clone();

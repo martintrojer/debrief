@@ -435,3 +435,218 @@ fn a_jj_rewrite_keeps_the_anchor_and_draws_no_marker() {
     assert_eq!(rev.summary.as_deref(), Some("second"));
     assert_eq!(cs[0].excerpt, "+TWO");
 }
+
+// <leader>rl and <leader>rr.
+
+fn app_with_send(f: &Fixture, command: &[&str]) -> App {
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config.send.command = command.iter().map(|s| s.to_string()).collect();
+    App::new(vcs::open(&f.root).unwrap(), opts).unwrap()
+}
+
+/// A diff comment on `commit` from another handle.
+fn add_diff(f: &Fixture, commit: &str, path: &str, line: u32, body: &str) -> u64 {
+    let rev = Rev {
+        commit: commit.into(),
+        change: None,
+        summary: None,
+    };
+    f.review()
+        .add(Comment::on_diff(
+            path,
+            rev,
+            Side::New,
+            line..=line,
+            "+x",
+            body,
+        ))
+        .unwrap()
+}
+
+#[test]
+fn the_picker_lists_the_whole_batch_and_goes_to_a_comment() {
+    let f = fixture();
+    let mut app = f.open();
+    let top = app.rows()[0].info.commit.clone();
+    add_diff(&f, &top, "a.txt", 37, "on a40");
+    f.review()
+        .add(Comment::on_file("notes.txt", 4..=5, "x", "from ramble"))
+        .unwrap();
+    keys(&mut app, "  ");
+    assert_eq!(app.mode(), Mode::Normal, "<leader><leader> is unbound");
+    keys(&mut app, " rl");
+    assert_eq!(app.mode(), Mode::Picker);
+    let v = app.picker().unwrap();
+    let labels: Vec<_> = v.items.iter().map(|i| i.label.clone()).collect();
+    assert_eq!(
+        labels,
+        [format!("a.txt:37 @{}", &top[..8]), "notes.txt:4-5".into()]
+    );
+    assert!(screen(&mut app).iter().any(|l| l.contains("from ramble")));
+
+    // Typed text filters.
+    keys(&mut app, "ramble");
+    assert_eq!(app.picker().unwrap().items.len(), 1);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.status(), "Working-copy comment: notes.txt:4");
+
+    // Enter on the diff comment, from another commit: opens its commit at the line.
+    keys(&mut app, "]]");
+    assert_eq!(app.screen(), Screen::Commit(1));
+    keys(&mut app, " rl");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen(), Screen::Commit(0));
+    assert_eq!(app.commit_cursor().row, added(&app, "a40 new"));
+}
+
+#[test]
+fn picker_enter_on_a_ramble_md_comment_hands_it_to_ramble() {
+    let f = fixture();
+    std::fs::write(f.root.join("plan.md"), "# plan\n").unwrap();
+    f.review()
+        .add(Comment::on_file("plan.md", 1..=1, "# plan", "tighten"))
+        .unwrap();
+    let mut app = f.open();
+    keys(&mut app, " rl");
+    press(&mut app, KeyCode::Enter);
+    match app.pending_effect() {
+        Some(debrief::app::Effect::Launch(l)) => {
+            assert_eq!(l.name, "md");
+            assert_eq!(
+                l.argv,
+                [
+                    "ramble".to_string(),
+                    f.root.join("plan.md").display().to_string()
+                ]
+            );
+        }
+        other => panic!("{other:?} {}", app.status()),
+    }
+}
+
+#[test]
+fn picker_enter_on_a_commit_not_in_the_log_keeps_the_comment() {
+    let f = fixture();
+    add_diff(&f, &"f".repeat(40), "a.txt", 1, "stale");
+    let mut app = f.open();
+    keys(&mut app, " rl");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.status(), "Comment's revision is not in the log");
+    assert_eq!(app.screen(), Screen::Commit(0));
+    assert_eq!(f.comments().len(), 1);
+}
+
+#[test]
+fn picker_remove_and_edit() {
+    let f = fixture();
+    let app = f.open();
+    let top = app.rows()[0].info.commit.clone();
+    add_diff(&f, &top, "a.txt", 3, "one");
+    add_diff(&f, &top, "b.txt", 2, "two");
+    let script = f.root.parent().unwrap().join("ed.sh");
+    std::fs::write(&script, "#!/bin/sh\nprintf 'better' > \"$1\"\n").unwrap();
+    let s = format!("sh {}", script.display());
+    let mut app = app.with_env(move |k| (k == "VISUAL").then(|| s.clone()));
+    keys(&mut app, " rl");
+    app.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    assert_eq!(app.status(), "Comment removed (1 in batch)");
+    assert_eq!(app.picker().unwrap().items.len(), 1);
+    app.key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+    app.run_pending_effect();
+    assert_eq!(app.status(), "Comment edited");
+    let cs = f.comments();
+    assert_eq!(cs.len(), 1);
+    assert_eq!(
+        (cs[0].path.as_str(), cs[0].body.as_str()),
+        ("b.txt", "better")
+    );
+    assert_eq!(app.picker().unwrap().items[0].detail, "better");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.screen(), Screen::Commit(0));
+}
+
+#[test]
+fn send_with_nothing_says_so() {
+    let f = fixture();
+    let mut app = f.open();
+    keys(&mut app, " rr");
+    assert_eq!(app.pending_effect(), None);
+    assert_eq!(app.status(), "No comments to send");
+}
+
+#[test]
+fn send_pipes_the_markdown_and_removes_what_it_sent() {
+    let f = fixture();
+    let out = f.root.parent().unwrap().join("sent.md");
+    let cmd = format!("cat > '{}'", out.display());
+    let mut app = app_with_send(&f, &["sh", "-c", &cmd]);
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    type_and_save(&mut app, "please explain");
+    // From the log screen too.
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen(), Screen::Log);
+    keys(&mut app, " rr");
+    assert!(app.pending_effect().is_some());
+    app.run_pending_effect();
+    assert_eq!(app.status(), "Review sent (1 comments)");
+    let md = std::fs::read_to_string(&out).unwrap();
+    assert!(md.starts_with("# Review feedback"), "{md}");
+    assert!(md.contains("- File: a.txt (new side)"), "{md}");
+    assert!(md.contains("please explain"), "{md}");
+    assert!(f.comments().is_empty());
+    assert!(app.take_output().is_empty(), "no clipboard");
+}
+
+#[test]
+fn a_failing_command_copies_to_the_clipboard() {
+    let f = fixture();
+    let mut app = app_with_send(&f, &["false"]);
+    let top = app.rows()[0].info.commit.clone();
+    add_diff(&f, &top, "a.txt", 3, "x");
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert_eq!(app.status(), "Review copied to clipboard (1 comments)");
+    let out = String::from_utf8(app.take_output()).unwrap();
+    assert!(out.starts_with("\x1b]52;c;"), "{out:?}");
+    assert!(f.comments().is_empty());
+}
+
+#[test]
+fn a_comment_added_during_a_send_survives() {
+    let f = fixture();
+    let app = app_with_send(&f, &["true"]);
+    let top = app.rows()[0].info.commit.clone();
+    let sent = add_diff(&f, &top, "a.txt", 3, "sent");
+    let (cache, root, commit) = (f.cache.clone(), f.root.clone(), top.clone());
+    let mut app = app.with_after_export(move || {
+        let rev = Rev {
+            commit: commit.clone(),
+            change: None,
+            summary: None,
+        };
+        Review::open(&cache, &root)
+            .unwrap()
+            .add(Comment::on_diff(
+                "b.txt",
+                rev,
+                Side::New,
+                2..=2,
+                "+b2",
+                "late",
+            ))
+            .unwrap();
+    });
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert_eq!(app.status(), "Review sent (1 comments)");
+    let cs = f.comments();
+    assert_eq!(cs.len(), 1);
+    assert_ne!(cs[0].id, sent);
+    assert_eq!(cs[0].body, "late");
+}

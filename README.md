@@ -92,9 +92,26 @@ after a pause in a key sequence a box shows what can follow.
 | `Enter` | open the commit |
 | `m` | mark every listed commit seen |
 | `r` | reload (also automatic when the repo changes; jj: snapshot first) |
+| `<leader>e` | show / hide the stats pane |
+| `/` `?` `n` `N` | search |
+| `f` | filter; `Enter` keeps it, `Esc` clears it |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `q` | quit |
+
+The stats pane shows the commit under the cursor like `git log --stat`:
+its ID (and jj change ID), author, date, full message, then a
+`path | N ++--` row per file (renames as `old → new`, binary files as
+`Bin`) and a summary line. It sits beside the log from 120 columns and
+below it on narrower terminals, and loads once the cursor has rested for
+a moment (cached per commit).
+
+Search and filter match the summary, the author, the commit ID and the jj
+change ID, as substrings, case-insensitive unless the pattern has a
+capital. They cover the loaded commits only (`--limit`). The filter
+narrows the list as you type and highlights the matches. The status line
+shows `filter: x (12/200)`. `m`, `Enter` and `]]` / `[[` act on the
+filtered list, and `r` keeps the filter.
 
 **Commit view**: the message, then every file's diff in one stream, with
 a file list on the left (hidden below 80 columns).
@@ -134,7 +151,7 @@ status-line preview. The sent review tags each item (`## Item 1 [ISSUE]`)
 and adds a legend of the kinds it uses, with their definitions.
 
 Pasting (bracketed paste) types into the comment prompt, the `/` `?`
-search prompt or the `<leader>rl` filter as one line: newlines and tabs
+search prompt, the log's filter or the `<leader>rl` filter as one line: newlines and tabs
 become spaces. A paste anywhere else is ignored, never run as keys.
 
 A comment uses the new-side line numbers of the selected lines. If you
@@ -181,6 +198,9 @@ kinds = [
 # once and the colours follow.
 [render]
 highlight = true
+
+[view]
+stats = true                 # the log's stats pane at start (<leader>e toggles)
 
 # Launchers run with the TUI suspended, as in ramble. Arguments are not
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}

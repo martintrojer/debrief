@@ -51,7 +51,7 @@ pub struct StartOptions {
     pub cache_dir: PathBuf,
     pub revset: Option<String>,
     pub limit: usize,
-    /// `[send]` and `[[launch]]`.
+    /// `[send]`, `[review]` and `[[launch]]`.
     pub config: config::Config,
 }
 
@@ -257,8 +257,9 @@ impl App {
         };
         app.review_open();
         app.config = app.opts.config.clone();
-        let (keys, errors) = launch::bindings(&app.config.launch);
+        let (keys, mut errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;
+        errors.extend(app.config.warnings.iter().cloned());
         if !errors.is_empty() {
             app.status = errors.join("; ");
         }

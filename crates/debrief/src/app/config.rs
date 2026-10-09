@@ -1,5 +1,6 @@
 //! `~/.config/debrief/config.toml` over built-in defaults: `[send]` (how
-//! `<leader>rr` hands the review back, shared in meaning with ramble's) and
+//! `<leader>rr` hands the review back, shared in meaning with ramble's),
+//! `[review]` (the comment kinds, the same shape as ramble's) and
 //! `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
@@ -8,12 +9,26 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
+use debrief_review::Kind;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Config {
     pub send: SendConfig,
+    pub review: ReviewConfig,
     pub launch: Vec<Launcher>,
+    /// Problems the file had that didn't stop it loading (dropped comment
+    /// kinds); the app shows them in the status line at start.
+    pub warnings: Vec<String>,
+}
+
+/// `[review]`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReviewConfig {
+    /// Kinds Tab cycles through in the comment prompt, in order; the
+    /// export's legend defines them. Omitted: debrief-review's built-ins;
+    /// a list replaces them; `[]` leaves comments untyped.
+    pub kinds: Vec<Kind>,
 }
 
 /// `[send]`.
@@ -47,10 +62,15 @@ fn strings(xs: &[&str]) -> Vec<String> {
 }
 
 impl Config {
-    /// The built-in config: no send command, the `md` and `edit` launchers.
+    /// The built-in config: no send command, the built-in comment kinds,
+    /// the `md` and `edit` launchers.
     pub fn defaults() -> Config {
         Config {
             send: SendConfig::default(),
+            review: ReviewConfig {
+                kinds: debrief_review::builtin_kinds(),
+            },
+            warnings: Vec::new(),
             launch: vec![
                 Launcher {
                     name: MD.into(),
@@ -97,6 +117,9 @@ impl Config {
                 c.send.preamble = s.preamble;
             }
         }
+        if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
+            c.review.kinds = clean_kinds(kinds, &mut c.warnings);
+        }
         for l in raw.launch.unwrap_or_default() {
             let pos = c.launch.iter().position(|d| d.name == l.name);
             if l.disabled {
@@ -135,7 +158,41 @@ impl Config {
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     send: Option<RawSend>,
+    review: Option<RawReview>,
     launch: Option<Vec<RawLauncher>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawReview {
+    kinds: Option<Vec<RawKind>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawKind {
+    id: String,
+    definition: Option<String>,
+}
+
+/// `[review] kinds` with ids trimmed and lowercased; an empty or repeated
+/// id is dropped with a warning (tuicr's rule).
+fn clean_kinds(kinds: Vec<RawKind>, warnings: &mut Vec<String>) -> Vec<Kind> {
+    let mut out: Vec<Kind> = Vec::new();
+    for k in kinds {
+        let id = k.id.trim().to_lowercase();
+        if id.is_empty() {
+            warnings.push("[review] kinds: dropped a kind with an empty id".into());
+        } else if out.iter().any(|o| o.id == id) {
+            warnings.push(format!("[review] kinds: dropped duplicate kind `{id}`"));
+        } else {
+            out.push(Kind {
+                id,
+                definition: k.definition,
+            });
+        }
+    }
+    out
 }
 
 #[derive(Deserialize)]
@@ -197,6 +254,48 @@ command = ["lazygit"]
         let names: Vec<_> = c.launch.iter().map(|l| l.name.as_str()).collect();
         assert_eq!(names, ["md", "lg"]);
         assert_eq!(c.launch[0].command, ["glow", "${file}"]);
+    }
+
+    #[test]
+    fn review_kinds_default_replace_or_empty() {
+        let ids =
+            |c: &Config| -> Vec<String> { c.review.kinds.iter().map(|k| k.id.clone()).collect() };
+        assert_eq!(
+            ids(&Config::parse("").unwrap()),
+            ["issue", "suggestion", "question", "nit"]
+        );
+        let c = Config::parse(
+            r#"
+[review]
+kinds = [
+  { id = " Praise ", definition = "Keep doing this." },
+  { id = "issue" },
+  { id = "praise" },
+  { id = "" },
+]
+"#,
+        )
+        .unwrap();
+        assert_eq!(ids(&c), ["praise", "issue"]);
+        assert_eq!(
+            c.review.kinds[0].definition.as_deref(),
+            Some("Keep doing this.")
+        );
+        assert_eq!(c.review.kinds[1].definition, None);
+        assert_eq!(
+            c.warnings,
+            [
+                "[review] kinds: dropped duplicate kind `praise`",
+                "[review] kinds: dropped a kind with an empty id"
+            ]
+        );
+        let c = Config::parse("[review]\nkinds = []\n").unwrap();
+        assert!(c.review.kinds.is_empty());
+        assert!(c.warnings.is_empty());
+        // `[review]` without `kinds` keeps the built-ins.
+        assert_eq!(ids(&Config::parse("[review]\n").unwrap()).len(), 4);
+        assert!(Config::parse("[review]\nkinds = [{ id = \"x\", color = \"red\" }]\n").is_err());
+        assert!(Config::parse("[review]\nenabled = true\n").is_err());
     }
 
     #[test]

@@ -30,6 +30,9 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
         app.set_status(format!("live reload off: {e:#}"));
     }
     while !app.should_quit() {
+        if app.pending_effect().is_some() {
+            suspend_and_run(terminal, || app.run_pending_effect())?;
+        }
         terminal.draw(|f| app.render(f))?;
         if event::poll(POLL)? {
             match event::read()? {
@@ -59,4 +62,20 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
         }
     }
     Ok(())
+}
+
+/// Leave raw mode and the alternate screen, run `f` (which may use the
+/// terminal), then re-enter and clear so the next draw repaints fully
+/// (ramble's `suspend_and_run`; debrief captures no mouse).
+pub fn suspend_and_run<R>(
+    terminal: &mut DefaultTerminal,
+    f: impl FnOnce() -> R,
+) -> anyhow::Result<R> {
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    let r = f();
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+    crossterm::terminal::enable_raw_mode()?;
+    terminal.clear()?;
+    Ok(r)
 }

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyEvent, KeyModifiers};
 
-use super::help::{BINDINGS, Tok, placeholder_key, show_key, tokens};
+use super::help::{Tok, placeholder_key, show_key, tokens};
 use super::keys::KeyResult;
 use super::{App, Mode};
 
@@ -90,7 +90,7 @@ impl App {
 
     fn clue_rows_for(&self, pending: &[KeyEvent]) -> Vec<ClueRow> {
         let mut out: Vec<ClueRow> = Vec::new();
-        for b in BINDINGS {
+        for b in self.bindings() {
             if !self.ctx_active(b.context) {
                 continue;
             }
@@ -125,7 +125,11 @@ impl App {
                 }
                 out.push(ClueRow {
                     key,
-                    desc: if group { "+more".into() } else { b.desc.into() },
+                    desc: if group {
+                        "+more".into()
+                    } else {
+                        b.desc.to_string()
+                    },
                     group,
                 });
             }

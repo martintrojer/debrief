@@ -98,6 +98,10 @@ pub enum Action {
     FileBottom,
     /// File list Enter: jump to the file and focus the diff.
     FileOpen,
+    /// A `[[launch]]` key: run launcher `i` of the config.
+    Launch(usize),
+    /// Enter in the diff: a `.md` file header goes to ramble.
+    DiffEnter,
 }
 
 /// What a key sequence means so far.
@@ -180,13 +184,10 @@ impl App {
         let second = keys.get(1);
         let ctrl_w =
             first.modifiers.contains(KeyModifiers::CONTROL) && first.code == KeyCode::Char('w');
-        let r = if plain(first) == Some(LEADER) {
-            match second.map(plain) {
-                None => KeyResult::Pending,
-                Some(Some('e')) => KeyResult::Action(A::ToggleSidebar),
-                _ => KeyResult::None,
-            }
-        } else if ctrl_w {
+        if plain(first) == Some(LEADER) {
+            return Some(self.leader_keymap(&keys[1..], true));
+        }
+        let r = if ctrl_w {
             match second.map(plain) {
                 None => KeyResult::Pending,
                 Some(Some('h')) => KeyResult::Action(A::Focus(Focus::Files)),
@@ -202,6 +203,25 @@ impl App {
             return None;
         };
         Some(if keys.len() > 2 { KeyResult::None } else { r })
+    }
+
+    /// Keys after `<leader>`: built-ins first (`e` on the commit screen),
+    /// then the `[[launch]]` keys.
+    pub(super) fn leader_keymap(&self, after: &[KeyEvent], commit: bool) -> KeyResult {
+        let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
+            return KeyResult::None;
+        };
+        match typed.as_slice() {
+            [] => return KeyResult::Pending,
+            ['e'] if commit => return KeyResult::Action(Action::ToggleSidebar),
+            _ => {}
+        }
+        use super::launch::LeaderMatch;
+        match super::launch::match_leader(&self.launch_keys, &typed) {
+            LeaderMatch::Launch(i) => KeyResult::Action(Action::Launch(i)),
+            LeaderMatch::Pending => KeyResult::Pending,
+            LeaderMatch::NoMapping => KeyResult::None,
+        }
     }
 
     /// The diff pane in normal mode.
@@ -271,6 +291,7 @@ impl App {
             KeyCode::Char('n') => A::SearchNext(true, count),
             KeyCode::Char('N') => A::SearchNext(false, count),
             KeyCode::Char('v' | 'V') => A::Visual,
+            KeyCode::Enter => A::DiffEnter,
             _ => return KeyResult::None,
         };
         KeyResult::Action(action)
@@ -327,6 +348,9 @@ impl App {
 
     fn log_keymap(&self, keys: &[KeyEvent]) -> KeyResult {
         use Action as A;
+        if keys.first().and_then(plain) == Some(LEADER) {
+            return self.leader_keymap(&keys[1..], false);
+        }
         let count = self.count;
         let [key] = keys else {
             let (Some(prefix), Some(c)) =
@@ -368,7 +392,8 @@ impl App {
     pub fn apply(&mut self, action: Action) {
         use Action as A;
         let n = |c: Option<usize>| c.unwrap_or(1).max(1) as isize;
-        if matches!(self.screen, Screen::Commit(_)) && !matches!(action, A::Quit | A::Help(_)) {
+        let shared = matches!(action, A::Quit | A::Help(_) | A::Launch(_));
+        if matches!(self.screen, Screen::Commit(_)) && !shared {
             return self.apply_commit(action);
         }
         match action {
@@ -383,6 +408,7 @@ impl App {
             A::MarkAll => self.mark_all(),
             A::Reload => self.reload(),
             A::Help(a) => self.help_action(a),
+            A::Launch(i) => self.launch_index(i),
             other => self.apply_commit(other),
         }
     }
@@ -406,6 +432,7 @@ impl App {
                 return;
             }
             A::Yank => return self.yank(),
+            A::DiffEnter => return self.diff_enter(),
             A::ToggleSidebar => return self.toggle_sidebar(),
             A::Focus(f) => return self.focus_pane(f),
             A::FileDown(c) => return self.select_file(self.sidebar_selected() + n(c)),
@@ -480,7 +507,14 @@ fn visual_ok(a: Action) -> bool {
     use Action as A;
     !matches!(
         a,
-        A::Back | A::Commit(_) | A::ToggleSidebar | A::Focus(_) | A::Help(_) | A::SearchStart(_)
+        A::Back
+            | A::Commit(_)
+            | A::ToggleSidebar
+            | A::Focus(_)
+            | A::Help(_)
+            | A::SearchStart(_)
+            | A::DiffEnter
+            | A::Launch(_)
     )
 }
 

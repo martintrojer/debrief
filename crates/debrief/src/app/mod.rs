@@ -4,8 +4,10 @@
 
 mod clue;
 pub mod commit;
+pub mod config;
 mod help;
 mod keys;
+pub mod launch;
 mod log;
 mod motion;
 pub mod run;
@@ -29,6 +31,7 @@ pub use commit::{Focus, Row as DiffRow, RowKind};
 pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::LEADER;
 pub use keys::{Action, KeyResult};
+pub use launch::{Effect, Exit, LaunchCommand};
 pub use log::{age, is_zero_id, short_id};
 pub use motion::Cursor;
 pub use visual::osc52;
@@ -43,6 +46,8 @@ pub struct StartOptions {
     pub cache_dir: PathBuf,
     pub revset: Option<String>,
     pub limit: usize,
+    /// `[send]` and `[[launch]]`.
+    pub config: config::Config,
 }
 
 impl StartOptions {
@@ -51,6 +56,7 @@ impl StartOptions {
             cache_dir,
             revset: None,
             limit: DEFAULT_LIMIT,
+            config: config::Config::defaults(),
         }
     }
 }
@@ -128,6 +134,13 @@ pub struct App {
     sidebar_on: bool,
     /// Bytes for the terminal (OSC 52).
     output: Vec<u8>,
+    config: config::Config,
+    /// Launcher key sequences after the leader, and their index.
+    launch_keys: Vec<(Vec<char>, usize)>,
+    /// A side effect waiting for the suspended TUI.
+    effect: Option<Effect>,
+    runner: Box<launch::Runner>,
+    env: Box<launch::EnvLookup>,
 }
 
 impl App {
@@ -161,7 +174,18 @@ impl App {
             focus: Focus::Diff,
             sidebar_on: true,
             output: Vec::new(),
+            config: config::Config::default(),
+            launch_keys: Vec::new(),
+            effect: None,
+            runner: Box::new(launch::system_run),
+            env: Box::new(|k| std::env::var(k).ok()),
         };
+        app.config = app.opts.config.clone();
+        let (keys, errors) = launch::bindings(&app.config.launch);
+        app.launch_keys = keys;
+        if !errors.is_empty() {
+            app.status = errors.join("; ");
+        }
         let commits = app.load()?;
         if app.seen.is_fresh() {
             app.seen

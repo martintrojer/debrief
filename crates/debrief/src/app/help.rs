@@ -5,6 +5,8 @@
 //! them. A unit test resolves every row through [`App::keymap`] in its
 //! context, so a row that no longer matches a binding fails the build.
 
+use std::borrow::Cow;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
@@ -38,11 +40,12 @@ pub(crate) enum Group {
     Files,
     Search,
     Visual,
+    Launch,
     Help,
 }
 
 impl Group {
-    const ALL: [Group; 8] = [
+    const ALL: [Group; 9] = [
         Group::General,
         Group::Motions,
         Group::Log,
@@ -50,6 +53,7 @@ impl Group {
         Group::Files,
         Group::Search,
         Group::Visual,
+        Group::Launch,
         Group::Help,
     ];
 
@@ -62,6 +66,7 @@ impl Group {
             Group::Files => "File list",
             Group::Search => "Search",
             Group::Visual => "Visual",
+            Group::Launch => "Launchers",
             Group::Help => "Help",
         }
     }
@@ -71,19 +76,20 @@ impl Group {
 /// Ctrl+x (`C-w h` is Ctrl+w then h), `<leader>` the leader key (Space),
 /// `{1-9}` a count digit, and `Enter Esc Down Up Left Right Backspace`
 /// name keys.
+#[derive(Debug, Clone)]
 pub(crate) struct Binding {
-    pub keys: &'static str,
+    pub keys: Cow<'static, str>,
     pub context: Ctx,
     pub group: Group,
-    pub desc: &'static str,
+    pub desc: Cow<'static, str>,
 }
 
 const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -> Binding {
     Binding {
-        keys,
+        keys: Cow::Borrowed(keys),
         context,
         group,
-        desc,
+        desc: Cow::Borrowed(desc),
     }
 }
 
@@ -145,6 +151,12 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("n", C, G::Commit, "next match"),
         b("N", C, G::Commit, "previous match"),
         b("v, V", C, G::Commit, "select rows"),
+        b(
+            "Enter",
+            C,
+            G::Launch,
+            "on a .md file header: open it in ramble",
+        ),
         b("<leader>e", C, G::Files, "show or hide the file list"),
         b("C-w h", C, G::Files, "to the file list"),
         b("C-w l", C, G::Files, "to the diff"),
@@ -174,6 +186,32 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("q, g?, Esc", H, G::Help, "in help: close"),
     ]
 };
+
+impl App {
+    /// [`BINDINGS`] plus a row per `[[launch]]` key on the log, the diff
+    /// and the file list.
+    pub(crate) fn bindings(&self) -> Vec<Binding> {
+        let mut out: Vec<Binding> = BINDINGS.to_vec();
+        for &(_, i) in &self.launch_keys {
+            let l = &self.config.launch[i];
+            let Some(key) = &l.key else { continue };
+            let desc = if l.name == super::config::EDIT {
+                "open $EDITOR at this file and line".to_string()
+            } else {
+                format!("run launcher {}", l.name)
+            };
+            for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files] {
+                out.push(Binding {
+                    keys: Cow::Owned(key.clone()),
+                    context: ctx,
+                    group: Group::Launch,
+                    desc: Cow::Owned(desc.clone()),
+                });
+            }
+        }
+        out
+    }
+}
 
 /// Named keys of the `keys` notation, as whole alternatives.
 pub(super) const NAMED: [(&str, KeyCode); 7] = [
@@ -381,7 +419,8 @@ impl App {
     pub fn help_lines(&self) -> Vec<HelpLine> {
         let mut out = Vec::new();
         for g in Group::ALL {
-            let items: Vec<HelpLine> = BINDINGS
+            let items: Vec<HelpLine> = self
+                .bindings()
                 .iter()
                 .filter(|b| b.group == g && self.ctx_shown(b.context))
                 .map(|b| HelpLine::Item {
@@ -532,7 +571,7 @@ pub(super) mod tests {
             Ctx::Help,
         ];
         let apps: Vec<_> = ctxs.iter().map(|&c| (c, in_ctx(c))).collect();
-        for b in BINDINGS {
+        for b in apps[0].1.1.bindings() {
             assert!(!b.desc.trim().is_empty(), "{} has no description", b.keys);
             let (_, (_t, a)) = apps.iter().find(|(c, _)| *c == b.context).unwrap();
             for alt in b.keys.split(", ") {
@@ -566,7 +605,8 @@ pub(super) mod tests {
                 .iter()
                 .map(|(_, c)| KeyEvent::new(*c, KeyModifiers::NONE)),
         );
-        let listed: Vec<Vec<KeyEvent>> = BINDINGS
+        let listed: Vec<Vec<KeyEvent>> = a
+            .bindings()
             .iter()
             // Visual mode keeps the diff pane's motions.
             .filter(|b| b.context == ctx || (ctx == Ctx::Visual && b.context == Ctx::Commit))

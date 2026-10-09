@@ -115,6 +115,17 @@ fn root_commit_shows_added_files() {
 }
 
 #[test]
+fn root_commit_shows_files_despite_show_root_false() {
+    let (_t, root) = repo();
+    git(&root, &["config", "log.showRoot", "false"]);
+    let v = vcs::open(&root).unwrap();
+    let first = v.log(None, 10).unwrap().pop().unwrap();
+    let d = v.show(&first.commit).unwrap();
+    let added: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
+    assert_eq!(added, [Some("a.txt"), Some("sub/keep.txt")]);
+}
+
+#[test]
 fn merge_shows_first_parent_diff() {
     let (_t, root) = repo();
     git(&root, &["checkout", "-q", "-b", "side", "HEAD~1"]);

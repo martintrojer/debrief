@@ -16,6 +16,7 @@ const CONFIG: &[&str] = &[
     "core.quotePath=true",
     "core.fsmonitor=false",
     "log.showSignature=false",
+    "log.showRoot=true",
     "color.ui=never",
 ];
 
@@ -112,7 +113,14 @@ impl Vcs for Git {
     fn show(&self, commit: &str) -> Result<CommitDiff> {
         let id = self.resolve(commit)?;
         let message = self.git(&["show", "-s", "--no-color", "--format=%B", &id, "--"])?;
-        let mut args = vec!["show", "--first-parent", "--format=", "--patch", "-M"];
+        let mut args = vec![
+            "show",
+            "--first-parent",
+            "--root",
+            "--format=",
+            "--patch",
+            "-M",
+        ];
         args.extend_from_slice(DIFF_FLAGS);
         args.extend_from_slice(&[&id, "--"]);
         let patch = self.git(&args)?;

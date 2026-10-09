@@ -587,3 +587,20 @@ fn five_digit_line_numbers_widen_the_gutter_and_dollar_stays_visible() {
     );
     assert!(app.commit_scroll().1 > 0);
 }
+
+#[test]
+fn a_search_typed_while_loading_finds_the_loaded_rows() {
+    let (_tmp, root, cache) = repo();
+    let mut app = open(&root, &cache);
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.commit_loading());
+    keys(&mut app, "/line");
+    press(&mut app, KeyCode::Enter);
+    app.event(rx.recv_timeout(Duration::from_secs(20)).unwrap());
+    assert!(!app.commit_loading());
+    assert!(!app.search_hits().is_empty(), "hits recomputed on load");
+    keys(&mut app, "n");
+    assert!(app.commit_rows()[row(&app)].text.contains("line"));
+}

@@ -312,6 +312,8 @@ impl App {
         match result {
             Ok(diff) => {
                 v.set_diff(diff);
+                // A search typed while loading saw no rows.
+                self.refresh_search();
                 self.commit_follow();
             }
             Err(e) => {

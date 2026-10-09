@@ -77,7 +77,8 @@ impl App {
             .collect()
     }
 
-    fn refresh_search(&mut self) {
+    /// Recompute the hits of the active pattern over the current rows.
+    pub(super) fn refresh_search(&mut self) {
         let Some(v) = &mut self.commit else { return };
         let pat = v.search.pattern.clone();
         v.search.hits = v

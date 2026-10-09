@@ -2,14 +2,16 @@
 //! widget per area; later screens add a file and one call here.
 
 mod clue;
+mod commit;
 mod help;
 mod log;
+mod sidebar;
 mod status;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 
-use crate::app::App;
+use crate::app::{App, Screen};
 
 /// Catppuccin Mocha colours, as ramble uses them.
 pub mod palette {
@@ -31,11 +33,20 @@ pub mod palette {
     pub const MANTLE: Color = Color::Rgb(0x18, 0x18, 0x25);
 }
 
-/// Draw one full screen: the log, the status line, overlays.
+/// Draw one full screen: the log or the commit, the status line, overlays.
 pub fn draw(frame: &mut Frame, app: &App) {
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
-    log::draw(frame, app, main);
+    match app.screen() {
+        Screen::Log => log::draw(frame, app, main),
+        Screen::Commit(_) => {
+            let l = app.commit_layout(main);
+            if let Some(side) = l.sidebar {
+                sidebar::draw(frame, app, side);
+            }
+            commit::draw(frame, app, l.diff);
+        }
+    }
     status::draw(frame, app, status);
     clue::draw(frame, app, main);
     help::draw(frame, app, main);

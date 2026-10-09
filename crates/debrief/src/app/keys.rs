@@ -6,11 +6,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use super::commit::{Focus, RowKind};
 use super::help::HelpAction;
 use super::{App, Mode, Screen};
 
 /// Cap on a typed count.
 const MAX_COUNT: usize = 1_000_000;
+
+/// The `<leader>` key (Space, as in ramble).
+pub const LEADER: char = ' ';
 
 /// Everything a key can do. `Option<usize>` is the typed count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +36,68 @@ pub enum Action {
     Reload,
     /// `g?` opens the help overlay; its own keys.
     Help(HelpAction),
+    /// Commit view: Esc / q back to the log.
+    Back,
+    Left(Option<usize>),
+    Right(Option<usize>),
+    /// `0`.
+    LineStart,
+    /// `$`: end of the line `count - 1` rows down.
+    LineEnd(Option<usize>),
+    WordForward(Option<usize>),
+    WordBackward(Option<usize>),
+    WordEnd(Option<usize>),
+    ParagraphForward(Option<usize>),
+    ParagraphBackward(Option<usize>),
+    PageDown,
+    PageUp,
+    /// `C-e`.
+    ScrollDown,
+    /// `C-y`.
+    ScrollUp,
+    /// `H`.
+    ScreenTop(Option<usize>),
+    /// `M`.
+    ScreenMiddle,
+    /// `L`.
+    ScreenBottom(Option<usize>),
+    /// `zz`.
+    Center,
+    /// `zt`.
+    CursorTop,
+    /// `zb`.
+    CursorBottom,
+    /// `]f` / `[f`.
+    File(bool, Option<usize>),
+    /// `]c` / `[c`.
+    Hunk(bool, Option<usize>),
+    /// `]]` / `[[`: the next (older) / previous commit of the log.
+    Commit(bool),
+    /// `/` (true) or `?`.
+    SearchStart(bool),
+    /// `n` (true) or `N`.
+    SearchNext(bool, Option<usize>),
+    SearchInput(char),
+    SearchBackspace,
+    SearchCommit,
+    SearchCancel,
+    /// `v` / `V`.
+    Visual,
+    VisualCancel,
+    /// `y` in visual mode.
+    Yank,
+    /// `<leader>e`.
+    ToggleSidebar,
+    /// `C-w h` / `C-w l`.
+    Focus(Focus),
+    /// File list: select the next / previous file (jumps the diff).
+    FileDown(Option<usize>),
+    FileUp(Option<usize>),
+    /// File list: first / last file.
+    FileTop,
+    FileBottom,
+    /// File list Enter: jump to the file and focus the diff.
+    FileOpen,
 }
 
 /// What a key sequence means so far.
@@ -68,6 +134,12 @@ impl App {
             self.quit = true;
             return;
         }
+        if key.code == KeyCode::Esc && (!self.pending.is_empty() || self.count.is_some()) {
+            // Esc first cancels a half-typed sequence or count.
+            self.pending.clear();
+            self.count = None;
+            return;
+        }
         self.pending.push(key);
         let keys = std::mem::take(&mut self.pending);
         match self.keymap(&keys) {
@@ -85,13 +157,171 @@ impl App {
             KeyResult::None => self.count = None,
         }
         self.keep_visible();
+        self.commit_follow();
     }
 
     /// Meaning of `keys` in the current mode and screen.
     pub fn keymap(&self, keys: &[KeyEvent]) -> KeyResult {
         match (self.mode, self.screen) {
             (Mode::Help, _) => super::help::help_keymap(self, keys),
-            (Mode::Normal, Screen::Log | Screen::Commit(_)) => self.log_keymap(keys),
+            (_, Screen::Log) => self.log_keymap(keys),
+            (Mode::Search, Screen::Commit(_)) => search_keymap(keys),
+            (Mode::Visual, Screen::Commit(_)) => self.visual_keymap(keys),
+            (Mode::Normal, Screen::Commit(_)) if self.files_focused() => self.files_keymap(keys),
+            (Mode::Normal, Screen::Commit(_)) => self.commit_keymap(keys),
+        }
+    }
+
+    /// Two-key sequences shared by the commit screen's panes: `<leader>e`,
+    /// `C-w h/l`, `g?`. `None` when `keys` don't start one.
+    fn pane_keymap(&self, keys: &[KeyEvent]) -> Option<KeyResult> {
+        use Action as A;
+        let first = keys.first()?;
+        let second = keys.get(1);
+        let ctrl_w =
+            first.modifiers.contains(KeyModifiers::CONTROL) && first.code == KeyCode::Char('w');
+        let r = if plain(first) == Some(LEADER) {
+            match second.map(plain) {
+                None => KeyResult::Pending,
+                Some(Some('e')) => KeyResult::Action(A::ToggleSidebar),
+                _ => KeyResult::None,
+            }
+        } else if ctrl_w {
+            match second.map(plain) {
+                None => KeyResult::Pending,
+                Some(Some('h')) => KeyResult::Action(A::Focus(Focus::Files)),
+                Some(Some('l')) => KeyResult::Action(A::Focus(Focus::Diff)),
+                _ => KeyResult::None,
+            }
+        } else if let [a, b] = keys
+            && plain(a) == Some('g')
+            && plain(b) == Some('?')
+        {
+            KeyResult::Action(A::Help(HelpAction::Open))
+        } else {
+            return None;
+        };
+        Some(if keys.len() > 2 { KeyResult::None } else { r })
+    }
+
+    /// The diff pane in normal mode.
+    fn commit_keymap(&self, keys: &[KeyEvent]) -> KeyResult {
+        use Action as A;
+        if let Some(r) = self.pane_keymap(keys) {
+            return r;
+        }
+        let count = self.count;
+        let [key] = keys else {
+            let (Some(prefix), Some(c), 2) = (
+                keys.first().and_then(plain),
+                keys.get(1).and_then(plain),
+                keys.len(),
+            ) else {
+                return KeyResult::None;
+            };
+            let action = match (prefix, c) {
+                ('g', 'g') => A::GotoTop(count),
+                ('z', 'z') => A::Center,
+                ('z', 't') => A::CursorTop,
+                ('z', 'b') => A::CursorBottom,
+                (']', 'f') => A::File(true, count),
+                ('[', 'f') => A::File(false, count),
+                (']', 'c') => A::Hunk(true, count),
+                ('[', 'c') => A::Hunk(false, count),
+                (']', ']') => A::Commit(true),
+                ('[', '[') => A::Commit(false),
+                _ => return KeyResult::None,
+            };
+            return KeyResult::Action(action);
+        };
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('d') => KeyResult::Action(A::HalfPageDown),
+                KeyCode::Char('u') => KeyResult::Action(A::HalfPageUp),
+                KeyCode::Char('f') => KeyResult::Action(A::PageDown),
+                KeyCode::Char('b') => KeyResult::Action(A::PageUp),
+                KeyCode::Char('e') => KeyResult::Action(A::ScrollDown),
+                KeyCode::Char('y') => KeyResult::Action(A::ScrollUp),
+                _ => KeyResult::None,
+            };
+        }
+        let action = match key.code {
+            KeyCode::Char(c @ '0'..='9') if c != '0' || count.is_some() => {
+                return KeyResult::Count(c as usize - '0' as usize);
+            }
+            KeyCode::Char('g' | 'z' | ']' | '[') => return KeyResult::Pending,
+            KeyCode::Char('q') | KeyCode::Esc => A::Back,
+            KeyCode::Char('j') | KeyCode::Down => A::Down(count),
+            KeyCode::Char('k') | KeyCode::Up => A::Up(count),
+            KeyCode::Char('h') | KeyCode::Left => A::Left(count),
+            KeyCode::Char('l') | KeyCode::Right => A::Right(count),
+            KeyCode::Char('0') => A::LineStart,
+            KeyCode::Char('$') => A::LineEnd(count),
+            KeyCode::Char('w') => A::WordForward(count),
+            KeyCode::Char('b') => A::WordBackward(count),
+            KeyCode::Char('e') => A::WordEnd(count),
+            KeyCode::Char('}') => A::ParagraphForward(count),
+            KeyCode::Char('{') => A::ParagraphBackward(count),
+            KeyCode::Char('G') => A::GotoBottom(count),
+            KeyCode::Char('H') => A::ScreenTop(count),
+            KeyCode::Char('M') => A::ScreenMiddle,
+            KeyCode::Char('L') => A::ScreenBottom(count),
+            KeyCode::Char('/') => A::SearchStart(true),
+            KeyCode::Char('?') => A::SearchStart(false),
+            KeyCode::Char('n') => A::SearchNext(true, count),
+            KeyCode::Char('N') => A::SearchNext(false, count),
+            KeyCode::Char('v' | 'V') => A::Visual,
+            _ => return KeyResult::None,
+        };
+        KeyResult::Action(action)
+    }
+
+    /// Visual mode: `y`, `v`/`V`, Esc, and the diff pane's motions.
+    fn visual_keymap(&self, keys: &[KeyEvent]) -> KeyResult {
+        use Action as A;
+        if let [k] = keys {
+            match (k.code, plain(k)) {
+                (KeyCode::Esc, _) => return KeyResult::Action(A::VisualCancel),
+                (_, Some('y')) => return KeyResult::Action(A::Yank),
+                _ => {}
+            }
+        }
+        if self.pane_keymap(keys).is_some() {
+            // `<leader>e`, `C-w h/l` and `g?` don't apply in visual mode.
+            return KeyResult::None;
+        }
+        match self.commit_keymap(keys) {
+            KeyResult::Action(a) if visual_ok(a) => KeyResult::Action(a),
+            KeyResult::Action(_) => KeyResult::None,
+            r => r,
+        }
+    }
+
+    /// The file list.
+    fn files_keymap(&self, keys: &[KeyEvent]) -> KeyResult {
+        use Action as A;
+        if let Some(r) = self.pane_keymap(keys) {
+            return r;
+        }
+        let count = self.count;
+        match keys {
+            [a, b] if plain(a) == Some('g') && plain(b) == Some('g') => {
+                KeyResult::Action(A::FileTop)
+            }
+            [k] if k.modifiers.contains(KeyModifiers::CONTROL) => KeyResult::None,
+            [k] => KeyResult::Action(match (k.code, plain(k)) {
+                (_, Some(c @ '1'..='9')) => return KeyResult::Count(c as usize - '0' as usize),
+                (_, Some('0')) if count.is_some() => return KeyResult::Count(0),
+                (_, Some('g')) => return KeyResult::Pending,
+                (_, Some('j')) | (KeyCode::Down, _) => A::FileDown(count),
+                (_, Some('k')) | (KeyCode::Up, _) => A::FileUp(count),
+                (_, Some('G')) => A::FileBottom,
+                (KeyCode::Enter, _) => A::FileOpen,
+                (KeyCode::Esc, _) => A::Focus(Focus::Diff),
+                (_, Some('q')) => A::Back,
+                _ => return KeyResult::None,
+            }),
+            _ => KeyResult::None,
         }
     }
 
@@ -138,6 +368,9 @@ impl App {
     pub fn apply(&mut self, action: Action) {
         use Action as A;
         let n = |c: Option<usize>| c.unwrap_or(1).max(1) as isize;
+        if matches!(self.screen, Screen::Commit(_)) && !matches!(action, A::Quit | A::Help(_)) {
+            return self.apply_commit(action);
+        }
         match action {
             A::Quit => self.quit = true,
             A::Down(c) => self.vertical(n(c)),
@@ -150,6 +383,118 @@ impl App {
             A::MarkAll => self.mark_all(),
             A::Reload => self.reload(),
             A::Help(a) => self.help_action(a),
+            other => self.apply_commit(other),
         }
     }
+
+    /// Commit-screen actions.
+    fn apply_commit(&mut self, action: Action) {
+        use Action as A;
+        let n = |c: Option<usize>| c.unwrap_or(1).max(1);
+        match action {
+            A::Back => return self.close_commit(),
+            A::Commit(forward) => return self.step_commit(forward),
+            A::SearchStart(f) => return self.search_start(f),
+            A::SearchNext(same, c) => return self.search_next(same, n(c)),
+            A::SearchInput(c) => return self.search_edit(Some(c)),
+            A::SearchBackspace => return self.search_edit(None),
+            A::SearchCommit => return self.search_commit(),
+            A::SearchCancel => return self.search_cancel(),
+            A::Visual => return self.visual_start(),
+            A::VisualCancel => {
+                self.mode = Mode::Normal;
+                return;
+            }
+            A::Yank => return self.yank(),
+            A::ToggleSidebar => return self.toggle_sidebar(),
+            A::Focus(f) => return self.focus_pane(f),
+            A::FileDown(c) => return self.select_file(self.sidebar_selected() + n(c)),
+            A::FileUp(c) => {
+                return self.select_file(self.sidebar_selected().saturating_sub(n(c)));
+            }
+            A::FileTop => return self.select_file(0),
+            A::FileBottom => return self.select_file(usize::MAX),
+            A::FileOpen => {
+                self.select_file(self.sidebar_selected());
+                self.focus = Focus::Diff;
+                return;
+            }
+            _ => {}
+        }
+        let Some(v) = &mut self.commit else { return };
+        let mut missing = None;
+        match action {
+            A::Down(c) => v.vertical(n(c) as isize),
+            A::Up(c) => v.vertical(-(n(c) as isize)),
+            A::Left(c) => v.horizontal(-(n(c) as isize)),
+            A::Right(c) => v.horizontal(n(c) as isize),
+            A::LineStart => v.set_col(0),
+            A::LineEnd(c) => v.line_end(n(c)),
+            A::WordForward(c) => v.repeat(n(c), super::commit::CommitView::word_forward),
+            A::WordBackward(c) => v.repeat(n(c), super::commit::CommitView::word_backward),
+            A::WordEnd(c) => v.repeat(n(c), super::commit::CommitView::word_end),
+            A::ParagraphForward(c) => {
+                v.repeat(n(c), super::commit::CommitView::paragraph_forward);
+            }
+            A::ParagraphBackward(c) => {
+                v.repeat(n(c), super::commit::CommitView::paragraph_backward);
+            }
+            A::GotoTop(c) => v.goto_row(c.map_or(0, |c| c.saturating_sub(1))),
+            A::GotoBottom(c) => v.goto_row(c.map_or(v.last_row(), |c| c.saturating_sub(1))),
+            A::HalfPageDown => v.half_page(true),
+            A::HalfPageUp => v.half_page(false),
+            A::PageDown => v.page_down(),
+            A::PageUp => v.page_up(),
+            A::ScrollDown => v.line_down(),
+            A::ScrollUp => v.line_up(),
+            A::ScreenTop(c) => v.screen_top(n(c)),
+            A::ScreenMiddle => v.screen_middle(),
+            A::ScreenBottom(c) => v.screen_bottom(n(c)),
+            A::Center => v.center_cursor(),
+            A::CursorTop => v.cursor_to_top(),
+            A::CursorBottom => v.cursor_to_bottom(),
+            A::File(f, c) if !v.jump_kind(RowKind::FileHeader, f, n(c)) => {
+                missing = Some(if f {
+                    "no next file"
+                } else {
+                    "no previous file"
+                });
+            }
+            A::Hunk(f, c) if !v.jump_kind(RowKind::HunkHeader, f, n(c)) => {
+                missing = Some(if f {
+                    "no next hunk"
+                } else {
+                    "no previous hunk"
+                });
+            }
+            _ => {}
+        }
+        if let Some(m) = missing {
+            self.set_status(m);
+        }
+    }
+}
+
+/// Actions visual mode keeps: motions, scrolling, search and `v`.
+fn visual_ok(a: Action) -> bool {
+    use Action as A;
+    !matches!(
+        a,
+        A::Back | A::Commit(_) | A::ToggleSidebar | A::Focus(_) | A::Help(_) | A::SearchStart(_)
+    )
+}
+
+/// Typing a search pattern: every plain key is input.
+fn search_keymap(keys: &[KeyEvent]) -> KeyResult {
+    use Action as A;
+    let Some(k) = keys.last() else {
+        return KeyResult::None;
+    };
+    KeyResult::Action(match k.code {
+        KeyCode::Enter => A::SearchCommit,
+        KeyCode::Esc => A::SearchCancel,
+        KeyCode::Backspace => A::SearchBackspace,
+        KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => A::SearchInput(c),
+        _ => return KeyResult::None,
+    })
 }

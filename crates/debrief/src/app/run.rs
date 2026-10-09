@@ -1,6 +1,7 @@
 //! The terminal and the event loop (no tokio: crossterm polling plus an
 //! mpsc channel for watcher events).
 
+use std::io::Write;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -49,6 +50,13 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
             app.event(AppEvent::Reload);
         }
         app.tick(Instant::now());
+        let out = app.take_output();
+        if !out.is_empty() {
+            // OSC 52 clipboard writes go straight to the terminal.
+            let mut stdout = std::io::stdout();
+            stdout.write_all(&out)?;
+            stdout.flush()?;
+        }
     }
     Ok(())
 }

@@ -3,10 +3,15 @@
 //! `keys`, its rows in `help::BINDINGS` and one draw call in `ui`.
 
 mod clue;
+pub mod commit;
 mod help;
 mod keys;
 mod log;
+mod motion;
 pub mod run;
+mod search;
+pub mod sidebar;
+mod visual;
 pub mod watch;
 
 use std::path::PathBuf;
@@ -17,12 +22,16 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 
 use crate::seen::{Seen, Status};
-use crate::vcs::{CommitInfo, Kind, Vcs};
+use crate::vcs::{CommitDiff, CommitInfo, Kind, Vcs};
 
 pub use clue::{CLUE_DELAY, ClueRow};
+pub use commit::{Focus, Row as DiffRow, RowKind};
 pub use help::{HelpLine, HelpView, help_rect};
+pub use keys::LEADER;
 pub use keys::{Action, KeyResult};
 pub use log::{age, is_zero_id, short_id};
+pub use motion::Cursor;
+pub use visual::osc52;
 
 /// Default number of commits listed.
 pub const DEFAULT_LIMIT: usize = 200;
@@ -53,6 +62,11 @@ pub enum AppEvent {
     Resize(u16, u16),
     /// The repository changed on disk (from the watcher).
     Reload,
+    /// A commit's diff from the loader thread, tagged with its request.
+    Loaded {
+        request: u64,
+        result: Result<CommitDiff, String>,
+    },
 }
 
 /// The main view.
@@ -69,6 +83,10 @@ pub enum Mode {
     Normal,
     /// The `g?` overlay.
     Help,
+    /// Typing a `/` or `?` pattern in the commit view.
+    Search,
+    /// Line-wise selection in the commit view.
+    Visual,
 }
 
 /// One log row: the commit and how it shows.
@@ -101,6 +119,15 @@ pub struct App {
     size: (u16, u16),
     sender: Option<Sender<AppEvent>>,
     watcher: Option<watch::RepoWatcher>,
+    /// The open commit (on `Screen::Commit`).
+    commit: Option<commit::CommitView>,
+    /// The last commit-load request number.
+    next_request: u64,
+    focus: Focus,
+    /// `<leader>e` state of the file list.
+    sidebar_on: bool,
+    /// Bytes for the terminal (OSC 52).
+    output: Vec<u8>,
 }
 
 impl App {
@@ -129,6 +156,11 @@ impl App {
             size: (80, 24),
             sender: None,
             watcher: None,
+            commit: None,
+            next_request: 0,
+            focus: Focus::Diff,
+            sidebar_on: true,
+            output: Vec::new(),
         };
         let commits = app.load()?;
         if app.seen.is_fresh() {
@@ -145,8 +177,12 @@ impl App {
     pub fn event(&mut self, ev: AppEvent) {
         match ev {
             AppEvent::Key(k) => self.key(k),
-            AppEvent::Resize(c, r) => self.size = (c, r),
+            AppEvent::Resize(c, r) => {
+                self.size = (c, r);
+                self.commit_follow();
+            }
             AppEvent::Reload => self.reload(),
+            AppEvent::Loaded { request, result } => self.loaded(request, result),
         }
     }
 
@@ -161,6 +197,7 @@ impl App {
         self.size = (area.width, area.height);
         self.view_h = area.height.saturating_sub(1).max(1) as usize;
         self.keep_visible();
+        self.commit_follow();
         crate::ui::draw(frame, self);
     }
 

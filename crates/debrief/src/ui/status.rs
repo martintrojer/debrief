@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::palette;
-use crate::app::App;
+use crate::app::{App, Mode, Screen};
 use crate::vcs::Kind;
 
 /// The key that opens the help overlay, shown dimmed while it fits.
@@ -29,6 +29,15 @@ fn elide_left(s: &str, max: usize) -> String {
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
+    if let Some(p) = app.search_prompt() {
+        let x = area.x + Span::raw(p.as_str()).width() as u16;
+        frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
+        frame.render_widget(Paragraph::new(p).style(base), area);
+        return;
+    }
+    if let Screen::Commit(_) = app.screen() {
+        return draw_commit(frame, app, area, base);
+    }
     let kind = match app.kind() {
         Kind::Git => "git",
         Kind::Jj => "jj",
@@ -60,6 +69,47 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             base.fg(palette::YELLOW),
         ));
     }
+    let left_w: usize = spans.iter().map(Span::width).sum();
+    let right_w = Span::raw(right.as_str()).width();
+    let hint_w = HELP_HINT.len();
+    let hint = left_w + right_w + hint_w + 2 <= area.width as usize;
+    let used = left_w + right_w + if hint { hint_w } else { 0 };
+    spans.push(Span::styled(
+        " ".repeat((area.width as usize).saturating_sub(used)),
+        base,
+    ));
+    if hint {
+        spans.push(Span::styled(HELP_HINT, base.fg(palette::OVERLAY)));
+    }
+    spans.push(Span::styled(right, base.fg(palette::TEAL)));
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
+}
+
+/// The commit screen: mode, commit ID, loading/status message, position.
+fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
+    let id = app.commit_id().unwrap_or("");
+    let id = id.get(..8).unwrap_or(id);
+    let mut spans = Vec::new();
+    if app.mode() == Mode::Visual {
+        spans.push(Span::styled(
+            " V-LINE ",
+            base.fg(palette::BASE).bg(palette::MAUVE),
+        ));
+    }
+    spans.push(Span::styled(format!(" {id}"), base.fg(palette::MAUVE)));
+    let msg = if app.commit_loading() {
+        "loading…"
+    } else {
+        app.status()
+    };
+    if !msg.is_empty() {
+        spans.push(Span::styled(format!("  {msg}"), base.fg(palette::YELLOW)));
+    }
+    let n = app.commit_rows().len();
+    let right = match n {
+        0 => " ".to_string(),
+        n => format!(" {}/{n} ", app.commit_cursor().row + 1),
+    };
     let left_w: usize = spans.iter().map(Span::width).sum();
     let right_w = Span::raw(right.as_str()).width();
     let hint_w = HELP_HINT.len();

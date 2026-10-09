@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyEvent, KeyModifiers};
 
-use super::help::{BINDINGS, Ctx, Tok, placeholder_key, show_key, tokens};
+use super::help::{BINDINGS, Tok, placeholder_key, show_key, tokens};
 use super::keys::KeyResult;
 use super::{App, Mode};
 
@@ -38,7 +38,7 @@ fn same_key(a: &KeyEvent, b: &KeyEvent) -> bool {
 
 impl App {
     fn clue_active(&self) -> bool {
-        !self.pending.is_empty() && self.mode == Mode::Normal
+        !self.pending.is_empty() && matches!(self.mode, Mode::Normal | Mode::Visual)
     }
 
     /// Called after every key: start timing a new sequence, or forget the
@@ -91,7 +91,7 @@ impl App {
     fn clue_rows_for(&self, pending: &[KeyEvent]) -> Vec<ClueRow> {
         let mut out: Vec<ClueRow> = Vec::new();
         for b in BINDINGS {
-            if b.context == Ctx::Help || !self.ctx_shown(b.context) {
+            if !self.ctx_active(b.context) {
                 continue;
             }
             for alt in b.keys.split(", ") {
@@ -142,6 +142,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::App;
     use crate::app::test_support::app;
     use crossterm::event::KeyCode;
 
@@ -166,10 +167,29 @@ mod tests {
         assert!(!a.clue_visible(), "the sequence ended");
     }
 
-    /// Every prefix the keymap answers `Pending` for has clue rows.
+    /// Every prefix the keymap answers `Pending` for has clue rows, on
+    /// the log, the diff, the file list and in visual mode.
     #[test]
     fn every_pending_prefix_has_clue_rows() {
-        let (_t, a) = app();
+        use crate::app::help::{Ctx, tests::in_ctx};
+        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Visual] {
+            let (_t, a) = in_ctx(ctx);
+            pending_prefixes_have_clue_rows(&a);
+        }
+    }
+
+    #[test]
+    fn commit_clue_lists_the_bracket_keys() {
+        use crate::app::help::{Ctx, tests::in_ctx};
+        let (_t, mut a) = in_ctx(Ctx::Commit);
+        a.key(ch(']'));
+        let rows = a.clue_rows();
+        let keys: Vec<_> = rows.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys, ["]", "c", "f"]);
+        assert_eq!(rows[2].desc, "next file");
+    }
+
+    fn pending_prefixes_have_clue_rows(a: &App) {
         let mut keys: Vec<KeyEvent> = (' '..='~').map(ch).collect();
         keys.extend(('a'..='z').map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)));
         let mut checked = 0;

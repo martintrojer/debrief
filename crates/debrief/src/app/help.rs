@@ -8,7 +8,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
-use super::keys::{Action, KeyResult, plain};
+use super::keys::{Action, KeyResult, LEADER, plain};
 use super::{App, Mode, Screen};
 
 /// Where a binding works.
@@ -16,6 +16,14 @@ use super::{App, Mode, Screen};
 pub(crate) enum Ctx {
     /// The log screen.
     Log,
+    /// The commit screen's diff pane.
+    Commit,
+    /// The commit screen's file list has focus.
+    Files,
+    /// Visual mode in the commit view.
+    Visual,
+    /// Typing a search pattern.
+    Search,
     /// The help overlay is open.
     Help,
 }
@@ -26,24 +34,43 @@ pub(crate) enum Group {
     General,
     Motions,
     Log,
+    Commit,
+    Files,
+    Search,
+    Visual,
     Help,
 }
 
 impl Group {
-    const ALL: [Group; 4] = [Group::General, Group::Motions, Group::Log, Group::Help];
+    const ALL: [Group; 8] = [
+        Group::General,
+        Group::Motions,
+        Group::Log,
+        Group::Commit,
+        Group::Files,
+        Group::Search,
+        Group::Visual,
+        Group::Help,
+    ];
 
     pub(super) fn title(self) -> &'static str {
         match self {
             Group::General => "General",
             Group::Motions => "Motions",
             Group::Log => "Log",
+            Group::Commit => "Commit",
+            Group::Files => "File list",
+            Group::Search => "Search",
+            Group::Visual => "Visual",
             Group::Help => "Help",
         }
     }
 }
 
 /// One help row. `keys` lists alternatives separated by `", "`; `C-x` is
-/// Ctrl+x, `{1-9}` a count digit, and `Enter Esc Down Up` name keys.
+/// Ctrl+x (`C-w h` is Ctrl+w then h), `<leader>` the leader key (Space),
+/// `{1-9}` a count digit, and `Enter Esc Down Up Left Right Backspace`
+/// name keys.
 pub(crate) struct Binding {
     pub keys: &'static str,
     pub context: Ctx,
@@ -62,7 +89,7 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 
 /// Every key binding, as the help overlay and the key clue list them.
 pub(crate) const BINDINGS: &[Binding] = {
-    use Ctx::{Help as H, Log as L};
+    use Ctx::{Commit as C, Files as F, Help as H, Log as L, Search as S, Visual as V};
     use Group as G;
     &[
         b("q", L, G::General, "quit"),
@@ -78,6 +105,67 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Enter", L, G::Log, "open the commit (marks it seen)"),
         b("m", L, G::Log, "mark every listed commit seen"),
         b("r", L, G::Log, "reload the log"),
+        b("q, Esc", C, G::General, "back to the log"),
+        b("C-c", C, G::General, "quit"),
+        b("g?", C, G::General, "help"),
+        b("j, Down", C, G::Motions, "down"),
+        b("k, Up", C, G::Motions, "up"),
+        b("h, Left", C, G::Motions, "left"),
+        b("l, Right", C, G::Motions, "right"),
+        b("0", C, G::Motions, "start of line"),
+        b("$", C, G::Motions, "end of line"),
+        b("w", C, G::Motions, "next word"),
+        b("b", C, G::Motions, "previous word"),
+        b("e", C, G::Motions, "end of word"),
+        b("}", C, G::Motions, "next blank row"),
+        b("{", C, G::Motions, "previous blank row"),
+        b("gg", C, G::Motions, "first row (or row {count})"),
+        b("G", C, G::Motions, "last row (or row {count})"),
+        b("C-d", C, G::Motions, "half page down"),
+        b("C-u", C, G::Motions, "half page up"),
+        b("C-f", C, G::Motions, "page down"),
+        b("C-b", C, G::Motions, "page up"),
+        b("C-e", C, G::Motions, "scroll down a row"),
+        b("C-y", C, G::Motions, "scroll up a row"),
+        b("H", C, G::Motions, "top of the screen"),
+        b("M", C, G::Motions, "middle of the screen"),
+        b("L", C, G::Motions, "bottom of the screen"),
+        b("zz", C, G::Motions, "cursor row to the middle"),
+        b("zt", C, G::Motions, "cursor row to the top"),
+        b("zb", C, G::Motions, "cursor row to the bottom"),
+        b("{1-9}", C, G::Motions, "count for the next motion"),
+        b("]f", C, G::Commit, "next file"),
+        b("[f", C, G::Commit, "previous file"),
+        b("]c", C, G::Commit, "next hunk"),
+        b("[c", C, G::Commit, "previous hunk"),
+        b("]]", C, G::Commit, "open the next commit"),
+        b("[[", C, G::Commit, "open the previous commit"),
+        b("/", C, G::Commit, "search forward"),
+        b("?", C, G::Commit, "search backward"),
+        b("n", C, G::Commit, "next match"),
+        b("N", C, G::Commit, "previous match"),
+        b("v, V", C, G::Commit, "select rows"),
+        b("<leader>e", C, G::Files, "show or hide the file list"),
+        b("C-w h", C, G::Files, "to the file list"),
+        b("C-w l", C, G::Files, "to the diff"),
+        b("C-w h", F, G::Files, "to the file list"),
+        b("C-w l", F, G::Files, "to the diff"),
+        b("<leader>e", F, G::Files, "show or hide the file list"),
+        b("g?", F, G::General, "help"),
+        b("j, Down", F, G::Files, "next file"),
+        b("k, Up", F, G::Files, "previous file"),
+        b("gg", F, G::Files, "first file"),
+        b("G", F, G::Files, "last file"),
+        b("Enter", F, G::Files, "jump to the file"),
+        b("Esc", F, G::Files, "back to the diff"),
+        b("q", F, G::Files, "back to the log"),
+        b("{1-9}", F, G::Files, "count for the next motion"),
+        b("Enter", S, G::Search, "in search: jump to the match"),
+        b("Esc", S, G::Search, "in search: cancel"),
+        b("Backspace", S, G::Search, "in search: delete a character"),
+        b("y", V, G::Visual, "copy the rows as diff text"),
+        b("v, V", V, G::Visual, "leave visual mode"),
+        b("Esc", V, G::Visual, "cancel"),
         b("j, Down", H, G::Help, "in help: scroll down"),
         b("k, Up", H, G::Help, "in help: scroll up"),
         b("C-d, C-u", H, G::Help, "in help: half page"),
@@ -88,11 +176,14 @@ pub(crate) const BINDINGS: &[Binding] = {
 };
 
 /// Named keys of the `keys` notation, as whole alternatives.
-pub(super) const NAMED: [(&str, KeyCode); 4] = [
+pub(super) const NAMED: [(&str, KeyCode); 7] = [
     ("Enter", KeyCode::Enter),
     ("Esc", KeyCode::Esc),
     ("Down", KeyCode::Down),
     ("Up", KeyCode::Up),
+    ("Left", KeyCode::Left),
+    ("Right", KeyCode::Right),
+    ("Backspace", KeyCode::Backspace),
 ];
 
 /// One token of a row's key alternative.
@@ -112,14 +203,17 @@ pub(super) fn tokens(alt: &str) -> Vec<Tok<'_>> {
     let mut out = Vec::new();
     let mut rest = alt;
     while !rest.is_empty() {
-        if let Some(r) = rest.strip_prefix("C-")
+        if let Some(r) = rest.strip_prefix("<leader>") {
+            out.push(ev(LEADER));
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("C-")
             && let Some(c) = r.chars().next()
         {
             out.push(Tok::Key(KeyEvent::new(
                 KeyCode::Char(c),
                 KeyModifiers::CONTROL,
             )));
-            rest = &r[c.len_utf8()..];
+            rest = r[c.len_utf8()..].trim_start();
         } else if rest.starts_with('{') && rest.len() > 2 {
             let end = rest.find('}').expect("closing }") + 1;
             out.push(Tok::Placeholder(&rest[..end]));
@@ -146,6 +240,7 @@ pub(super) fn show_key(key: &KeyEvent) -> String {
     }
     match key.code {
         KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => format!("C-{c}"),
+        KeyCode::Char(LEADER) => "<leader>".to_string(),
         KeyCode::Char(c) => c.to_string(),
         other => format!("{other:?}"),
     }
@@ -261,8 +356,24 @@ impl App {
     /// Rows of `ctx` apply now (the help rows only describe the overlay).
     pub(super) fn ctx_shown(&self, ctx: Ctx) -> bool {
         match ctx {
-            Ctx::Log => matches!(self.screen, Screen::Log | Screen::Commit(_)),
+            Ctx::Log => self.screen == Screen::Log,
+            Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Search => {
+                matches!(self.screen, Screen::Commit(_))
+            }
             Ctx::Help => true,
+        }
+    }
+
+    /// Rows of `ctx` apply to the keys typed now (the key clue).
+    pub(super) fn ctx_active(&self, ctx: Ctx) -> bool {
+        let commit = matches!(self.screen, Screen::Commit(_));
+        match ctx {
+            Ctx::Log => self.screen == Screen::Log,
+            Ctx::Commit => commit && !self.files_focused() && self.mode != Mode::Search,
+            Ctx::Files => commit && self.files_focused() && self.mode == Mode::Normal,
+            Ctx::Visual => commit && self.mode == Mode::Visual,
+            Ctx::Search => commit && self.mode == Mode::Search,
+            Ctx::Help => false,
         }
     }
 
@@ -394,19 +505,36 @@ pub(super) mod tests {
             .collect()
     }
 
-    fn in_ctx(ctx: Ctx) -> (tempfile::TempDir, App) {
+    pub(crate) fn in_ctx(ctx: Ctx) -> (tempfile::TempDir, App) {
         let (t, mut a) = app();
-        if ctx == Ctx::Help {
-            a.help_action(HelpAction::Open);
+        if ctx != Ctx::Log && ctx != Ctx::Help {
+            a.open_index(0);
+            assert!(!a.commit_rows().is_empty());
+        }
+        match ctx {
+            Ctx::Help => a.help_action(HelpAction::Open),
+            Ctx::Files => a.focus_pane(crate::app::Focus::Files),
+            Ctx::Visual => a.visual_start(),
+            Ctx::Search => a.search_start(true),
+            Ctx::Log | Ctx::Commit => {}
         }
         (t, a)
     }
 
     #[test]
     fn every_row_resolves_in_its_context_and_has_a_description() {
+        let ctxs = [
+            Ctx::Log,
+            Ctx::Commit,
+            Ctx::Files,
+            Ctx::Visual,
+            Ctx::Search,
+            Ctx::Help,
+        ];
+        let apps: Vec<_> = ctxs.iter().map(|&c| (c, in_ctx(c))).collect();
         for b in BINDINGS {
             assert!(!b.desc.trim().is_empty(), "{} has no description", b.keys);
-            let (_t, a) = in_ctx(b.context);
+            let (_, (_t, a)) = apps.iter().find(|(c, _)| *c == b.context).unwrap();
             for alt in b.keys.split(", ") {
                 let keys = parse(alt);
                 let r = a.keymap(&keys);
@@ -418,11 +546,17 @@ pub(super) mod tests {
         }
     }
 
-    /// The reverse direction: every single key the log keymap binds has
-    /// a help row.
+    /// The reverse direction: every key (and two-key sequence) the keymap
+    /// binds in each context has a help row there.
     #[test]
-    fn every_log_key_has_a_row() {
-        let (_t, a) = app();
+    fn every_key_has_a_row() {
+        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Visual] {
+            let (_t, a) = in_ctx(ctx);
+            every_key_has_a_row_in(&a, ctx);
+        }
+    }
+
+    fn every_key_has_a_row_in(a: &App, ctx: Ctx) {
         let mut keys: Vec<KeyEvent> = (' '..='~')
             .map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
             .collect();
@@ -434,7 +568,8 @@ pub(super) mod tests {
         );
         let listed: Vec<Vec<KeyEvent>> = BINDINGS
             .iter()
-            .filter(|b| b.context == Ctx::Log)
+            // Visual mode keeps the diff pane's motions.
+            .filter(|b| b.context == ctx || (ctx == Ctx::Visual && b.context == Ctx::Commit))
             .flat_map(|b| b.keys.split(", ").map(parse))
             .collect();
         for k in &keys {
@@ -443,7 +578,7 @@ pub(super) mod tests {
                     let digit = matches!(k.code, KeyCode::Char('1'..='9'));
                     assert!(
                         digit || listed.contains(&vec![*k]),
-                        "{} has no help row",
+                        "{} has no help row in {ctx:?}",
                         show_key(k)
                     );
                 }
@@ -452,7 +587,7 @@ pub(super) mod tests {
                         if let KeyResult::Action(_) = a.keymap(&[*k, *k2]) {
                             assert!(
                                 listed.contains(&vec![*k, *k2]),
-                                "{}{} has no help row",
+                                "{}{} has no help row in {ctx:?}",
                                 show_key(k),
                                 show_key(k2)
                             );

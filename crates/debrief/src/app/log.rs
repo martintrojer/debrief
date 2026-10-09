@@ -4,7 +4,7 @@
 use crate::seen::Status;
 use crate::vcs::CommitInfo;
 
-use super::{App, Row, Screen};
+use super::{App, Row};
 
 /// The commit ID of jj's root commit (and any all-zero ID).
 pub fn is_zero_id(id: &str) -> bool {
@@ -76,11 +76,7 @@ impl App {
                 {
                     self.cursor = i;
                 }
-                if let Screen::Commit(i) = self.screen
-                    && i >= self.rows.len()
-                {
-                    self.screen = Screen::Log;
-                }
+                self.commit_reindex();
             }
             Err(e) => self.set_status(format!("reload failed: {e:#}")),
         }
@@ -114,10 +110,7 @@ impl App {
         if self.rows.is_empty() {
             return;
         }
-        let i = self.cursor;
-        self.mark_row(i);
-        // The commit view comes in the next task; stay on the log.
-        self.set_status("commit view: next task");
+        self.open_index(self.cursor);
     }
 
     pub(super) fn last_row(&self) -> usize {

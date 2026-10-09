@@ -7,7 +7,7 @@ use std::time::Duration;
 use common::{JjEnv, commit, git, have_jj};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::watch::{RepoWatcher, watch_targets};
-use debrief::app::{App, Mode, StartOptions};
+use debrief::app::{App, Mode, Screen, StartOptions};
 use debrief::seen::{Seen, Status};
 use debrief::vcs;
 use ratatui::Terminal;
@@ -185,12 +185,15 @@ fn motions_and_enter() {
         s[10].ends_with("commit 0"),
         "scrolled to the cursor: {s:#?}"
     );
-    // Enter marks the commit seen and says the commit view is next.
+    // Enter marks the commit seen and opens it.
     keys(&mut app, "gg");
     assert_eq!(app.rows()[0].status, Status::New);
     app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.rows()[0].status, Status::Seen);
-    assert_eq!(app.status(), "commit view: next task");
+    assert_eq!(app.screen(), Screen::Commit(0));
+    key(&mut app, 'q');
+    assert_eq!(app.screen(), Screen::Log);
+    assert!(!app.should_quit());
     key(&mut app, 'q');
     assert!(app.should_quit());
 }

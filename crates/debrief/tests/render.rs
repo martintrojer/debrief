@@ -1,0 +1,327 @@
+//! Commit-view rendering (spec Q25): tabs, CR and control characters,
+//! full-width row backgrounds. A fake `Vcs`
+//! serves one commit with a hand-built diff.
+
+use std::path::{Path, PathBuf};
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use debrief::app::{App, Screen, StartOptions};
+use debrief::ui::palette;
+use debrief::vcs::{
+    self, CommitDiff, CommitInfo, DiffLine, FileDiff, Hunk, Kind, LineKind, OpenOptions, Vcs,
+};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+use ratatui::style::Modifier;
+
+struct Fake {
+    root: PathBuf,
+    diff: CommitDiff,
+}
+
+impl Vcs for Fake {
+    fn kind(&self) -> Kind {
+        Kind::Git
+    }
+    fn root(&self) -> &Path {
+        &self.root
+    }
+    fn open_options(&self) -> OpenOptions {
+        OpenOptions::default()
+    }
+    fn log(&self, _: Option<&str>, _: usize) -> anyhow::Result<Vec<CommitInfo>> {
+        Ok(vec![CommitInfo {
+            commit: "c0ffee0000000000000000000000000000000000".into(),
+            change: None,
+            author: "t".into(),
+            time: 0,
+            summary: "s".into(),
+            parents: vec![],
+        }])
+    }
+    fn show(&self, _: &str) -> anyhow::Result<CommitDiff> {
+        Ok(self.diff.clone())
+    }
+}
+
+fn file(old: Option<&str>, new: Option<&str>, lines: Vec<DiffLine>) -> FileDiff {
+    let hunks = if lines.is_empty() {
+        vec![]
+    } else {
+        vec![Hunk {
+            header: "@@ -1 +1 @@".into(),
+            old_start: 1,
+            new_start: 1,
+            lines,
+        }]
+    };
+    FileDiff {
+        old_path: old.map(str::to_string),
+        new_path: new.map(str::to_string),
+        binary: false,
+        hunks,
+        note: None,
+        mode_change: None,
+        copied: false,
+    }
+}
+
+fn line(kind: LineKind, n: u32, text: &str) -> DiffLine {
+    let (old, new) = match kind {
+        LineKind::Added => (None, Some(n)),
+        LineKind::Removed => (Some(n), None),
+        LineKind::Context => (Some(n), Some(n)),
+    };
+    DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+        no_newline: false,
+    }
+}
+
+/// The app with the fake commit open (no message, so row 0 is the first
+/// file header).
+fn open(files: Vec<FileDiff>) -> (tempfile::TempDir, App) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    let fake = Fake {
+        root,
+        diff: CommitDiff {
+            message: String::new(),
+            files,
+        },
+    };
+    let mut app = App::new(Box::new(fake), StartOptions::new(tmp.path().join("cache"))).unwrap();
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(app.screen(), Screen::Commit(_)));
+    (tmp, app)
+}
+
+fn keys(app: &mut App, s: &str) {
+    for c in s.chars() {
+        app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+}
+
+fn draw(app: &mut App, w: u16, h: u16) -> Buffer {
+    let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    t.backend().buffer().clone()
+}
+
+fn text(buf: &Buffer, y: u16) -> String {
+    (0..buf.area.width)
+        .map(|x| buf[(x, y)].symbol())
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+/// The screen row whose text contains `needle`.
+fn row_of(buf: &Buffer, needle: &str) -> u16 {
+    (0..buf.area.height)
+        .find(|&y| text(buf, y).contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} not on screen"))
+}
+
+/// The first text column of the diff pane (after sidebar and gutter),
+/// found from a line whose text starts with `first`.
+fn text_x(buf: &Buffer, y: u16, first: &str) -> u16 {
+    let s = text(buf, y);
+    let byte = s.rfind(first).unwrap();
+    s[..byte].chars().count() as u16
+}
+
+/// Index of the diff row whose text is `t`.
+fn diff_row(app: &App, t: &str) -> usize {
+    app.commit_rows().iter().position(|r| r.text == t).unwrap()
+}
+
+/// Put the cursor on diff row `r` at column 0.
+fn goto(app: &mut App, r: usize) {
+    keys(app, "gg");
+    if r > 0 {
+        keys(app, &format!("{r}j"));
+    }
+    keys(app, "0");
+}
+
+#[test]
+fn tabs_render_at_tab_stops_with_cursor_and_search_on_the_right_cells() {
+    let (_tmp, mut app) = open(vec![file(
+        Some("a.go"),
+        Some("a.go"),
+        vec![
+            line(LineKind::Context, 1, "|x"),
+            line(LineKind::Added, 2, "\tfoo\tbar"),
+        ],
+    )]);
+    let r = diff_row(&app, "\tfoo\tbar");
+    assert_eq!(
+        app.commit_rows()[r].text,
+        "\tfoo\tbar",
+        "Row.text stays raw"
+    );
+    let buf = draw(&mut app, 100, 12);
+    // Column 0 of the text, from the context line above.
+    let x0 = text_x(&buf, row_of(&buf, "|x"), "|x");
+    let y = row_of(&buf, "foo");
+    let at = |x: u16| buf[(x0 + x, y)].symbol().to_string();
+    assert_eq!(
+        (0..11).map(at).collect::<String>(),
+        "    foo bar",
+        "tab to column 4, then from 7 to 8"
+    );
+    // The cursor walks the cells: l from the tab lands on f (column 4).
+    goto(&mut app, r);
+    keys(&mut app, "l");
+    assert_eq!(app.commit_cursor().col, 4);
+    let buf = draw(&mut app, 100, 12);
+    assert_eq!(buf[(x0 + 4, y)].symbol(), "f");
+    assert!(
+        buf[(x0 + 4, y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED)
+    );
+    // w then w: foo -> tab -> bar at column 8.
+    keys(&mut app, "w");
+    assert_eq!(app.commit_cursor().col, 8);
+    // A search for "bar" highlights columns 8..11 and jumps there.
+    keys(&mut app, "0/bar");
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.search_hits(), vec![(r, 8, 11)]);
+    assert_eq!(app.commit_cursor(), debrief::app::Cursor { row: r, col: 8 });
+    keys(&mut app, "k");
+    let buf = draw(&mut app, 100, 12);
+    for x in 8..11 {
+        assert_eq!(buf[(x0 + x, y)].style().bg, Some(palette::YELLOW), "{x}");
+    }
+    assert_ne!(buf[(x0 + 7, y)].style().bg, Some(palette::YELLOW));
+}
+
+#[test]
+fn cr_and_control_characters() {
+    let (_tmp, mut app) = open(vec![file(
+        Some("a"),
+        Some("a"),
+        vec![
+            line(LineKind::Context, 1, "|x"),
+            line(LineKind::Context, 2, "a\tb\rc"),
+            line(LineKind::Context, 3, "esc\x1b!"),
+            line(LineKind::Context, 4, "crlf\r"),
+        ],
+    )]);
+    let buf = draw(&mut app, 100, 12);
+    let x0 = text_x(&buf, row_of(&buf, "|x"), "|x");
+    let cells = |y: u16, n: u16| {
+        (0..n)
+            .map(|x| buf[(x0 + x, y)].symbol())
+            .collect::<String>()
+    };
+    let y = row_of(&buf, "a   b");
+    assert_eq!(cells(y, 8), "a   b?c ");
+    let q = buf[(x0 + 5, y)].style();
+    assert_eq!(q.fg, Some(palette::OVERLAY));
+    assert!(q.add_modifier.contains(Modifier::DIM));
+    let y = row_of(&buf, "esc");
+    assert_eq!(cells(y, 6), "esc?! ");
+    assert!(
+        buf[(x0 + 3, y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::DIM)
+    );
+    let y = row_of(&buf, "crlf");
+    assert_eq!(cells(y, 6), "crlf  ", "a trailing CR is not drawn");
+    // `$` stops on the f, not on an invisible CR cell.
+    let r = diff_row(&app, "crlf\r");
+    goto(&mut app, r);
+    keys(&mut app, "$");
+    assert_eq!(app.commit_cursor().col, 3);
+    // Row text stays raw for yank and comments.
+    assert_eq!(app.commit_rows()[r].text, "crlf\r");
+}
+
+#[test]
+fn backgrounds_fill_the_pane_and_the_sign_is_coloured() {
+    let (_tmp, mut app) = open(vec![file(
+        Some("a"),
+        Some("a"),
+        vec![
+            line(LineKind::Removed, 1, "x"),
+            line(LineKind::Added, 1, "y"),
+            line(LineKind::Context, 2, "z"),
+        ],
+    )]);
+    let w = 100;
+    let buf = draw(&mut app, w, 12);
+    let last = w - 1;
+    let del = row_of(&buf, "- x");
+    let add = row_of(&buf, "+ y");
+    let hunk = row_of(&buf, "@@ -1 +1 @@");
+    let ctx = row_of(&buf, "  z");
+    let header = row_of(&buf, "── a ──");
+    assert_eq!(buf[(last, del)].style().bg, Some(palette::DEL_BG));
+    assert_eq!(buf[(last, add)].style().bg, Some(palette::ADD_BG));
+    assert_eq!(buf[(last, hunk)].style().bg, Some(palette::HUNK_BG));
+    assert_ne!(buf[(last, ctx)].style().bg, Some(palette::ADD_BG));
+    // The cursor row (the header at first) is surface to the edge.
+    assert_eq!(app.commit_cursor().row, 0);
+    assert_eq!(buf[(last, header)].style().bg, Some(palette::SURFACE));
+    assert_eq!(
+        buf[(last, header)].symbol(),
+        "─",
+        "the rule runs to the edge"
+    );
+    // The sign is coloured.
+    let sx = |y| {
+        text(&buf, y)
+            .chars()
+            .position(|c| c == '+' || c == '-')
+            .unwrap() as u16
+    };
+    assert_eq!(buf[(sx(add), add)].style().fg, Some(palette::GREEN));
+    assert_eq!(buf[(sx(del), del)].style().fg, Some(palette::RED));
+    // Moving the cursor onto the short added line paints it surface to
+    // the edge.
+    let r = diff_row(&app, "y");
+    goto(&mut app, r);
+    let buf = draw(&mut app, w, 12);
+    assert_eq!(buf[(last, add)].style().bg, Some(palette::SURFACE));
+    assert_eq!(buf[(last, del)].style().bg, Some(palette::DEL_BG));
+}
+
+#[test]
+fn a_real_mode_change_is_labelled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    };
+    git(&["init", "-q"]);
+    std::fs::write(root.join("run.sh"), "echo\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "a"]);
+    git(&["update-index", "--chmod=+x", "run.sh"]);
+    git(&["commit", "-q", "-m", "b"]);
+    let v = vcs::open(&root, OpenOptions::default()).unwrap();
+    let id = v.log(None, 1).unwrap()[0].commit.clone();
+    let f = &v.show(&id).unwrap().files[0];
+    assert_eq!(
+        f.mode_change,
+        Some(("100644".to_string(), "100755".to_string()))
+    );
+    assert!(f.hunks.is_empty());
+}

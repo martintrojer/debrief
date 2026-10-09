@@ -241,11 +241,15 @@ fn renders_gutter_colours_and_sidebar() {
     );
     assert_eq!(cell("- line 2", "line 2").fg, Some(red));
     let bold = ratatui::style::Modifier::BOLD;
+    let hy = s.iter().position(|l| l.contains("── m.txt ──")).unwrap();
+    let hx = s[hy].chars().position(|c| c == 'm').unwrap() as u16;
+    assert!(buf[(hx, hy as u16)].style().add_modifier.contains(bold));
     assert!(
-        cell("── m.txt ──", "── m.txt ──")
-            .add_modifier
-            .contains(bold)
+        s[hy].ends_with("──────"),
+        "the header rule runs to the right edge: {}",
+        s[hy]
     );
+    assert_eq!(s[hy].chars().count(), 100, "{}", s[hy]);
     assert!(cell("@@ -1,5 +1,5 @@", "@@").add_modifier.contains(bold));
     // No wrap: the long line is cut at the width.
     assert!(!s.iter().any(|l| l.contains("END")));

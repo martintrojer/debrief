@@ -33,6 +33,28 @@ pub mod palette {
     pub const BASE: Color = Color::Rgb(0x1e, 0x1e, 0x2e);
     /// Background of the status line (Catppuccin Mocha mantle).
     pub const MANTLE: Color = Color::Rgb(0x18, 0x18, 0x25);
+    pub const RED: Color = Color::Rgb(0xf3, 0x8b, 0xa8);
+    pub const PEACH: Color = Color::Rgb(0xfa, 0xb3, 0x87);
+    pub const PINK: Color = Color::Rgb(0xf5, 0xc2, 0xe7);
+    /// Background of added rows: green blended 20% into base (tuicr's
+    /// `diff_add_bg` for Catppuccin), `#394545`.
+    pub const ADD_BG: Color = blend(GREEN, 20);
+    /// Background of removed rows: red blended 20% into base, `#483346`.
+    pub const DEL_BG: Color = blend(RED, 20);
+    /// Background of hunk headers: mauve blended 12% into base.
+    pub const HUNK_BG: Color = blend(MAUVE, 12);
+
+    /// `fg` blended `pct` percent over [`BASE`] (tuicr's `blend`).
+    pub const fn blend(fg: Color, pct: u16) -> Color {
+        let (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) = (fg, BASE) else {
+            return fg;
+        };
+        Color::Rgb(mix(r, br, pct), mix(g, bg, pct), mix(b, bb, pct))
+    }
+
+    const fn mix(c: u8, base: u8, pct: u16) -> u8 {
+        ((c as u16 * pct + base as u16 * (100 - pct)) / 100) as u8
+    }
 }
 
 /// Draw one full screen: the log or the commit, the status line, overlays.
@@ -54,4 +76,18 @@ pub fn draw(frame: &mut Frame, app: &App) {
     popup::draw(frame, app, main);
     picker::draw(frame, app, main);
     help::draw(frame, app, main);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::palette::*;
+    use ratatui::style::Color;
+
+    #[test]
+    fn blends_match_the_research_table() {
+        assert_eq!(ADD_BG, Color::Rgb(0x39, 0x45, 0x45));
+        assert_eq!(DEL_BG, Color::Rgb(0x48, 0x33, 0x46));
+        assert_eq!(blend(GREEN, 16), Color::Rgb(0x33, 0x3d, 0x40));
+        assert_eq!(blend(RED, 16), Color::Rgb(0x40, 0x2f, 0x41));
+    }
 }

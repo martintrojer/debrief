@@ -1,22 +1,22 @@
 //! The commit view's diff pane: a `●` review gutter (while the commit has
-//! comments), a `oooo nnnn ±` gutter, then the row text,
-//! cut at the pane's width and scrolled horizontally with the cursor.
+//! comments), a `oooo nnnn ±` gutter, then the row text laid out by
+//! [`display::cells`], cut at the pane's width and scrolled horizontally
+//! with the cursor. Added, removed, hunk-header, cursor and selected rows
+//! are coloured across the whole pane; a file header's rule runs to the
+//! right edge.
 
+use super::palette;
+use crate::app::commit::gutter_width;
+use crate::app::display::{self, DisplayCell, Glyph};
+use crate::app::review::MARKER;
+use crate::app::{App, DiffRow, Focus, Mode, RowKind};
+use crate::vcs::LineKind;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
-use super::palette;
-use crate::app::commit::gutter_width;
-use crate::app::review::MARKER;
-use crate::app::{App, DiffRow, Focus, Mode, RowKind};
-use crate::vcs::LineKind;
-
-const RED: Color = Color::Rgb(0xf3, 0x8b, 0xa8);
 /// Selection background (Catppuccin Mocha surface2).
 const SELECTED: Color = Color::Rgb(0x58, 0x5b, 0x70);
 const HIT: Color = palette::YELLOW;
@@ -28,14 +28,25 @@ fn style_of(kind: RowKind) -> Style {
         RowKind::FileHeader => s.fg(palette::BLUE).add_modifier(Modifier::BOLD),
         RowKind::HunkHeader => s.fg(palette::MAUVE).add_modifier(Modifier::BOLD),
         RowKind::Line(LineKind::Added) => s.fg(palette::GREEN),
-        RowKind::Line(LineKind::Removed) => s.fg(RED),
+        RowKind::Line(LineKind::Removed) => s.fg(palette::RED),
         RowKind::Line(LineKind::Context) => s,
         RowKind::NoNewline | RowKind::Binary | RowKind::Blank => s.fg(palette::OVERLAY),
     }
 }
 
-/// The gutter: old and new line numbers (`w` digits each) and the sign.
-fn gutter(app: &App, r: &DiffRow, w: usize) -> String {
+/// The background a row of `kind` gets across the whole pane, if any.
+fn row_bg(kind: RowKind) -> Option<Color> {
+    match kind {
+        RowKind::Line(LineKind::Added) => Some(palette::ADD_BG),
+        RowKind::Line(LineKind::Removed) => Some(palette::DEL_BG),
+        RowKind::HunkHeader => Some(palette::HUNK_BG),
+        _ => None,
+    }
+}
+
+/// The gutter: old and new line numbers (`w` digits each), and the sign
+/// (with its colour) that follows them on Line rows.
+fn gutter(app: &App, r: &DiffRow, w: usize) -> (String, Option<(char, Color)>) {
     let line = match (app.commit_diff(), r.kind) {
         (Some(d), RowKind::Line(_)) => r
             .file
@@ -46,35 +57,27 @@ fn gutter(app: &App, r: &DiffRow, w: usize) -> String {
     };
     let num = |n: Option<u32>| n.map_or(String::new(), |n| n.to_string());
     let sign = match r.kind {
-        RowKind::Line(LineKind::Added) => '+',
-        RowKind::Line(LineKind::Removed) => '-',
-        _ => ' ',
+        RowKind::Line(LineKind::Added) => ('+', palette::GREEN),
+        RowKind::Line(LineKind::Removed) => ('-', palette::RED),
+        _ => (' ', palette::OVERLAY),
     };
     match line {
-        Some(l) => format!("{:>w$} {:>w$} {sign} ", num(l.old), num(l.new)),
-        None => " ".repeat(gutter_width(w)),
+        Some(l) => (
+            format!("{:>w$} {:>w$} ", num(l.old), num(l.new)),
+            Some(sign),
+        ),
+        None => (" ".repeat(gutter_width(w)), None),
     }
 }
 
-/// The graphemes of `text` in display columns `[from, from + width)`,
-/// as (column, grapheme) pairs; a wide grapheme cut by an edge is dropped.
-fn visible(text: &str, from: usize, width: usize) -> Vec<(usize, &str)> {
-    let mut col = 0;
-    let mut out = Vec::new();
-    for g in text.graphemes(true) {
-        let w = g.width();
-        if w == 0 {
-            continue;
-        }
-        if col >= from && col + w <= from + width {
-            out.push((col, g));
-        }
-        col += w;
-        if col >= from + width {
-            break;
-        }
-    }
-    out
+/// The display cells of `text` within columns `[from, from + width)`; a
+/// cell cut by an edge is dropped.
+fn visible(text: &str, from: usize, width: usize) -> Vec<DisplayCell<'_>> {
+    display::cells(text)
+        .into_iter()
+        .skip_while(|c| c.col < from)
+        .take_while(|c| c.col + c.width <= from + width)
+        .collect()
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
@@ -100,56 +103,88 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let marks = app.review_gutter();
     let marked = app.review_marked_rows();
     let text_w = (area.width as usize).saturating_sub(gutter_width(num_w) + marks);
-    let lines: Vec<Line> = rows
+    let mut lines = Vec::new();
+    for (y, (i, r)) in rows
         .iter()
         .enumerate()
         .skip(scroll)
         .take(area.height as usize)
-        .map(|(i, r)| {
-            let mut base = style_of(r.kind);
-            let selected = sel.is_some_and(|(lo, hi)| (lo..=hi).contains(&i));
-            if selected {
-                base = base.bg(SELECTED);
-            } else if i == cur.row {
-                base = base.bg(palette::SURFACE);
+        .enumerate()
+    {
+        let selected = sel.is_some_and(|(lo, hi)| (lo..=hi).contains(&i));
+        let bg = if selected {
+            Some(SELECTED)
+        } else if i == cur.row {
+            Some(palette::SURFACE)
+        } else {
+            row_bg(r.kind)
+        };
+        // Paint the background across the pane: a Line's style only
+        // reaches the cells it draws.
+        if let Some(bg) = bg {
+            let row = Rect::new(area.x, area.y + y as u16, area.width, 1);
+            frame.buffer_mut().set_style(row, Style::new().bg(bg));
+        }
+        let base = match bg {
+            Some(bg) => style_of(r.kind).bg(bg),
+            None => style_of(r.kind),
+        };
+        let mut spans = Vec::new();
+        if marks > 0 {
+            let m = if marked.binary_search(&i).is_ok() {
+                MARKER.to_string()
+            } else {
+                " ".to_string()
+            };
+            spans.push(Span::styled(m, base.fg(palette::YELLOW)));
+        }
+        let (nums, sign) = gutter(app, r, num_w);
+        spans.push(Span::styled(nums, base.fg(palette::OVERLAY)));
+        if let Some((c, fg)) = sign {
+            spans.push(Span::styled(format!("{c} "), base.fg(fg)));
+        }
+        let mut col = hscroll;
+        for c in visible(&r.text, hscroll, text_w) {
+            if c.col > col {
+                spans.push(Span::styled(" ".repeat(c.col - col), base));
             }
-            let mut spans = Vec::new();
-            if marks > 0 {
-                let m = if marked.binary_search(&i).is_ok() {
-                    MARKER.to_string()
-                } else {
-                    " ".to_string()
-                };
-                spans.push(Span::styled(m, base.fg(palette::YELLOW)));
+            let mut s = base;
+            if hits
+                .iter()
+                .any(|&(hr, a, b)| hr == i && (a..b).contains(&c.col))
+            {
+                s = s.bg(HIT).fg(palette::BASE);
             }
-            spans.push(Span::styled(
-                gutter(app, r, num_w),
-                base.fg(palette::OVERLAY),
-            ));
-            let mut col = hscroll;
-            for (c, g) in visible(&r.text, hscroll, text_w) {
-                if c > col {
-                    spans.push(Span::styled(" ".repeat(c - col), base));
+            let (text, pad) = match c.glyph {
+                Glyph::Text(g) => (g.to_string(), String::new()),
+                Glyph::Tab => (" ".to_string(), " ".repeat(c.width - 1)),
+                Glyph::Control => {
+                    s = s.fg(palette::OVERLAY).add_modifier(Modifier::DIM);
+                    ("?".to_string(), String::new())
                 }
-                let mut s = base;
-                if hits
-                    .iter()
-                    .any(|&(hr, a, b)| hr == i && (a..b).contains(&c))
-                {
-                    s = s.bg(HIT).fg(palette::BASE);
-                }
-                if focused && i == cur.row && c == cur.col && sel.is_none() {
-                    s = s.add_modifier(Modifier::REVERSED);
-                }
-                spans.push(Span::styled(g.to_string(), s));
-                col = c + g.width();
+            };
+            let pad_style = s;
+            if focused && i == cur.row && c.col == cur.col && sel.is_none() {
+                s = s.add_modifier(Modifier::REVERSED);
             }
-            if focused && i == cur.row && r.text.is_empty() && sel.is_none() {
-                spans.push(Span::styled(" ", base.add_modifier(Modifier::REVERSED)));
+            spans.push(Span::styled(text, s));
+            if !pad.is_empty() {
+                spans.push(Span::styled(pad, pad_style));
             }
-            Line::from(spans).style(base)
-        })
-        .collect();
+            col = c.col + c.width;
+        }
+        if r.kind == RowKind::FileHeader {
+            // The header's rule runs to the right edge.
+            let end = hscroll + text_w;
+            if end > col {
+                spans.push(Span::styled("─".repeat(end - col), base));
+            }
+        }
+        if focused && i == cur.row && r.text.is_empty() && sel.is_none() {
+            spans.push(Span::styled(" ", base.add_modifier(Modifier::REVERSED)));
+        }
+        lines.push(Line::from(spans).style(base));
+    }
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -157,11 +192,14 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
 mod tests {
     use super::visible;
 
+    fn cols(text: &str, from: usize, width: usize) -> Vec<usize> {
+        visible(text, from, width).iter().map(|c| c.col).collect()
+    }
+
     #[test]
     fn visible_cuts_by_columns() {
-        let v: Vec<_> = visible("ab日cd", 1, 3).into_iter().collect();
-        assert_eq!(v, [(1, "b"), (2, "日")]);
-        let v: Vec<_> = visible("ab日cd", 3, 2).into_iter().collect();
-        assert_eq!(v, [(4, "c")], "a cut wide grapheme is dropped");
+        assert_eq!(cols("ab日cd", 1, 3), [1, 2]);
+        assert_eq!(cols("ab日cd", 3, 2), [4], "a cut wide grapheme is dropped");
+        assert_eq!(cols("\tx", 2, 4), [4], "a cut tab is dropped");
     }
 }

@@ -225,9 +225,7 @@ fn send_copies_the_review_with_one_osc52_write() {
     tmux.wait_for("the diff", |s| s.contains("+two") || s.contains(" two"));
     tmux.keys(&["G"]);
     tmux.keys(&["c", "c"]);
-    tmux.wait_for("the prompt", |s| {
-        s.lines().any(|l| l.starts_with("comment:"))
-    });
+    tmux.wait_for("the comment box", |s| s.contains(" comment L"));
     tmux.keys(&["-l", "please explain"]);
     tmux.keys(&["Enter"]);
     tmux.wait_for("saved", |s| s.contains("Comment added (1 in batch)"));

@@ -29,12 +29,6 @@ fn elide_left(s: &str, max: usize) -> String {
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
-    if let Some((p, col)) = app.comment_prompt_view(area.width as usize) {
-        let x = area.x.saturating_add(col as u16);
-        frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
-        frame.render_widget(Paragraph::new(p).style(base), area);
-        return;
-    }
     if let Some(p) = app.search_prompt() {
         let x = area.x + Span::raw(p.as_str()).width() as u16;
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));

@@ -11,12 +11,12 @@ use common::{JjEnv, commit, git, have_jj};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::comment::{EMPTY_COMMENT, EXCERPT_LINES, NOT_A_LINE, SPANS_FILES};
 use debrief::app::review::{MARKER, REVIEW_POLL};
-use debrief::app::{App, AppEvent, Mode, RowKind, Screen, StartOptions};
+use debrief::app::{App, AppEvent, CommentBox, Mode, RowKind, Screen, StartOptions};
 use debrief::vcs::{self, LineKind};
 use debrief_review::{Comment, Rev, Review, Side};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::text::Span;
+use ratatui::layout::Rect;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -157,7 +157,7 @@ fn cc_on_an_added_line() {
     let r = added(&app, "a3 new");
     goto(&mut app, r);
     keys(&mut app, "cc");
-    assert_eq!(app.comment_prompt().as_deref(), Some("comment: "));
+    assert_eq!(app.comment_text(), Some(""));
     type_and_save(&mut app, "why?");
     assert_eq!(app.status(), "Comment added (1 in batch)");
     let cs = f.comments();
@@ -273,7 +273,7 @@ fn prompt_esc_cancels_and_an_empty_body_is_not_saved() {
     goto(&mut app, r);
     keys(&mut app, "cc");
     keys(&mut app, "q text");
-    assert_eq!(app.comment_prompt().as_deref(), Some("comment: q text"));
+    assert_eq!(app.comment_text(), Some("q text"));
     press(&mut app, KeyCode::Esc);
     assert_eq!(app.mode(), Mode::Normal);
     assert_eq!(
@@ -759,22 +759,19 @@ fn paste(app: &mut App, text: &str) {
 }
 
 #[test]
-fn a_multi_line_paste_lands_in_the_comment_prompt_as_one_line() {
+fn a_multi_line_paste_keeps_its_newlines_in_the_comment_box() {
     let f = fixture();
     let mut app = f.open();
     let r = added(&app, "a3 new");
     goto(&mut app, r);
     keys(&mut app, "cc");
     keys(&mut app, "see ");
-    paste(&mut app, "first\r\nsecond\tthird\nG");
+    paste(&mut app, "first\r\nsecond\tthird\rG");
     assert_eq!(app.mode(), Mode::Comment, "the newline ran no Enter");
-    assert_eq!(
-        app.comment_prompt().as_deref(),
-        Some("comment: see first second third G")
-    );
+    assert_eq!(app.comment_text(), Some("see first\nsecond third\nG"));
     assert_eq!(app.commit_cursor().row, r, "no key ran");
     press(&mut app, KeyCode::Enter);
-    assert_eq!(f.comments()[0].body, "see first second third G");
+    assert_eq!(f.comments()[0].body, "see first\nsecond third\nG");
 }
 
 #[test]
@@ -840,8 +837,8 @@ fn tab_cycles_the_kind_and_the_comment_saves_it() {
     let r = added(&app, "a3 new");
     goto(&mut app, r);
     keys(&mut app, "cc");
-    let prompt = |app: &App| app.comment_prompt().unwrap();
-    assert_eq!(prompt(&app), "comment: ");
+    let prompt = |app: &App| app.comment_title().unwrap();
+    assert_eq!(prompt(&app), " comment L3 ");
     let labels: Vec<String> = (0..5)
         .map(|_| {
             press(&mut app, KeyCode::Tab);
@@ -851,18 +848,18 @@ fn tab_cycles_the_kind_and_the_comment_saves_it() {
     assert_eq!(
         labels,
         [
-            "comment [ISSUE]: ",
-            "comment [SUGGESTION]: ",
-            "comment [QUESTION]: ",
-            "comment [NIT]: ",
-            "comment: ",
+            " comment [ISSUE] L3 ",
+            " comment [SUGGESTION] L3 ",
+            " comment [QUESTION] L3 ",
+            " comment [NIT] L3 ",
+            " comment L3 ",
         ]
     );
     press(&mut app, KeyCode::BackTab);
-    assert_eq!(prompt(&app), "comment [NIT]: ");
+    assert_eq!(prompt(&app), " comment [NIT] L3 ");
     press(&mut app, KeyCode::BackTab);
     press(&mut app, KeyCode::BackTab);
-    assert_eq!(prompt(&app), "comment [SUGGESTION]: ");
+    assert_eq!(prompt(&app), " comment [SUGGESTION] L3 ");
     keys(&mut app, "try this");
     press(&mut app, KeyCode::Enter);
     assert_eq!(f.comments()[0].kind.as_deref(), Some("suggestion"));
@@ -870,7 +867,7 @@ fn tab_cycles_the_kind_and_the_comment_saves_it() {
 
     // The next comment starts untyped.
     keys(&mut app, "cc");
-    assert_eq!(prompt(&app), "comment: ");
+    assert_eq!(prompt(&app), " comment L3 ");
     type_and_save(&mut app, "plain");
     assert_eq!(f.comments()[1].kind, None);
 }
@@ -883,16 +880,16 @@ fn configured_kinds_replace_the_builtins_and_none_make_tab_inert() {
     goto(&mut app, r);
     keys(&mut app, "cc");
     press(&mut app, KeyCode::Tab);
-    assert_eq!(app.comment_prompt().unwrap(), "comment [PRAISE]: ");
+    assert_eq!(app.comment_title().unwrap(), " comment [PRAISE] L3 ");
     press(&mut app, KeyCode::Tab);
-    assert_eq!(app.comment_prompt().unwrap(), "comment: ");
+    assert_eq!(app.comment_title().unwrap(), " comment L3 ");
 
     let mut app = app_with_kinds(&f, "[review]\nkinds = []\n");
     goto(&mut app, r);
     keys(&mut app, "cc");
     press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::BackTab);
-    assert_eq!(app.comment_prompt().unwrap(), "comment: ");
+    assert_eq!(app.comment_title().unwrap(), " comment L3 ");
     type_and_save(&mut app, "untyped");
     assert_eq!(f.comments()[0].kind, None);
 }
@@ -992,14 +989,14 @@ fn the_prompt_edits_at_the_cursor() {
     press_mod(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
     press_mod(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
     keys(&mut app, "is ");
-    assert_eq!(app.comment_prompt().unwrap(), "comment: why is this here");
+    assert_eq!(app.comment_text().unwrap(), "why is this here");
     press_ctrl(&mut app, 'a');
     press(&mut app, KeyCode::Delete);
     keys(&mut app, "W");
     press(&mut app, KeyCode::End);
     press_ctrl(&mut app, 'w');
     keys(&mut app, "there?");
-    assert_eq!(app.comment_prompt().unwrap(), "comment: Why is this there?");
+    assert_eq!(app.comment_text().unwrap(), "Why is this there?");
     press(&mut app, KeyCode::Home);
     press_mod(&mut app, KeyCode::Char('f'), KeyModifiers::ALT);
     press(&mut app, KeyCode::Right);
@@ -1007,61 +1004,166 @@ fn the_prompt_edits_at_the_cursor() {
     press_ctrl(&mut app, 'u');
     press(&mut app, KeyCode::Left);
     press(&mut app, KeyCode::Backspace);
-    assert_eq!(app.comment_prompt().unwrap(), "comment:  this there?");
+    assert_eq!(app.comment_text().unwrap(), " this there?");
     press(&mut app, KeyCode::Delete);
     // Pasted text goes in at the cursor too.
-    paste(&mut app, "is\n");
-    assert_eq!(app.comment_prompt().unwrap(), "comment: is this there?");
+    paste(&mut app, "is ");
+    assert_eq!(app.comment_text().unwrap(), "is this there?");
     press(&mut app, KeyCode::Enter);
     assert_eq!(f.comments()[0].body, "is this there?");
 }
 
-/// The status row (the last one; a wide grapheme's second cell left
-/// out) and the terminal cursor.
-fn prompt_row(app: &mut App, width: u16) -> (String, (u16, u16)) {
-    let mut t = Terminal::new(TestBackend::new(width, 30)).unwrap();
+// The comment box.
+
+/// Draw at `w`x`h`; the screen's lines, the box (as the app places it)
+/// and the terminal cursor.
+fn draw_box(app: &mut App, w: u16, h: u16) -> (Vec<String>, Option<CommentBox>, (u16, u16)) {
+    let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
     t.draw(|f| app.render(f)).unwrap();
     let buf = t.backend().buffer().clone();
-    let mut row = String::new();
-    let mut x = 0;
-    while x < width {
-        let sym = buf[(x, 29)].symbol();
-        row.push_str(sym);
-        x += Span::raw(sym).width().max(1) as u16;
-    }
+    let lines = (0..h)
+        .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+        .collect();
+    let pane = app.commit_layout(Rect::new(0, 0, w, h - 1)).diff;
     let pos = t.get_cursor_position().unwrap();
-    (row, (pos.x, pos.y))
+    (lines, app.comment_box(pane), (pos.x, pos.y))
+}
+
+/// Screen row of diff row `row`.
+fn on_screen(app: &App, row: usize) -> u16 {
+    (row - app.commit_scroll().0) as u16
 }
 
 #[test]
-fn a_long_comment_scrolls_in_the_prompt_and_shows_the_cursor() {
+fn the_box_opens_below_a_selection_in_the_middle_and_keeps_it_highlighted() {
+    let f = fixture();
+    let mut app = f.open();
+    let (a, b) = (context(&app, "a2"), added(&app, "a3 new"));
+    select_and_comment(&mut app, a, b);
+    let (lines, bx, cur) = draw_box(&mut app, 100, 30);
+    let bx = bx.expect("box open");
+    let pane = app.commit_layout(Rect::new(0, 0, 100, 29)).diff;
+    let (ya, yb) = (on_screen(&app, a), on_screen(&app, b));
+    assert_eq!(bx.rect.y, yb + 1, "directly below the last row");
+    assert_eq!(bx.rect.width, pane.width - 2, "the pane less a margin");
+    assert_eq!(bx.rect.x, pane.x + 1);
+    assert_eq!(bx.rect.height, 3, "one text row");
+    assert_eq!(bx.title, " comment L2-3 ");
+    let top = &lines[bx.rect.y as usize];
+    assert!(top.contains("╭ comment L2-3 "), "{top}");
+    assert!(lines[bx.rect.y as usize + 2].contains("Enter save"));
+    // The rows stay drawn and selected while typing.
+    assert!(lines[ya as usize].contains("a2"));
+    assert!(lines[yb as usize].contains("a3 new"));
+    let mut t = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let sel = t.backend().buffer()[(pane.x + 2, yb)].bg;
+    let other = t.backend().buffer()[(pane.x + 2, yb + 5)].bg;
+    assert_ne!(sel, other, "selected background");
+    assert_eq!(sel, t.backend().buffer()[(pane.x + 2, ya)].bg);
+    keys(&mut app, "ab");
+    let (lines, bx, cur2) = draw_box(&mut app, 100, 30);
+    let bx = bx.unwrap();
+    assert_eq!(cur, (bx.rect.x + 1, bx.rect.y + 1), "cursor in the box");
+    assert_eq!(cur2, (bx.rect.x + 3, bx.rect.y + 1));
+    assert!(lines[bx.rect.y as usize + 1].contains("│ab"));
+}
+
+#[test]
+fn the_box_opens_above_rows_at_the_bottom() {
+    let f = fixture();
+    let mut app = f.open();
+    keys(&mut app, "G");
+    let r = app.commit_cursor().row;
+    keys(&mut app, "cc");
+    assert_eq!(app.mode(), Mode::Comment, "{}", app.status());
+    let (lines, bx, _) = draw_box(&mut app, 100, 30);
+    let bx = bx.unwrap();
+    let y = on_screen(&app, r);
+    assert_eq!(y, 28, "the last diff row is at the bottom");
+    assert_eq!(bx.rect.bottom(), y, "directly above the row");
+    assert!(lines[y as usize].contains("g50"), "the row is not covered");
+}
+
+#[test]
+fn a_multi_line_body_is_saved_with_its_newlines_and_the_box_grows() {
     let f = fixture();
     let mut app = f.open();
     let r = added(&app, "a3 new");
     goto(&mut app, r);
     keys(&mut app, "cc");
-    let (row, cur) = prompt_row(&mut app, 40);
-    assert_eq!((row.trim_end(), cur), ("comment:", (9, 29)));
-    let long = "the quick brown fox jumps over the lazy dog again";
-    keys(&mut app, long);
-    // 40 cells: 9 for the label, 30 for text, 1 for the cursor.
-    let (row, cur) = prompt_row(&mut app, 40);
-    assert_eq!(row, format!("comment: {}", &long[long.len() - 30..]) + " ");
-    assert_eq!(cur, (39, 29));
-    press(&mut app, KeyCode::Home);
-    let (row, cur) = prompt_row(&mut app, 40);
-    assert_eq!(row, format!("comment: {}", &long[..31]));
-    assert_eq!(cur, (9, 29));
-    // Wide graphemes count two cells.
-    press_ctrl(&mut app, 'u');
-    press(&mut app, KeyCode::End);
-    press_ctrl(&mut app, 'w');
-    keys(&mut app, "좋아요");
-    press(&mut app, KeyCode::Left);
-    let (row, cur) = prompt_row(&mut app, 40);
-    // The cursor is on 요, so no spare cell: 요 takes the last two.
-    assert_eq!(row, "comment:  jumps over the lazy dog 좋아요");
-    assert_eq!(cur, (38, 29));
+    keys(&mut app, "one");
+    press_ctrl(&mut app, 'j');
+    keys(&mut app, "two");
+    press_mod(&mut app, KeyCode::Enter, KeyModifiers::ALT);
+    keys(&mut app, "three");
+    let (_, bx, cur) = draw_box(&mut app, 100, 30);
+    let bx = bx.unwrap();
+    assert_eq!(bx.lines, ["one", "two", "three"]);
+    assert_eq!(bx.rect.height, 5);
+    assert_eq!(cur, (bx.rect.x + 6, bx.rect.y + 3));
+    // Up moves by row.
+    press(&mut app, KeyCode::Up);
+    keys(&mut app, "!");
+    assert_eq!(app.comment_text(), Some("one\ntwo!\nthree"));
+    // Up to 8 rows, then it scrolls with the cursor.
+    press(&mut app, KeyCode::Down);
+    for i in 0..9 {
+        press(&mut app, KeyCode::End);
+        press_ctrl(&mut app, 'j');
+        keys(&mut app, &format!("l{i}"));
+    }
+    let (_, bx, cur) = draw_box(&mut app, 100, 30);
+    let bx = bx.unwrap();
+    assert_eq!(bx.rect.height, 10, "8 text rows");
+    assert_eq!(bx.lines.last().map(String::as_str), Some("l8"));
+    assert_eq!(cur.1, bx.rect.y + 8, "cursor on the last shown row");
     press(&mut app, KeyCode::Enter);
-    assert!(f.comments()[0].body.ends_with("lazy dog 좋아요"));
+    assert_eq!(app.mode(), Mode::Normal);
+    let body = &f.comments()[0].body;
+    assert!(body.starts_with("one\ntwo!\nthree\nl0\n"), "{body:?}");
+    assert_eq!(body.lines().count(), 12);
+}
+
+#[test]
+fn esc_closes_the_box_and_drops_the_highlight() {
+    let f = fixture();
+    let mut app = f.open();
+    let (a, b) = (context(&app, "a2"), added(&app, "a3 new"));
+    select_and_comment(&mut app, a, b);
+    keys(&mut app, "draft");
+    press(&mut app, KeyCode::Esc);
+    let (lines, bx, _) = draw_box(&mut app, 100, 30);
+    assert!(bx.is_none());
+    assert!(app.comment_rows().is_none());
+    assert!(!lines.iter().any(|l| l.contains("comment L")));
+    assert!(f.comments().is_empty());
+}
+
+#[test]
+fn the_box_follows_a_resize() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = added(&app, "a40 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    keys(&mut app, &"word ".repeat(20));
+    let (_, wide, _) = draw_box(&mut app, 100, 30);
+    let wide = wide.unwrap();
+    app.event(AppEvent::Resize(50, 12));
+    let (lines, narrow, _) = draw_box(&mut app, 50, 12);
+    let narrow = narrow.unwrap();
+    let pane = app.commit_layout(Rect::new(0, 0, 50, 11)).diff;
+    assert_eq!(narrow.rect.width, pane.width - 2);
+    assert!(narrow.rect.height > wide.rect.height, "rewrapped taller");
+    let y = on_screen(&app, r);
+    assert!(
+        narrow.rect.bottom() <= y || narrow.rect.y > y,
+        "the row is not covered: {:?} row {y}",
+        narrow.rect
+    );
+    assert!(lines[y as usize].contains("a40 new"));
+    assert!(narrow.rect.bottom() <= 11, "inside the pane");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(f.comments()[0].body, "word ".repeat(20).trim());
 }

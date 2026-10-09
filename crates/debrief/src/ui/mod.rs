@@ -2,6 +2,7 @@
 //! widget per area; later screens add a file and one call here.
 
 mod clue;
+mod comment_box;
 mod commit;
 mod help;
 mod log;
@@ -76,6 +77,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 sidebar::draw(frame, app, side);
             }
             commit::draw(frame, app, l.diff);
+            comment_box::draw(frame, app, l.diff);
         }
     }
     status::draw(frame, app, status);

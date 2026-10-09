@@ -105,7 +105,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     }
     let (scroll, hscroll) = app.commit_scroll();
     let cur = app.commit_cursor();
-    let sel = app.selection_rows();
+    // A comment being typed keeps its rows highlighted.
+    let sel = app.selection_rows().or(app.comment_rows());
     let hits = app.search_hits();
     let focused = app.focus() == Focus::Diff || app.mode() != Mode::Normal;
     let num_w = app.commit_num_width();

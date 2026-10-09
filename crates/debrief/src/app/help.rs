@@ -209,6 +209,12 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("[r", C, G::Review, "previous commented line"),
         b("K", C, G::Review, "show the comments on this line"),
         b("Enter", P, G::Review, "in a comment: save"),
+        b(
+            "C-j",
+            P,
+            G::Review,
+            "in a comment: new line (Alt-Enter too)",
+        ),
         b("Esc", P, G::Review, "in a comment: cancel"),
         b("C-e", P, G::Review, "in a comment: edit in $EDITOR"),
         b(
@@ -261,7 +267,7 @@ pub(crate) const BINDINGS: &[Binding] = {
 };
 
 impl App {
-    /// [`BINDINGS`], the comment prompt's Tab row when `[review] kinds`
+    /// [`BINDINGS`], the comment box's Tab row when `[review] kinds`
     /// lists some, and a row per `[[launch]]` key on the log, the diff and
     /// the file list.
     pub(crate) fn bindings(&self) -> Vec<Binding> {

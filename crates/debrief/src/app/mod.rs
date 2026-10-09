@@ -35,7 +35,7 @@ use crate::seen::{Seen, Status};
 use crate::vcs::{CommitDiff, CommitInfo, CommitStat, Kind, Vcs, WorkingCopy};
 
 pub use clue::{CLUE_DELAY, ClueRow};
-pub use comment::{CommentAction, Draft};
+pub use comment::{CommentAction, CommentBox, Draft};
 pub use commit::{Focus, Row as DiffRow, RowKind};
 pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::LEADER;
@@ -321,18 +321,17 @@ impl App {
         }
     }
 
-    /// A bracketed paste: typed into the open prompt (comment, `/` `?`
-    /// search, the log's filter, picker filter) as one line, newlines and
-    /// tabs as spaces.
-    /// Anywhere else it is dropped, never replayed as keys.
+    /// A bracketed paste: typed into the comment box with its newlines,
+    /// or into the open prompt (`/` `?` search, the log's filter, picker
+    /// filter) as one line, newlines and tabs as spaces. Anywhere else it
+    /// is dropped, never replayed as keys.
     pub fn paste(&mut self, text: &str) {
-        let text = paste_line(text);
         match self.mode {
-            Mode::Comment => self.comment_insert(&text),
-            Mode::Search if self.screen == Screen::Log => self.log_search_insert(&text),
-            Mode::Search => self.search_insert(&text),
-            Mode::Filter => self.filter_insert(&text),
-            Mode::Picker => self.picker_insert(&text),
+            Mode::Comment => self.comment_paste(text),
+            Mode::Search if self.screen == Screen::Log => self.log_search_insert(&paste_line(text)),
+            Mode::Search => self.search_insert(&paste_line(text)),
+            Mode::Filter => self.filter_insert(&paste_line(text)),
+            Mode::Picker => self.picker_insert(&paste_line(text)),
             _ => {}
         }
     }

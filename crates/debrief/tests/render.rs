@@ -1,5 +1,5 @@
 //! Commit-view rendering (spec Q25): tabs, CR and control characters,
-//! full-width row backgrounds. A fake `Vcs`
+//! full-width row backgrounds, sidebar status letters. A fake `Vcs`
 //! serves one commit with a hand-built diff.
 
 use std::path::{Path, PathBuf};
@@ -294,6 +294,51 @@ fn backgrounds_fill_the_pane_and_the_sign_is_coloured() {
     let buf = draw(&mut app, w, 12);
     assert_eq!(buf[(last, add)].style().bg, Some(palette::SURFACE));
     assert_eq!(buf[(last, del)].style().bg, Some(palette::DEL_BG));
+}
+
+#[test]
+fn sidebar_letters_mode_changes_and_empty_files() {
+    let ctx = || vec![line(LineKind::Context, 1, "x")];
+    let mut copy = file(Some("orig.rs"), Some("copy.rs"), ctx());
+    copy.copied = true;
+    let mut mode = file(Some("run.sh"), Some("run.sh"), vec![]);
+    mode.mode_change = Some(("100644".into(), "100755".into()));
+    let files = vec![
+        file(None, Some("added.rs"), ctx()),
+        file(Some("mod.rs"), Some("mod.rs"), ctx()),
+        file(Some("gone.rs"), None, ctx()),
+        file(Some("old.rs"), Some("new.rs"), vec![]),
+        copy,
+        mode,
+    ];
+    let (_tmp, mut app) = open(files);
+    let buf = draw(&mut app, 100, 40);
+    let want = [
+        ('A', "added.rs", palette::GREEN),
+        ('M', "mod.rs", palette::YELLOW),
+        ('D', "gone.rs", palette::RED),
+        ('R', "new.rs", palette::PINK),
+        ('C', "copy.rs", palette::TEAL),
+        ('M', "run.sh", palette::YELLOW),
+    ];
+    for (y, (letter, path, color)) in want.into_iter().enumerate() {
+        let y = y as u16;
+        let s = text(&buf, y);
+        let after_mark: String = s.chars().skip(1).collect();
+        assert!(after_mark.starts_with(&format!("{letter} {path} ")), "{s}");
+        assert_eq!(buf[(1, y)].style().fg, Some(color), "{s}");
+    }
+    let rows: Vec<_> = app.commit_rows().iter().map(|r| r.text.as_str()).collect();
+    let i = rows
+        .iter()
+        .position(|t| t.contains("old.rs → new.rs"))
+        .unwrap();
+    assert_eq!(rows[i + 1], "(no content changes)");
+    let i = rows
+        .iter()
+        .position(|t| *t == "── run.sh (mode 100644 → 100755) ──")
+        .unwrap();
+    assert_eq!(rows[i + 1], "(no content changes)");
 }
 
 #[test]

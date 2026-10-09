@@ -14,6 +14,8 @@ pub const SIDEBAR_MAX: u16 = 48;
 pub const SIDEBAR_HIDE_BELOW: u16 = 80;
 /// The current-file marker gutter at the left of each row.
 pub const GUTTER_COLS: usize = 1;
+/// The status letter and its space after the gutter.
+pub const STATUS_COLS: usize = 2;
 
 /// Where the commit screen's panes go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +104,7 @@ impl App {
         }
     }
 
-    /// Columns each file row needs: gutter, path and counts.
+    /// Columns each file row needs: gutter, status letter, path and counts.
     fn sidebar_needs(&self) -> Vec<u16> {
         let Some(d) = self.commit_diff() else {
             return Vec::new();
@@ -111,7 +113,8 @@ impl App {
             .iter()
             .map(|f| {
                 let (a, r) = file_counts(f);
-                let n = GUTTER_COLS + file_path(f).width() + counts_label(a, r).width();
+                let n =
+                    GUTTER_COLS + STATUS_COLS + file_path(f).width() + counts_label(a, r).width();
                 n.min(u16::MAX as usize) as u16
             })
             .collect()

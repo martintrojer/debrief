@@ -193,7 +193,7 @@ fn renders_gutter_colours_and_sidebar() {
     let (_tmp, mut app) = open_big();
     let s = screen(&mut app, 100, 30);
     assert!(
-        s[0].starts_with(" bin.dat"),
+        s[0].starts_with(" A bin.dat"),
         "in the message: no current file {s:#?}"
     );
     assert!(s[1].contains("m.txt") && s[1].contains("+2 −2"), "{}", s[1]);
@@ -255,7 +255,7 @@ fn renders_gutter_colours_and_sidebar() {
     assert!(!s.iter().any(|l| l.contains("END")));
     keys(&mut app, "]f");
     let s = screen(&mut app, 100, 30);
-    assert!(s[0].starts_with("▎bin.dat"), "{}", s[0]);
+    assert!(s[0].starts_with("▎A bin.dat"), "{}", s[0]);
     keys(&mut app, "gg");
     // Below 80 columns the sidebar is hidden.
     let s = screen(&mut app, 79, 30);
@@ -316,8 +316,8 @@ fn sidebar_enter_jumps_and_marks_the_current_file() {
     assert_eq!(kind(&app), RowKind::FileHeader);
     assert_eq!(app.current_file(), Some(2));
     let s = screen(&mut app, 100, 30);
-    assert!(s[2].starts_with("▎new.txt"), "{s:#?}");
-    assert!(s[0].starts_with(" bin.dat"), "{}", s[0]);
+    assert!(s[2].starts_with("▎A new.txt"), "{s:#?}");
+    assert!(s[0].starts_with(" A bin.dat"), "{}", s[0]);
     // C-w h, then C-w l back; q in the list returns to the log.
     ctrl(&mut app, 'w');
     keys(&mut app, "h");

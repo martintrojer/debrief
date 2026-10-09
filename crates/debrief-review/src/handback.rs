@@ -66,28 +66,32 @@ fn run(command: &[String], markdown: &str, root: &Path, timeout: Duration) -> bo
     // Dropping stdin at the end of the thread closes it.
     let writer = thread::spawn(move || stdin.write_all(input.as_bytes()));
 
+    // Poll the writer alongside the child: a failed write (EPIPE included) is final,
+    // so kill and fall back at once rather than waiting for the child to exit.
     let deadline = Instant::now() + timeout;
-    let status = loop {
+    let mut writer = Some(writer);
+    loop {
+        if writer.as_ref().is_some_and(|w| w.is_finished()) {
+            let wrote = writer
+                .take()
+                .is_some_and(|w| w.join().is_ok_and(|r| r.is_ok()));
+            if !wrote {
+                kill(&mut child);
+                return false;
+            }
+        }
         match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            _ => break None,
+            // Success needs all of stdin taken; if the writer is still going, keep polling.
+            Ok(Some(status)) if writer.is_none() => return status.success(),
+            Ok(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            _ => {
+                // Killing the child breaks the pipe, so the writer thread ends too (unless a
+                // grandchild holds stdin; then it is left detached rather than waited on).
+                kill(&mut child);
+                return false;
+            }
         }
-    };
-    let Some(status) = status else {
-        // Killing the child breaks the pipe, so the writer thread ends too (unless a
-        // grandchild holds stdin; then it is left detached rather than waited on).
-        kill(&mut child);
-        return false;
-    };
-    while !writer.is_finished() {
-        if Instant::now() >= deadline {
-            return false;
-        }
-        thread::sleep(Duration::from_millis(10));
     }
-    let wrote = writer.join().is_ok_and(|r| r.is_ok());
-    wrote && status.success()
 }
 
 fn kill(child: &mut Child) {
@@ -123,6 +127,35 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
+    }
+
+    #[test]
+    fn stdin_write_failure_falls_back_promptly_and_reaps_the_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let script = format!(
+            "echo $$ > '{}'; exec 0<&-; exec sleep 30",
+            pidfile.display()
+        );
+        let cmd = vec!["sh".to_owned(), "-c".to_owned(), script];
+        let input = "x".repeat(200 * 1024);
+        let start = Instant::now();
+        let sent = send(&cmd, &input, Path::new("/"), &mut |_: &str| Ok(())).unwrap();
+        assert_eq!(sent, Sent::Clipboard);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+        // A reaped pid is gone; a zombie would still answer `kill -0`.
+        let pid = std::fs::read_to_string(&pidfile).unwrap();
+        let alive = Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(!alive, "child {} not reaped", pid.trim());
     }
 
     #[test]

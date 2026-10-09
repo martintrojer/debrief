@@ -16,7 +16,7 @@ use debrief::app::watch::tree_watcher;
 use debrief::app::{App, AppEvent, Mode, RowKind, Screen, StartOptions, WORKING_ID};
 use debrief::seen::Status;
 use debrief::vcs::{self, LineKind, OpenOptions};
-use debrief_review::{Comment, Review, Side};
+use debrief_review::{Comment, Rev, Review, Side};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -241,6 +241,50 @@ fn removed_lines_of_a_renamed_file_use_the_old_path() {
     assert_eq!(c.path, "a.txt", "the path in HEAD");
     assert_eq!(c.side, Some(Side::Old));
     assert_eq!(app.review_marked_rows(), [r]);
+}
+
+#[test]
+fn old_side_markers_never_match_a_renamed_new_path() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    // HEAD deletes b.txt; an old-side comment on its line 4 stays valid.
+    std::fs::write(f.root.join("b.txt"), "b1\nb2\nb3\nb4\nb5\n").unwrap();
+    commit(&f.root, "add b");
+    git(&f.root, &["rm", "-q", "b.txt"]);
+    commit(&f.root, "delete b");
+    let head = vcs::open(&f.root, OpenOptions::default())
+        .unwrap()
+        .log(None, 1)
+        .unwrap()
+        .remove(0);
+    // The working tree renames a.txt -> b.txt and removes a4.
+    git(&f.root, &["mv", "a.txt", "b.txt"]);
+    std::fs::write(f.root.join("b.txt"), "a1\na2\na3\na5\n").unwrap();
+    let mut review = Review::open(&f.cache, &f.root).unwrap();
+    let rev = Rev {
+        commit: head.commit,
+        change: head.change,
+        summary: None,
+    };
+    review
+        .add(Comment::on_diff(
+            "b.txt",
+            rev,
+            Side::Old,
+            4..=4,
+            "-b4",
+            "b4",
+        ))
+        .unwrap();
+    drop(review);
+    let app = f.open();
+    let r = row_of(&app, "a4", RowKind::Line(LineKind::Removed));
+    assert!(
+        app.comments_at(r).is_empty(),
+        "old side is a.txt, not b.txt"
+    );
+    assert!(app.review_marked_rows().is_empty());
 }
 
 #[test]

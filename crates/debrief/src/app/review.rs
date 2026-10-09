@@ -107,12 +107,13 @@ impl App {
             return false;
         };
         let fd = &diff.files[f];
-        // The side's own path (K11), or the display path older comments use.
-        let side_path = match c.side {
-            Some(Side::Old) => fd.old_path.as_deref(),
-            _ => fd.new_path.as_deref(),
+        // The side's own path (K11). Old-side comments match only the old
+        // path; new-side ones also the display path older comments use.
+        let path_ok = match c.side {
+            Some(Side::Old) => fd.old_path.as_deref() == Some(c.path.as_str()),
+            _ => fd.new_path.as_deref() == Some(c.path.as_str()) || file_path(fd) == c.path,
         };
-        if side_path != Some(c.path.as_str()) && file_path(fd) != c.path {
+        if !path_ok {
             return false;
         }
         let n = match (c.side, kind) {

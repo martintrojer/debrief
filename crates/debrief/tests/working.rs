@@ -12,7 +12,7 @@ use std::time::Duration;
 use common::{JjEnv, commit, git, have_jj};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::comment::{MERGE_OLD_SIDE, OUTSIDE_ROOT};
-use debrief::app::watch::tree_watcher;
+use debrief::app::watch::{TreeFilter, tree_watcher};
 use debrief::app::{App, AppEvent, Mode, RowKind, Screen, StartOptions, WORKING_ID};
 use debrief::seen::Status;
 use debrief::vcs::{self, LineKind, OpenOptions};
@@ -559,6 +559,39 @@ fn an_info_exclude_change_updates_the_live_row() {
         None,
         "only an ignored file is left"
     );
+}
+
+#[test]
+fn a_tracked_symlink_retargeted_outside_the_root_fires() {
+    let f = fixture();
+    let one = f._tmp.path().join("one");
+    let two = f._tmp.path().join("two");
+    std::fs::write(&one, "1").unwrap();
+    std::fs::write(&two, "2").unwrap();
+    std::os::unix::fs::symlink(&one, f.root.join("link")).unwrap();
+    commit(&f.root, "link");
+    let (_w, rx) = watch(&f.root);
+    std::fs::remove_file(f.root.join("link")).unwrap();
+    std::os::unix::fs::symlink(&two, f.root.join("link")).unwrap();
+    assert!(fires(&rx), "a tracked link is judged as the link");
+}
+
+#[test]
+fn a_tracked_symlink_into_an_ignored_file_is_relevant() {
+    let f = fixture();
+    std::fs::write(f.root.join(".gitignore"), "*.ig\n").unwrap();
+    std::fs::write(f.root.join("target.ig"), "t\n").unwrap();
+    std::os::unix::fs::symlink("target.ig", f.root.join("link")).unwrap();
+    commit(&f.root, "link");
+    let mut filter = TreeFilter::new(&f.root).unwrap();
+    assert!(filter.is_relevant(&f.root.join("link")));
+    // And one pointing outside the root.
+    let out = f._tmp.path().join("outside");
+    std::fs::write(&out, "o\n").unwrap();
+    std::os::unix::fs::symlink(&out, f.root.join("ext")).unwrap();
+    commit(&f.root, "ext");
+    let mut filter = TreeFilter::new(&f.root).unwrap();
+    assert!(filter.is_relevant(&f.root.join("ext")));
 }
 
 // jj: @ is the working copy, after a snapshot (Q21, K5–K8).

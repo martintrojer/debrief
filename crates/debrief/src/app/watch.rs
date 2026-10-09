@@ -12,7 +12,8 @@
 //! when they lie outside it. Events in the git dir never count. An
 //! untracked path counts unless git ignores it (nested `.gitignore`s,
 //! `info/exclude`, `core.excludesFile`, via the `ignore` crate); a tracked
-//! path always counts. A change to any ignore file rebuilds the rules and counts; a
+//! path always counts. Paths are judged as named, never through a final
+//! symlink. A change to any ignore file rebuilds the rules and counts; a
 //! change to the index marks the tracked set stale.
 
 use std::collections::HashSet;
@@ -320,9 +321,16 @@ impl TreeFilter {
         nested || self.global.iter().any(|g| g == path)
     }
 
-    /// Whether a change to `path` should refresh the working copy.
+    /// Whether a change to `path` should refresh the working copy. The
+    /// path is judged as named: a final symlink is not followed.
     pub fn is_relevant(&mut self, path: &Path) -> bool {
-        let path = &canon(path);
+        // notify names paths under the (canonical) dirs it watches; only
+        // a path outside them gets its parent resolved.
+        let path = &if path.starts_with(&self.root) || path.starts_with(&self.git_dir) {
+            path.to_path_buf()
+        } else {
+            canon_parent(path)
+        };
         if self.is_ignore_file(path) {
             // New rules may hide or reveal untracked files: refresh too.
             self.rules = Rules::build(&self.root, &self.git_dir, &self.global);
@@ -380,7 +388,8 @@ impl Rules {
     /// git's verdict on `path` (or a parent dir of it): the deepest
     /// `.gitignore` with an opinion wins, then the repo-wide rules.
     fn ignored(&self, path: &Path) -> bool {
-        let is_dir = path.is_dir();
+        // git sees a symlink as a file, wherever it points.
+        let is_dir = path.symlink_metadata().is_ok_and(|m| m.is_dir());
         for (dir, gi) in &self.nested {
             if !path.starts_with(dir) || path == dir {
                 continue;

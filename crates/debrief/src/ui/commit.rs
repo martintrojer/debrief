@@ -70,13 +70,18 @@ fn gutter(app: &App, r: &DiffRow, w: usize) -> (String, Option<(char, Color)>) {
     }
 }
 
-/// The display cells of `text` within columns `[from, from + width)`; a
-/// cell cut by an edge is dropped.
-fn visible(text: &str, from: usize, width: usize) -> Vec<DisplayCell<'_>> {
+/// The display cells of `text` within columns `[from, from + width)`,
+/// each with the columns `[start, end)` it shows there. An expanded tab cut
+/// by an edge shows its remaining columns; any other cut cell is dropped.
+fn visible(text: &str, from: usize, width: usize) -> Vec<(DisplayCell<'_>, usize, usize)> {
+    let to = from + width;
     display::cells(text)
         .into_iter()
-        .skip_while(|c| c.col < from)
-        .take_while(|c| c.col + c.width <= from + width)
+        .filter_map(|c| {
+            let (start, end) = (c.col.max(from), (c.col + c.width).min(to));
+            let whole = start == c.col && end == c.col + c.width;
+            (start < end && (whole || c.glyph == Glyph::Tab)).then_some((c, start, end))
+        })
         .collect()
 }
 
@@ -144,9 +149,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(Span::styled(format!("{c} "), base.fg(fg)));
         }
         let mut col = hscroll;
-        for c in visible(&r.text, hscroll, text_w) {
-            if c.col > col {
-                spans.push(Span::styled(" ".repeat(c.col - col), base));
+        for (c, start, end) in visible(&r.text, hscroll, text_w) {
+            if start > col {
+                spans.push(Span::styled(" ".repeat(start - col), base));
             }
             let mut s = base;
             if hits
@@ -157,7 +162,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             }
             let (text, pad) = match c.glyph {
                 Glyph::Text(g) => (g.to_string(), String::new()),
-                Glyph::Tab => (" ".to_string(), " ".repeat(c.width - 1)),
+                Glyph::Tab => (" ".to_string(), " ".repeat(end - start - 1)),
                 Glyph::Control => {
                     s = s.fg(palette::OVERLAY).add_modifier(Modifier::DIM);
                     ("?".to_string(), String::new())
@@ -171,7 +176,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             if !pad.is_empty() {
                 spans.push(Span::styled(pad, pad_style));
             }
-            col = c.col + c.width;
+            col = end;
         }
         if r.kind == RowKind::FileHeader {
             // The header's rule runs to the right edge.
@@ -193,13 +198,18 @@ mod tests {
     use super::visible;
 
     fn cols(text: &str, from: usize, width: usize) -> Vec<usize> {
-        visible(text, from, width).iter().map(|c| c.col).collect()
+        visible(text, from, width)
+            .iter()
+            .map(|&(_, start, _)| start)
+            .collect()
     }
 
     #[test]
     fn visible_cuts_by_columns() {
         assert_eq!(cols("ab日cd", 1, 3), [1, 2]);
         assert_eq!(cols("ab日cd", 3, 2), [4], "a cut wide grapheme is dropped");
-        assert_eq!(cols("\tx", 2, 4), [4], "a cut tab is dropped");
+        assert_eq!(cols("\tx", 2, 1), [2], "a cut tab shows its remainder");
+        assert_eq!(cols("\tx", 2, 4), [2, 4]);
+        assert_eq!(cols("ab\tc", 0, 4), [0, 1, 2], "cut on the right too");
     }
 }

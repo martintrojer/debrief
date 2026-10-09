@@ -205,6 +205,50 @@ fn tabs_render_at_tab_stops_with_cursor_and_search_on_the_right_cells() {
 }
 
 #[test]
+fn a_tab_cut_by_the_viewport_edge_keeps_its_search_hit_and_cursor() {
+    // Width 79 leaves 67 text columns; `$` scrolls to 5, inside the tab
+    // at 4..8, whose three visible columns stay highlighted.
+    let raw = format!("aaaa\t{}", "Z".repeat(64));
+    let (_tmp, mut app) = open(vec![file(
+        Some("a"),
+        Some("a"),
+        vec![line(LineKind::Context, 1, &raw)],
+    )]);
+    draw(&mut app, 79, 12);
+    let r = diff_row(&app, &raw);
+    goto(&mut app, r);
+    keys(&mut app, "/\t");
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.search_hits(), vec![(r, 4, 8)]);
+    keys(&mut app, "$");
+    let buf = draw(&mut app, 79, 12);
+    assert_eq!(app.commit_scroll().1, 5);
+    let y = row_of(&buf, "ZZZ");
+    let first_z = (0..79).find(|&x| buf[(x, y)].symbol() == "Z").unwrap();
+    for x in first_z - 3..first_z {
+        assert_eq!(buf[(x, y)].style().bg, Some(palette::YELLOW), "{x}");
+    }
+    assert_ne!(buf[(first_z - 4, y)].style().bg, Some(palette::YELLOW));
+
+    // A pane narrower than the tab: the cursor on it stays visible.
+    for width in 13..20 {
+        let (_tmp, mut app) = open(vec![file(
+            Some("a"),
+            Some("a"),
+            vec![line(LineKind::Added, 1, "\tX")],
+        )]);
+        let r = diff_row(&app, "\tX");
+        goto(&mut app, r);
+        let buf = draw(&mut app, width, 12);
+        let reversed = (0..buf.area.height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .filter(|&p| buf[p].style().add_modifier.contains(Modifier::REVERSED))
+            .count();
+        assert_eq!(reversed, 1, "width {width}");
+    }
+}
+
+#[test]
 fn cr_and_control_characters() {
     let (_tmp, mut app) = open(vec![file(
         Some("a"),

@@ -328,6 +328,31 @@ fn git_watcher_fires_on_commit() {
 }
 
 #[test]
+fn git_watcher_fires_on_commit_in_a_root_ending_in_newline() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("ends\n");
+    if std::fs::create_dir(&root).is_err() {
+        eprintln!("skipped: filesystem refuses a newline in a directory name");
+        return;
+    }
+    git(&root, &["init", "-q"]);
+    add_commit(&root, 0);
+    let root = root.canonicalize().unwrap();
+    let v = vcs::open(&root).unwrap();
+    let t = watch_targets(v.as_ref()).unwrap();
+    assert!(t.is_relevant(&root.join(".git/HEAD")), "{t:?}");
+    let (tx, rx) = mpsc::channel();
+    let _w = RepoWatcher::start(t, move || {
+        let _ = tx.send(());
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    drain(&rx);
+    add_commit(&root, 1);
+    assert!(fires(&rx), "external commit reloads");
+}
+
+#[test]
 fn jj_watcher_follows_a_secondary_workspace() {
     if !have_jj() {
         return;

@@ -58,36 +58,36 @@ pub fn watch_targets(vcs: &dyn Vcs) -> Result<WatchTargets> {
     }
 }
 
-fn git_targets(root: &Path) -> Result<WatchTargets> {
+/// `git rev-parse --git-path <name>` as an absolute path. One path per call:
+/// output lines cannot be split when the path itself may contain newlines,
+/// so strip exactly the one trailing newline git appends.
+fn git_path(root: &Path, name: &str) -> Result<PathBuf> {
     let out = Command::new("git")
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(root)
-        .args([
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "HEAD",
-            "--git-path",
-            "refs",
-            "--git-path",
-            "packed-refs",
-        ])
+        .args(["rev-parse", "--path-format=absolute", "--git-path", name])
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
         .output()
         .context("failed to run git")?;
     if !out.status.success() {
         bail!(
-            "git rev-parse --git-path failed: {}",
+            "git rev-parse --git-path {name} failed: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let paths: Vec<PathBuf> = text.lines().map(|l| canon(Path::new(l))).collect();
-    let [head, refs, packed] = &paths[..] else {
+    let text = String::from_utf8(out.stdout).context("git path is not UTF-8")?;
+    let Some(path) = text.strip_suffix('\n') else {
         bail!("unexpected git rev-parse output: {text:?}");
     };
+    Ok(canon(Path::new(path)))
+}
+
+fn git_targets(root: &Path) -> Result<WatchTargets> {
+    let head = &git_path(root, "HEAD")?;
+    let refs = &git_path(root, "refs")?;
+    let packed = &git_path(root, "packed-refs")?;
     let mut dirs: Vec<(PathBuf, RecursiveMode)> = Vec::new();
     for d in [head.parent(), packed.parent()].into_iter().flatten() {
         if !dirs.iter().any(|(x, _)| x == d) {

@@ -1,7 +1,7 @@
 //! `~/.config/debrief/config.toml` over built-in defaults: `[send]` (how
 //! `<leader>rr` hands the review back, shared in meaning with ramble's),
-//! `[review]` (the comment kinds, the same shape as ramble's) and
-//! `[[launch]]` (commands run with the TUI suspended, like ramble's).
+//! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
+//! (syntax highlighting) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one.
@@ -16,6 +16,7 @@ use serde::Deserialize;
 pub struct Config {
     pub send: SendConfig,
     pub review: ReviewConfig,
+    pub render: RenderConfig,
     pub launch: Vec<Launcher>,
     /// Problems the file had that didn't stop it loading (dropped comment
     /// kinds); the app shows them in the status line at start.
@@ -29,6 +30,19 @@ pub struct ReviewConfig {
     /// export's legend defines them. Omitted: debrief-review's built-ins;
     /// a list replaces them; `[]` leaves comments untyped.
     pub kinds: Vec<Kind>,
+}
+
+/// `[render]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderConfig {
+    /// Syntax-highlight diff lines (on by default).
+    pub highlight: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        RenderConfig { highlight: true }
+    }
 }
 
 /// `[send]`.
@@ -67,6 +81,7 @@ impl Config {
     pub fn defaults() -> Config {
         Config {
             send: SendConfig::default(),
+            render: RenderConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
             },
@@ -117,6 +132,9 @@ impl Config {
                 c.send.preamble = s.preamble;
             }
         }
+        if let Some(h) = raw.render.and_then(|r| r.highlight) {
+            c.render.highlight = h;
+        }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
         }
@@ -159,6 +177,7 @@ impl Config {
 struct RawConfig {
     send: Option<RawSend>,
     review: Option<RawReview>,
+    render: Option<RawRender>,
     launch: Option<Vec<RawLauncher>>,
 }
 
@@ -166,6 +185,12 @@ struct RawConfig {
 #[serde(deny_unknown_fields)]
 struct RawReview {
     kinds: Option<Vec<RawKind>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRender {
+    highlight: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -296,6 +321,20 @@ kinds = [
         assert_eq!(ids(&Config::parse("[review]\n").unwrap()).len(), 4);
         assert!(Config::parse("[review]\nkinds = [{ id = \"x\", color = \"red\" }]\n").is_err());
         assert!(Config::parse("[review]\nenabled = true\n").is_err());
+    }
+
+    #[test]
+    fn render_highlight_defaults_on() {
+        assert!(Config::defaults().render.highlight);
+        assert!(Config::parse("[render]\n").unwrap().render.highlight);
+        assert!(
+            !Config::parse("[render]\nhighlight = false\n")
+                .unwrap()
+                .render
+                .highlight
+        );
+        assert!(Config::parse("[render]\nhighlight = \"no\"\n").is_err());
+        assert!(Config::parse("[render]\nwrap = true\n").is_err());
     }
 
     #[test]

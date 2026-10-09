@@ -118,6 +118,14 @@ pub enum Action {
     ReviewSend,
     /// Keys in the `<leader>rl` picker.
     Picker(super::picker::PickerAction),
+    /// Log: `f` opens the filter prompt.
+    FilterStart,
+    FilterInput(char),
+    FilterBackspace,
+    /// Enter in the filter prompt: keep the filter.
+    FilterCommit,
+    /// Esc in the filter prompt, or on the log: clear the filter.
+    FilterClear,
 }
 
 /// What a key sequence means so far.
@@ -185,6 +193,8 @@ impl App {
         match (self.mode, self.screen) {
             (Mode::Help, _) => super::help::help_keymap(self, keys),
             (Mode::Picker, _) => super::picker::picker_keymap(keys),
+            (Mode::Filter, _) => filter_keymap(keys),
+            (Mode::Search, Screen::Log) => search_keymap(keys),
             (_, Screen::Log) => self.log_keymap(keys),
             (Mode::Search, Screen::Commit(_)) => search_keymap(keys),
             (Mode::Comment, Screen::Commit(_)) => super::comment::comment_keymap(keys),
@@ -204,7 +214,7 @@ impl App {
         let ctrl_w =
             first.modifiers.contains(KeyModifiers::CONTROL) && first.code == KeyCode::Char('w');
         if plain(first) == Some(LEADER) {
-            return Some(self.leader_keymap(&keys[1..], true));
+            return Some(self.leader_keymap(&keys[1..]));
         }
         let r = if ctrl_w {
             match second.map(plain) {
@@ -226,8 +236,9 @@ impl App {
 
     /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
     /// prefix waits for more keys), then the built-ins (`e` on the commit
-    /// screen, `rl`, `rr`), as in ramble.
-    pub(super) fn leader_keymap(&self, after: &[KeyEvent], commit: bool) -> KeyResult {
+    /// screen, `rl`, `rr`), as in ramble. `e` toggles the file list on
+    /// the commit screen and the stats pane on the log.
+    pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
         let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
             return KeyResult::None;
         };
@@ -237,7 +248,7 @@ impl App {
             LeaderMatch::Pending => KeyResult::Pending,
             LeaderMatch::NoMapping => match typed.as_slice() {
                 [] | ['r'] => KeyResult::Pending,
-                ['e'] if commit => KeyResult::Action(Action::ToggleSidebar),
+                ['e'] => KeyResult::Action(Action::ToggleSidebar),
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
                 _ => KeyResult::None,
@@ -380,7 +391,7 @@ impl App {
     fn log_keymap(&self, keys: &[KeyEvent]) -> KeyResult {
         use Action as A;
         if keys.first().and_then(plain) == Some(LEADER) {
-            return self.leader_keymap(&keys[1..], false);
+            return self.leader_keymap(&keys[1..]);
         }
         let count = self.count;
         let [key] = keys else {
@@ -414,6 +425,12 @@ impl App {
             KeyCode::Enter => A::Open,
             KeyCode::Char('m') => A::MarkAll,
             KeyCode::Char('r') => A::Reload,
+            KeyCode::Char('/') => A::SearchStart(true),
+            KeyCode::Char('?') => A::SearchStart(false),
+            KeyCode::Char('n') => A::SearchNext(true, count),
+            KeyCode::Char('N') => A::SearchNext(false, count),
+            KeyCode::Char('f') => A::FilterStart,
+            KeyCode::Esc => A::FilterClear,
             _ => return KeyResult::None,
         };
         KeyResult::Action(action)
@@ -446,6 +463,18 @@ impl App {
             A::ReviewList => self.picker_open(),
             A::ReviewSend => self.review_send(),
             A::Picker(a) => self.picker_action(a),
+            A::SearchStart(f) => self.log_search_start(f),
+            A::SearchNext(same, c) => self.log_search_next(same, n(c) as usize),
+            A::SearchInput(c) => self.log_search_edit(Some(c)),
+            A::SearchBackspace => self.log_search_edit(None),
+            A::SearchCommit => self.log_search_commit(),
+            A::SearchCancel => self.log_search_cancel(),
+            A::FilterStart => self.filter_start(),
+            A::FilterInput(c) => self.filter_edit(Some(c)),
+            A::FilterBackspace => self.filter_edit(None),
+            A::FilterCommit => self.filter_commit(),
+            A::FilterClear => self.filter_clear(),
+            A::ToggleSidebar => self.toggle_stats(),
             other => self.apply_commit(other),
         }
     }
@@ -577,6 +606,21 @@ fn search_keymap(keys: &[KeyEvent]) -> KeyResult {
         KeyCode::Esc => A::SearchCancel,
         KeyCode::Backspace => A::SearchBackspace,
         KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => A::SearchInput(c),
+        _ => return KeyResult::None,
+    })
+}
+
+/// Typing the log's filter: every plain key is input.
+fn filter_keymap(keys: &[KeyEvent]) -> KeyResult {
+    use Action as A;
+    let Some(k) = keys.last() else {
+        return KeyResult::None;
+    };
+    KeyResult::Action(match k.code {
+        KeyCode::Enter => A::FilterCommit,
+        KeyCode::Esc => A::FilterClear,
+        KeyCode::Backspace => A::FilterBackspace,
+        KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => A::FilterInput(c),
         _ => return KeyResult::None,
     })
 }

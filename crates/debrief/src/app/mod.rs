@@ -12,12 +12,14 @@ pub mod highlight;
 mod keys;
 pub mod launch;
 mod log;
+mod log_search;
 mod motion;
 pub mod picker;
 pub mod review;
 pub mod run;
-mod search;
+pub mod search;
 pub mod sidebar;
+pub mod stat;
 pub mod textbox;
 mod visual;
 pub mod watch;
@@ -30,7 +32,7 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 
 use crate::seen::{Seen, Status};
-use crate::vcs::{CommitDiff, CommitInfo, Kind, Vcs, WorkingCopy};
+use crate::vcs::{CommitDiff, CommitInfo, CommitStat, Kind, Vcs, WorkingCopy};
 
 pub use clue::{CLUE_DELAY, ClueRow};
 pub use comment::{CommentAction, Draft};
@@ -42,6 +44,7 @@ pub use launch::{Effect, Exit, LaunchCommand};
 pub use log::{WORKING_ID, age, is_zero_id, short_id};
 pub use motion::Cursor;
 pub use picker::{PickerAction, PickerItem, PickerView};
+pub use stat::{LogLayout, StatPane};
 pub use visual::osc52;
 
 /// Default number of commits listed.
@@ -91,6 +94,11 @@ pub enum AppEvent {
         request: u64,
         spans: highlight::DiffSpans,
     },
+    /// A commit's stat for the log's stats pane, tagged with its request.
+    Stat {
+        request: u64,
+        result: Result<CommitStat, String>,
+    },
 }
 
 /// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
@@ -120,8 +128,10 @@ pub enum Mode {
     Normal,
     /// The `g?` overlay.
     Help,
-    /// Typing a `/` or `?` pattern in the commit view.
+    /// Typing a `/` or `?` pattern (commit view or log).
     Search,
+    /// Typing the log's `f` filter.
+    Filter,
     /// Line-wise selection in the commit view.
     Visual,
     /// Typing a comment's body.
@@ -146,7 +156,14 @@ pub struct App {
     vcs: Box<dyn Vcs>,
     opts: StartOptions,
     seen: Seen,
+    /// The log rows shown: `all_rows` narrowed by the filter.
     rows: Vec<Row>,
+    /// Every loaded log row.
+    all_rows: Vec<Row>,
+    /// The log's `/` search and `f` filter.
+    log_search: log_search::LogSearch,
+    /// The log's stats pane.
+    stat: stat::StatState,
     cursor: usize,
     /// First row drawn.
     scroll: usize,
@@ -228,6 +245,9 @@ impl App {
             opts,
             seen,
             rows: Vec::new(),
+            all_rows: Vec::new(),
+            log_search: log_search::LogSearch::default(),
+            stat: stat::StatState::default(),
             cursor: 0,
             scroll: 0,
             view_h: 20,
@@ -266,6 +286,7 @@ impl App {
         };
         app.review_open();
         app.config = app.opts.config.clone();
+        app.stat.on = app.config.view.stats;
         let (keys, mut errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;
         errors.extend(app.config.warnings.iter().cloned());
@@ -296,34 +317,44 @@ impl App {
             AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
+            AppEvent::Stat { request, result } => self.stat_loaded(request, result),
         }
     }
 
     /// A bracketed paste: typed into the open prompt (comment, `/` `?`
-    /// search, picker filter) as one line, newlines and tabs as spaces.
+    /// search, the log's filter, picker filter) as one line, newlines and
+    /// tabs as spaces.
     /// Anywhere else it is dropped, never replayed as keys.
     pub fn paste(&mut self, text: &str) {
         let text = paste_line(text);
         match self.mode {
             Mode::Comment => self.comment_insert(&text),
+            Mode::Search if self.screen == Screen::Log => self.log_search_insert(&text),
             Mode::Search => self.search_insert(&text),
+            Mode::Filter => self.filter_insert(&text),
             Mode::Picker => self.picker_insert(&text),
             _ => {}
         }
     }
 
     /// Time passes: the key clue opens after a pause; the review batch
-    /// is re-read at most once a second.
+    /// is re-read at most once a second; the stats pane loads once the
+    /// cursor rests.
     pub fn tick(&mut self, now: Instant) {
         self.clue_tick(now);
         self.review_tick(now);
+        self.stat_tick(now);
     }
 
     /// Draw the whole screen.
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
         self.size = (area.width, area.height);
-        self.view_h = area.height.saturating_sub(1).max(1) as usize;
+        let main = ratatui::layout::Rect {
+            height: area.height.saturating_sub(1),
+            ..area
+        };
+        self.view_h = self.log_layout(main).log.height.max(1) as usize;
         self.keep_visible();
         self.commit_follow();
         crate::ui::draw(frame, self);
@@ -378,9 +409,9 @@ impl App {
         self.working.as_ref()
     }
 
-    /// Rows that are new, and rows that are updated.
+    /// Loaded rows that are new, and rows that are updated.
     pub fn counts(&self) -> (usize, usize) {
-        let n = |s| self.rows.iter().filter(|r| r.status == s).count();
+        let n = |s| self.all_rows.iter().filter(|r| r.status == s).count();
         (n(Status::New), n(Status::Updated))
     }
 

@@ -42,6 +42,13 @@ pub fn age(now: i64, then: i64) -> String {
     }
 }
 
+fn infos(rows: &[Row]) -> Vec<CommitInfo> {
+    rows.iter()
+        .filter(|r| r.info.commit != WORKING_ID)
+        .map(|r| r.info.clone())
+        .collect()
+}
+
 impl App {
     /// Read the log from the VCS, without jj's root commit; a zero parent
     /// counts as no parent. First brings the VCS up to date (`snapshot`:
@@ -107,25 +114,26 @@ impl App {
             working: self.working_commit.as_deref() == Some(info.commit.as_str()),
             info,
         }));
-        self.rows = rows;
-        self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
+        self.all_rows = rows;
+        // A kept filter narrows the new list too; the caller places the
+        // cursor.
+        let keep = self.rows.get(self.cursor).map(|r| r.info.commit.clone());
+        let cursor = self.cursor;
+        self.refilter(keep);
+        self.cursor = cursor.min(self.rows.len().saturating_sub(1));
     }
 
     fn restatus(&mut self) {
-        for r in &mut self.rows {
+        for r in self.rows.iter_mut().chain(self.all_rows.iter_mut()) {
             if r.info.commit != WORKING_ID {
                 r.status = self.seen.status(&r.info);
             }
         }
     }
 
-    /// The log's commits, without git's synthetic row.
+    /// The loaded commits, without git's synthetic row.
     fn commits(&self) -> Vec<CommitInfo> {
-        self.rows
-            .iter()
-            .filter(|r| r.info.commit != WORKING_ID)
-            .map(|r| r.info.clone())
-            .collect()
+        infos(&self.all_rows)
     }
 
     /// The oldest new or updated row (the log is newest first).
@@ -146,6 +154,7 @@ impl App {
     /// re-read the log, keeping the cursor on the same commit when it is
     /// still listed (on the working copy when it was there).
     pub fn reload(&mut self, snapshot: bool) {
+        self.stat_reload();
         let current = self
             .rows
             .get(self.cursor)
@@ -192,9 +201,9 @@ impl App {
         self.commit_reindex();
     }
 
-    /// `m`: every listed commit is seen.
+    /// `m`: every listed commit (the filtered list) is seen.
     pub(super) fn mark_all(&mut self) {
-        let commits = self.commits();
+        let commits = infos(&self.rows);
         match self.seen.mark_all(&commits) {
             Ok(()) => {
                 self.restatus();

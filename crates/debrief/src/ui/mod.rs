@@ -8,6 +8,7 @@ mod log;
 mod picker;
 mod popup;
 mod sidebar;
+mod stat;
 mod status;
 
 use ratatui::Frame;
@@ -62,7 +63,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
     match app.screen() {
-        Screen::Log => log::draw(frame, app, main),
+        Screen::Log => {
+            let l = app.log_layout(main);
+            log::draw(frame, app, l.log);
+            if let Some(pane) = l.stats {
+                stat::draw(frame, app, pane, l.side_by_side);
+            }
+        }
         Screen::Commit(_) => {
             let l = app.commit_layout(main);
             if let Some(side) = l.sidebar {

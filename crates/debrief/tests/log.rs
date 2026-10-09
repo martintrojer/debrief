@@ -30,12 +30,11 @@ fn add_commit(root: &Path, i: usize) {
     commit(root, &format!("commit {i}"));
 }
 
+/// The log alone (the stats pane off), so rows fill the screen.
 fn open(root: &Path, cache: &Path) -> App {
-    App::new(
-        vcs::open(root, vcs::OpenOptions::default()).unwrap(),
-        StartOptions::new(cache.to_path_buf()),
-    )
-    .unwrap()
+    let mut opts = StartOptions::new(cache.to_path_buf());
+    opts.config.view.stats = false;
+    App::new(vcs::open(root, vcs::OpenOptions::default()).unwrap(), opts).unwrap()
 }
 
 fn key(app: &mut App, c: char) {
@@ -393,4 +392,226 @@ fn jj_watcher_follows_a_secondary_workspace() {
     drain(&rx);
     e.jj(&["--quiet", "describe", "-r", "@-", "-m", "one, reworded"]);
     assert!(fires(&rx), "an operation in the main workspace reloads");
+}
+
+/// Open with the stats pane on (the default config).
+fn open_with_stats(root: &Path, cache: &Path) -> App {
+    App::new(
+        vcs::open(root, vcs::OpenOptions::default()).unwrap(),
+        StartOptions::new(cache.to_path_buf()),
+    )
+    .unwrap()
+}
+
+fn screen_at(app: &mut App, w: u16, h: u16) -> Vec<String> {
+    let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let buf = t.backend().buffer().clone();
+    (0..buf.area.height)
+        .map(|y| {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// Rest the cursor long enough for the stat to load (no sender: loads
+/// in the tick).
+fn settle(app: &mut App) {
+    let t = std::time::Instant::now();
+    app.tick(t);
+    app.tick(t + debrief::app::stat::STAT_DELAY);
+}
+
+#[test]
+fn stats_pane_side_by_side_at_120_columns_stacked_at_119() {
+    let (tmp, root) = git_repo(3);
+    let mut app = open_with_stats(&root, &tmp.path().join("cache"));
+    let s = screen_at(&mut app, 120, 20);
+    assert!(s[0].contains("loading…"), "{s:#?}");
+    settle(&mut app);
+    let s = screen_at(&mut app, 120, 20);
+    // Log 72 columns, the border at column 72, the pane after it.
+    for row in &s[..19] {
+        assert_eq!(row.chars().nth(72), Some('│'), "{s:#?}");
+    }
+    assert!(
+        s[0].chars()
+            .take(72)
+            .collect::<String>()
+            .contains("commit 2")
+    );
+    let pane: Vec<String> = s.iter().map(|r| r.chars().skip(74).collect()).collect();
+    assert!(pane[1].starts_with("t <t@t>"), "{pane:#?}");
+    assert!(pane[2].contains(" UTC ("), "{pane:#?}");
+    assert!(pane[4].starts_with("commit 2"), "{pane:#?}");
+    assert!(pane[6].starts_with("f2.txt | 1 +"), "{pane:#?}");
+    assert!(
+        pane[7].starts_with("1 file changed, 1 insertion(+), 0 deletions(-)"),
+        "{pane:#?}"
+    );
+
+    let s = screen_at(&mut app, 119, 20);
+    // 19 rows above the status line: the pane is the bottom 40% (7),
+    // its top border on row 12.
+    assert!(s[12].trim_end().chars().all(|c| c == '─'), "{s:#?}");
+    assert!(s[0].contains("commit 2") && !s[0].contains('│'));
+    assert!(s[13].contains(&app.rows()[0].info.commit[..12]), "{s:#?}");
+
+    // <leader>e hides it.
+    keys(&mut app, " e");
+    let s = screen_at(&mut app, 119, 20);
+    assert!(!s.iter().any(|r| r.contains('─')), "{s:#?}");
+    keys(&mut app, " e");
+    assert!(screen_at(&mut app, 119, 20)[12].starts_with('─'));
+}
+
+#[test]
+fn stats_load_after_the_cursor_rests_and_stale_answers_drop() {
+    use debrief::app::AppEvent;
+    use debrief::app::stat::STAT_DELAY;
+    let (tmp, root) = git_repo(3);
+    let mut app = open_with_stats(&root, &tmp.path().join("cache"));
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    let t0 = std::time::Instant::now();
+    app.tick(t0);
+    app.tick(t0 + STAT_DELAY / 2);
+    assert!(rx.try_recv().is_err(), "debounced");
+    key(&mut app, 'j');
+    app.tick(t0 + STAT_DELAY);
+    assert!(rx.try_recv().is_err(), "moved: the pause starts again");
+    app.tick(t0 + STAT_DELAY * 2);
+    let first = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    // Before the answer is fed in, the cursor moves on and a newer
+    // request goes out.
+    key(&mut app, 'j');
+    app.tick(t0 + STAT_DELAY * 3);
+    app.tick(t0 + STAT_DELAY * 4);
+    let second = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (AppEvent::Stat { request: r1, .. }, AppEvent::Stat { request: r2, .. }) =
+        (&first, &second)
+    else {
+        panic!("not stats");
+    };
+    assert!(r1 < r2);
+    app.event(first);
+    assert_eq!(app.stat_cached(), 0, "stale answer dropped");
+    app.event(second);
+    assert_eq!(app.stat_cached(), 1);
+    assert!(matches!(
+        app.stat_pane(),
+        Some(debrief::app::StatPane::Ready(s)) if s.message == "commit 0"
+    ));
+    // Cached: coming back to it sends nothing.
+    key(&mut app, 'k');
+    key(&mut app, 'j');
+    app.tick(t0 + STAT_DELAY * 5);
+    app.tick(t0 + STAT_DELAY * 6);
+    assert!(rx.try_recv().is_err());
+}
+
+fn type_str(app: &mut App, s: &str) {
+    keys(app, s);
+}
+
+fn enter(app: &mut App) {
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+}
+
+fn esc(app: &mut App) {
+    app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+}
+
+#[test]
+fn filter_narrows_marks_only_visible_rows_and_survives_reload() {
+    let (tmp, root) = git_repo(12);
+    let cache = tmp.path().join("cache");
+    seed_oldest(&root, &cache);
+    let mut app = open(&root, &cache);
+    assert_eq!(app.rows().len(), 12);
+    key(&mut app, 'f');
+    assert_eq!(app.mode(), Mode::Filter);
+    type_str(&mut app, "commit 1");
+    // commit 1, 10, 11.
+    assert_eq!(app.rows().len(), 3);
+    let s = screen(&mut app);
+    assert!(s[11].starts_with("filter: commit 1"), "{s:#?}");
+    app.event(debrief::app::AppEvent::Paste("0".into()));
+    assert_eq!(app.rows().len(), 1);
+    app.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    enter(&mut app);
+    assert_eq!(app.mode(), Mode::Normal);
+    let s = screen(&mut app);
+    assert!(s[11].contains("filter: commit 1 (3/12)"), "{s:#?}");
+    // The match is highlighted.
+    let mut t = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let buf = t.backend().buffer();
+    let line: String = (0..80).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+    let at = line.find("commit 1").unwrap();
+    let x = line[..at].chars().count() as u16;
+    assert_eq!(buf[(x, 0)].bg, debrief::ui::palette::YELLOW);
+
+    // m marks only the filtered rows.
+    key(&mut app, 'm');
+    assert_eq!(app.status(), "marked 3 commits seen");
+    esc(&mut app);
+    assert_eq!(app.rows().len(), 12);
+    let new = app
+        .rows()
+        .iter()
+        .filter(|r| r.status == Status::New)
+        .count();
+    assert_eq!(new, 8, "12 - 3 marked - 1 seeded");
+
+    // r keeps the filter, the cursor on the same commit.
+    key(&mut app, 'f');
+    type_str(&mut app, "commit 1");
+    enter(&mut app);
+    keys(&mut app, "ggj");
+    let id = app.rows()[1].info.commit.clone();
+    add_commit(&root, 12);
+    key(&mut app, 'r');
+    assert_eq!(app.rows().len(), 4, "commit 12 joins");
+    assert_eq!(app.rows()[app.cursor()].info.commit, id);
+    // Enter and ]] walk the filtered list.
+    enter(&mut app);
+    keys(&mut app, "]]");
+    assert_eq!(
+        app.commit_id(),
+        Some(app.rows()[app.cursor()].info.commit.as_str())
+    );
+    assert!(
+        app.rows()[app.cursor()]
+            .info
+            .summary
+            .starts_with("commit 1")
+    );
+    key(&mut app, 'q');
+    assert_eq!(app.rows().len(), 4);
+}
+
+#[test]
+fn log_search_moves_and_reports_misses() {
+    let (tmp, root) = git_repo(5);
+    let mut app = open(&root, &tmp.path().join("cache"));
+    keys(&mut app, "gg/commit 3");
+    let s = screen(&mut app);
+    assert!(s[11].starts_with("/commit 3"), "{s:#?}");
+    enter(&mut app);
+    assert_eq!(app.rows()[app.cursor()].info.summary, "commit 3");
+    keys(&mut app, "/zzz");
+    enter(&mut app);
+    assert_eq!(app.status(), "pattern not found: zzz");
+    keys(&mut app, "?commit");
+    enter(&mut app);
+    assert_eq!(app.rows()[app.cursor()].info.summary, "commit 4");
+    key(&mut app, 'N');
+    assert_eq!(app.rows()[app.cursor()].info.summary, "commit 3");
+    keys(&mut app, "gg");
+    key(&mut app, 'n');
+    assert_eq!(app.rows()[app.cursor()].info.summary, "commit 0");
+    assert_eq!(app.status(), "search hit TOP, continuing at BOTTOM");
 }

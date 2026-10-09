@@ -49,8 +49,12 @@ pub fn find_all(text: &str, pat: &str) -> Vec<Range<usize>> {
 }
 
 impl App {
-    /// The search prompt (`/foo` or `?foo`) while typing.
+    /// The search prompt (`/foo` or `?foo`) while typing; on the log
+    /// also the filter prompt (`filter: foo`).
     pub fn search_prompt(&self) -> Option<String> {
+        if self.screen == super::Screen::Log {
+            return self.log_prompt();
+        }
         let s = &self.commit.as_ref()?.search;
         let p = s.prompt.as_ref()?;
         Some(format!("{}{p}", if s.forward { '/' } else { '?' }))

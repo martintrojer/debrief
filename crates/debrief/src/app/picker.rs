@@ -261,6 +261,10 @@ impl App {
             }
             return self.set_status(format!("Working-copy comment: {}:{}", c.path, c.lines.0));
         };
+        // A kept log filter hiding the commit is cleared.
+        if self.unfilter_for(&rev.commit) {
+            self.commit_reindex();
+        }
         let Some(i) = self.rows.iter().position(|r| r.info.commit == rev.commit) else {
             return self.set_status(NOT_IN_LOG);
         };

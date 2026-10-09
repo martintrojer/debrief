@@ -56,6 +56,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     if app.working_copy().is_some() {
         counts.push_str(", working copy dirty");
     }
+    if let Some(f) = app.filter_label() {
+        counts.push_str(&format!("  {f}"));
+    }
     let right = match app.rows().len() {
         0 => " 0/0 ".to_string(),
         n => format!(" {}/{n} ", app.cursor() + 1),

@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::palette;
+use crate::app::search::find_all;
 use crate::app::{App, WORKING_ID, age, short_id};
 use crate::seen::Status;
 
@@ -34,6 +35,33 @@ fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// `text` in `style`, with the matches of `pats` marked as search hits.
+fn hl(text: String, style: Style, pats: &[&str]) -> Vec<Span<'static>> {
+    let mut hits: Vec<std::ops::Range<usize>> =
+        pats.iter().flat_map(|p| find_all(&text, p)).collect();
+    if hits.is_empty() {
+        return vec![Span::styled(text, style)];
+    }
+    hits.sort_by_key(|h| h.start);
+    let hit = style.bg(palette::YELLOW).fg(palette::BASE);
+    let mut out = Vec::new();
+    let mut at = 0;
+    for h in hits {
+        if h.start < at {
+            continue;
+        }
+        if h.start > at {
+            out.push(Span::styled(text[at..h.start].to_string(), style));
+        }
+        out.push(Span::styled(text[h.clone()].to_string(), hit));
+        at = h.end;
+    }
+    if at < text.len() {
+        out.push(Span::styled(text[at..].to_string(), style));
+    }
+    out
+}
+
 /// `s` cut or padded to `w` characters.
 fn fit(s: &str, w: usize) -> String {
     let mut out: String = s.chars().take(w).collect();
@@ -51,6 +79,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
     let now = now();
+    let pats = app.log_patterns();
     let lines: Vec<Line> = app
         .rows()
         .iter()
@@ -78,20 +107,24 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 ])
                 .style(base);
             }
-            Line::from(vec![
-                Span::styled(format!("{m} "), base.fg(mc)),
-                Span::styled(format!("{} ", short_id(&r.info)), base.fg(palette::MAUVE)),
-                Span::styled(
-                    format!("{:>4} ", age(now, r.info.time)),
-                    base.fg(palette::GREEN),
-                ),
-                Span::styled(
-                    format!("{} ", fit(&r.info.author, AUTHOR_W)),
-                    base.fg(palette::BLUE),
-                ),
-                Span::styled(r.info.summary.clone(), base),
-            ])
-            .style(base)
+            let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
+            spans.extend(hl(
+                short_id(&r.info).to_string(),
+                base.fg(palette::MAUVE),
+                &pats,
+            ));
+            spans.push(Span::styled(
+                format!(" {:>4} ", age(now, r.info.time)),
+                base.fg(palette::GREEN),
+            ));
+            spans.extend(hl(
+                fit(&r.info.author, AUTHOR_W),
+                base.fg(palette::BLUE),
+                &pats,
+            ));
+            spans.push(Span::styled(" ", base));
+            spans.extend(hl(r.info.summary.clone(), base, &pats));
+            Line::from(spans).style(base)
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), area);

@@ -24,8 +24,10 @@ pub(crate) enum Ctx {
     Files,
     /// Visual mode in the commit view.
     Visual,
-    /// Typing a search pattern.
+    /// Typing a search pattern (commit view or log).
     Search,
+    /// Typing the log's filter.
+    Filter,
     /// Typing a comment.
     Comment,
     /// The `K` popup is open.
@@ -105,8 +107,8 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 /// Every key binding, as the help overlay and the key clue list them.
 pub(crate) const BINDINGS: &[Binding] = {
     use Ctx::{
-        Comment as P, Commit as C, Files as F, Help as H, Log as L, Picker as R, Popup as K,
-        Search as S, Visual as V,
+        Comment as P, Commit as C, Files as F, Filter as Fl, Help as H, Log as L, Picker as R,
+        Popup as K, Search as S, Visual as V,
     };
     use Group as G;
     &[
@@ -123,6 +125,16 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Enter", L, G::Log, "open the commit (marks it seen)"),
         b("m", L, G::Log, "mark every listed commit seen"),
         b("r", L, G::Log, "reload the log"),
+        b("<leader>e", L, G::Log, "show or hide the stats pane"),
+        b("/", L, G::Log, "search forward"),
+        b("?", L, G::Log, "search backward"),
+        b("n", L, G::Log, "next match"),
+        b("N", L, G::Log, "previous match"),
+        b("f", L, G::Log, "filter the log"),
+        b("Esc", L, G::Log, "clear the filter"),
+        b("Enter", Fl, G::Log, "in the filter: keep it"),
+        b("Esc", Fl, G::Log, "in the filter: clear it"),
+        b("Backspace", Fl, G::Log, "in the filter: delete a character"),
         b("q, Esc", C, G::General, "back to the log"),
         b("C-c", C, G::General, "quit"),
         b("g?", C, G::General, "help"),
@@ -467,10 +479,11 @@ impl App {
     pub(super) fn ctx_shown(&self, ctx: Ctx) -> bool {
         match ctx {
             Ctx::Log => self.screen == Screen::Log,
-            Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Search | Ctx::Comment | Ctx::Popup => {
+            Ctx::Filter => self.screen == Screen::Log,
+            Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }
-            Ctx::Picker | Ctx::Help => true,
+            Ctx::Search | Ctx::Picker | Ctx::Help => true,
         }
     }
 
@@ -484,7 +497,8 @@ impl App {
             }
             Ctx::Files => commit && self.files_focused() && self.mode == Mode::Normal,
             Ctx::Visual => commit && self.mode == Mode::Visual,
-            Ctx::Search => commit && self.mode == Mode::Search,
+            Ctx::Search => self.mode == Mode::Search,
+            Ctx::Filter => self.mode == Mode::Filter,
             Ctx::Comment => commit && self.mode == Mode::Comment,
             Ctx::Popup => commit && self.mode == Mode::Popup,
             Ctx::Picker => self.mode == Mode::Picker,
@@ -623,7 +637,7 @@ pub(super) mod tests {
 
     pub(crate) fn in_ctx(ctx: Ctx) -> (tempfile::TempDir, App) {
         let (t, mut a) = app();
-        if !matches!(ctx, Ctx::Log | Ctx::Help | Ctx::Picker) {
+        if !matches!(ctx, Ctx::Log | Ctx::Help | Ctx::Picker | Ctx::Filter) {
             a.open_index(0);
             assert!(!a.commit_rows().is_empty());
         }
@@ -636,6 +650,7 @@ pub(super) mod tests {
             Ctx::Comment => a.mode = Mode::Comment,
             Ctx::Popup => a.mode = Mode::Popup,
             Ctx::Picker => a.picker_open(),
+            Ctx::Filter => a.filter_start(),
             Ctx::Log | Ctx::Commit => {}
         }
         (t, a)
@@ -649,6 +664,7 @@ pub(super) mod tests {
             Ctx::Files,
             Ctx::Visual,
             Ctx::Search,
+            Ctx::Filter,
             Ctx::Comment,
             Ctx::Popup,
             Ctx::Picker,

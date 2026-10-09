@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Hand a debrief review to the mu agent whose workspace is $DEBRIEF_ROOT.
+# Reads the markdown on stdin. Exits 1 (so the caller falls back to the
+# clipboard) when mu or jq is missing, or no single workspace matches.
+set -euo pipefail
+
+command -v mu >/dev/null 2>&1 || { echo "debrief-send: mu not found" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "debrief-send: jq not found" >&2; exit 1; }
+
+text=$(cat)
+root="${DEBRIEF_ROOT:-}"
+[[ -n "$root" ]] || { echo "debrief-send: DEBRIEF_ROOT is not set" >&2; exit 1; }
+
+# Prints "<agent>\t<workstream>" for every workspace whose path is $root.
+listing=$(mu workspace list --all --json)
+matches=$(jq -r --arg r "$root" '
+  .items[]
+  | select((.path | rtrimstr("/")) == ($r | rtrimstr("/")))
+  | [.agentName, .workstreamName] | @tsv' <<<"$listing")
+
+if [[ -z "$matches" ]]; then
+  echo "debrief-send: no mu workspace at $root" >&2
+  exit 1
+fi
+if [[ $(wc -l <<<"$matches") -ne 1 ]]; then
+  echo "debrief-send: several mu workspaces at $root" >&2
+  exit 1
+fi
+IFS=$'\t' read -r agent workstream <<<"$matches"
+
+mu agent send "$agent" -w "$workstream" - <<<"$text"
+echo "sent to $agent" >&2

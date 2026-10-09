@@ -79,6 +79,16 @@ fn quote(p: &Path) -> String {
 /// Start the binary on `repo` in a fresh tmux server; the shell writes
 /// debrief's exit status to `status_file`.
 fn start(repo: &Path, cache: &Path, status_file: &Path, env: &str) -> Option<Tmux> {
+    start_with(repo, cache, status_file, env, "")
+}
+
+fn start_with(
+    repo: &Path,
+    cache: &Path,
+    status_file: &Path,
+    env: &str,
+    flags: &str,
+) -> Option<Tmux> {
     if Command::new("tmux").arg("-V").output().is_err() {
         eprintln!("skipping tui_e2e: tmux not found on PATH");
         return None;
@@ -92,7 +102,7 @@ fn start(repo: &Path, cache: &Path, status_file: &Path, env: &str) -> Option<Tmu
     };
     let bin = env!("CARGO_BIN_EXE_debrief");
     let shell_cmd = format!(
-        "env {env} {} {} --cache-dir {}; echo $? > {}",
+        "env {env} {} {} --cache-dir {} {flags}; echo $? > {}",
         quote(Path::new(bin)),
         quote(repo),
         quote(cache),
@@ -184,4 +194,139 @@ fn not_a_repo_exits_2_with_the_error() {
         err.starts_with("debrief: not a git or jj repository: "),
         "{err}"
     );
+}
+
+#[test]
+fn send_copies_the_review_with_one_osc52_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    commit(&root, "first");
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+    commit(&root, "second");
+    let status = dir.path().join("status");
+    // No [send] command: the review goes to the clipboard.
+    let env = format!("XDG_CONFIG_HOME={}", quote(&dir.path().join("cfg")));
+    let Some(tmux) = start(&root, &dir.path().join("cache"), &status, &env) else {
+        return;
+    };
+    tmux.wait_for("the log", |s| s.contains("second"));
+    // Record every byte the pane's program writes.
+    let raw = dir.path().join("pane.raw");
+    let pipe = format!("cat >> {}", quote(&raw));
+    assert!(
+        tmux.cmd(&["pipe-pane", "-O", "-t", "e2e", &pipe])
+            .status
+            .success()
+    );
+    tmux.keys(&["gg", "Enter"]);
+    tmux.wait_for("the diff", |s| s.contains("+two") || s.contains(" two"));
+    tmux.keys(&["G"]);
+    tmux.keys(&["c", "c"]);
+    tmux.wait_for("the prompt", |s| {
+        s.lines().any(|l| l.starts_with("comment:"))
+    });
+    tmux.keys(&["-l", "please explain"]);
+    tmux.keys(&["Enter"]);
+    tmux.wait_for("saved", |s| s.contains("Comment added (1 in batch)"));
+    tmux.keys(&["Space", "r", "r"]);
+    tmux.wait_for("sent", |s| {
+        s.contains("Review copied to clipboard (1 comments)")
+    });
+    // The pipe is asynchronous: give it a moment to drain.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let count = loop {
+        let bytes = std::fs::read(&raw).unwrap_or_default();
+        let n = bytes.windows(7).filter(|w| w == b"\x1b]52;c;").count();
+        if n > 0 || Instant::now() > deadline {
+            break n;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(count, 1, "exactly one OSC 52 write");
+    tmux.keys(&["q"]);
+    tmux.wait_for("the log", |s| s.contains("first"));
+    assert_eq!(tmux.quit(&status), "0");
+}
+
+#[test]
+fn git_working_copy_row_appears_live_and_opens() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    commit(&root, "first");
+    let status = dir.path().join("status");
+    let Some(tmux) = start(&root, &dir.path().join("cache"), &status, "") else {
+        return;
+    };
+    let screen = tmux.wait_for("the log", |s| s.contains("first"));
+    assert!(!screen.contains("Working copy"), "{screen}");
+    // The tree watcher picks up an edit on its own.
+    std::fs::write(root.join("a.txt"), "one\nlive edit\n").unwrap();
+    let screen = tmux.wait_for("the row", |s| s.contains("✎ Working copy  1 file"));
+    assert!(screen.contains("working copy dirty"), "{screen}");
+    tmux.keys(&["gg", "Enter"]);
+    tmux.wait_for("the diff", |s| {
+        s.contains("Working copy (uncommitted) on ") && s.contains("+ live edit")
+    });
+    tmux.keys(&["q"]);
+    tmux.wait_for("the log", |s| s.contains("first"));
+    assert_eq!(tmux.quit(&status), "0");
+}
+
+#[test]
+fn jj_snapshot_and_no_snapshot() {
+    if !have_jj() {
+        return;
+    }
+    let e = JjEnv::new(false);
+    e.write("a.txt", "one\n");
+    e.jj(&["--quiet", "commit", "-m", "jj first"]);
+    e.write("a.txt", "one\nunsnapshotted\n");
+    let dir = e.root.parent().unwrap();
+    let env = format!("JJ_CONFIG={}", quote(Path::new(&e.cfg)));
+    let ops = e.op_count();
+    // --no-snapshot: @ is as of the last jj command, nothing is written.
+    let status = dir.join("status1");
+    let Some(tmux) = start_with(
+        &e.root,
+        &dir.join("cache"),
+        &status,
+        &env,
+        "--no-snapshot --revset '::@ ~ root()'",
+    ) else {
+        return;
+    };
+    tmux.wait_for("the log", |s| s.contains("jj first"));
+    tmux.keys(&["gg", "Enter"]);
+    let screen = tmux.wait_for("@ open", |s| {
+        s.contains("nothing to show") || s.contains("1/")
+    });
+    assert!(!screen.contains("unsnapshotted"), "{screen}");
+    tmux.keys(&["q"]);
+    tmux.wait_for("the log", |s| s.contains("jj first"));
+    assert_eq!(tmux.quit(&status), "0");
+    assert_eq!(e.op_count(), ops);
+    drop(tmux);
+    // Default: the snapshot makes the edit visible in @.
+    let status = dir.join("status2");
+    let Some(tmux) = start_with(
+        &e.root,
+        &dir.join("cache"),
+        &status,
+        &env,
+        "--revset '::@ ~ root()'",
+    ) else {
+        return;
+    };
+    tmux.wait_for("the log", |s| s.contains("jj first"));
+    tmux.keys(&["gg", "Enter"]);
+    tmux.wait_for("the edit", |s| s.contains("+ unsnapshotted"));
+    tmux.keys(&["q"]);
+    tmux.wait_for("the log", |s| s.contains("jj first"));
+    assert_eq!(tmux.quit(&status), "0");
 }

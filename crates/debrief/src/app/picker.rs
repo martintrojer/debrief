@@ -327,11 +327,9 @@ impl App {
         let n = ids.len();
         let md = r.to_markdown(self.config.send.preamble.as_deref());
         let root = r.root().to_path_buf();
-        let output = &mut self.output;
-        let mut copy = |text: &str| -> std::io::Result<()> {
-            output.extend(super::osc52(text).into_bytes());
-            Ok(())
-        };
+        let terminal = &mut self.terminal;
+        let mut copy =
+            |text: &str| -> std::io::Result<()> { terminal(super::osc52(text).as_bytes()) };
         let how = match handback::send(&self.config.send.command, &md, &root, &mut copy) {
             Ok(Sent::Command) => "sent",
             Ok(Sent::Clipboard) => "copied to clipboard",
@@ -360,6 +358,13 @@ impl App {
     /// sent comments (tests add a comment there from another handle).
     pub fn with_after_export(mut self, f: impl FnMut() + 'static) -> Self {
         self.after_export = Some(Box::new(f));
+        self
+    }
+
+    /// Injects the terminal writer a send's clipboard copy goes through
+    /// (stdout in production).
+    pub fn with_terminal(mut self, w: impl FnMut(&[u8]) -> std::io::Result<()> + 'static) -> Self {
+        self.terminal = Box::new(w);
         self
     }
 }

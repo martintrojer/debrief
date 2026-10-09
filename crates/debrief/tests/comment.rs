@@ -606,15 +606,39 @@ fn send_pipes_the_markdown_and_removes_what_it_sent() {
 #[test]
 fn a_failing_command_copies_to_the_clipboard() {
     let f = fixture();
-    let mut app = app_with_send(&f, &["false"]);
+    let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
+    let sink = written.clone();
+    let mut app = app_with_send(&f, &["false"]).with_terminal(move |b| {
+        sink.borrow_mut().extend_from_slice(b);
+        Ok(())
+    });
     let top = app.rows()[0].info.commit.clone();
     add_diff(&f, &top, "a.txt", 3, "x");
     keys(&mut app, " rr");
     app.run_pending_effect();
     assert_eq!(app.status(), "Review copied to clipboard (1 comments)");
-    let out = String::from_utf8(app.take_output()).unwrap();
+    let out = String::from_utf8(written.borrow().clone()).unwrap();
     assert!(out.starts_with("\x1b]52;c;"), "{out:?}");
+    assert!(app.take_output().is_empty(), "written directly, not queued");
     assert!(f.comments().is_empty());
+}
+
+#[test]
+fn a_failing_clipboard_write_keeps_the_batch() {
+    let f = fixture();
+    let mut app = app_with_send(&f, &["false"])
+        .with_terminal(|_| Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)));
+    let top = app.rows()[0].info.commit.clone();
+    add_diff(&f, &top, "a.txt", 3, "x");
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert!(
+        app.status().starts_with("Review not sent: "),
+        "{}",
+        app.status()
+    );
+    assert!(app.status().contains("roken pipe"), "{}", app.status());
+    assert_eq!(f.comments().len(), 1, "batch kept");
 }
 
 #[test]

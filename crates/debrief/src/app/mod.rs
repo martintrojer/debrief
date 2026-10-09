@@ -164,6 +164,19 @@ pub struct App {
     picker: Option<picker::Picker>,
     /// Test hook between a send's export and its removal.
     after_export: Option<Box<dyn FnMut()>>,
+    /// Writes and flushes bytes to the terminal (stdout; a send's OSC 52
+    /// clipboard copy goes through it so its IO error is seen).
+    terminal: Box<TerminalWriter>,
+}
+
+/// Writes bytes straight to the terminal and flushes them.
+pub type TerminalWriter = dyn FnMut(&[u8]) -> std::io::Result<()>;
+
+fn stdout_write(bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    out.write_all(bytes)?;
+    out.flush()
 }
 
 impl App {
@@ -208,6 +221,7 @@ impl App {
             popup: None,
             picker: None,
             after_export: None,
+            terminal: Box::new(stdout_write),
         };
         app.review_open();
         app.config = app.opts.config.clone();

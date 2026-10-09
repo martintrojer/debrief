@@ -8,6 +8,7 @@ pub mod commit;
 pub mod config;
 pub mod display;
 mod help;
+pub mod highlight;
 mod keys;
 pub mod launch;
 mod log;

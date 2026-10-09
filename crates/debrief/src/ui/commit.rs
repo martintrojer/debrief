@@ -185,7 +185,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 spans.push(Span::styled("─".repeat(end - col), base));
             }
         }
-        if focused && i == cur.row && r.text.is_empty() && sel.is_none() {
+        // A row with no cells (empty, or only a hidden trailing CR) still
+        // shows the cursor.
+        if focused && i == cur.row && display::cells(&r.text).is_empty() && sel.is_none() {
             spans.push(Span::styled(" ", base.add_modifier(Modifier::REVERSED)));
         }
         lines.push(Line::from(spans).style(base));

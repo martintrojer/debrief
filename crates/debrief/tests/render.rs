@@ -292,6 +292,23 @@ fn cr_and_control_characters() {
 }
 
 #[test]
+fn the_cursor_shows_on_a_blank_crlf_line() {
+    let (_tmp, mut app) = open(vec![file(
+        Some("a"),
+        Some("a"),
+        vec![line(LineKind::Added, 1, "\r")],
+    )]);
+    let r = diff_row(&app, "\r");
+    goto(&mut app, r);
+    let buf = draw(&mut app, 79, 12);
+    let reversed = (0..buf.area.height)
+        .flat_map(|y| (0..79).map(move |x| (x, y)))
+        .filter(|&p| buf[p].style().add_modifier.contains(Modifier::REVERSED))
+        .count();
+    assert_eq!(reversed, 1);
+}
+
+#[test]
 fn backgrounds_fill_the_pane_and_the_sign_is_coloured() {
     let (_tmp, mut app) = open(vec![file(
         Some("a"),

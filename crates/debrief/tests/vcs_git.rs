@@ -2,19 +2,8 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::{assert_same, sh, snapshot};
+use common::{assert_same, commit, git, sh, snapshot};
 use debrief::vcs::{self, Kind, LineKind};
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let mut a = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
-    a.extend_from_slice(args);
-    sh(dir, "git", &a)
-}
-
-fn commit(dir: &Path, msg: &str) {
-    git(dir, &["add", "-A"]);
-    git(dir, &["commit", "-q", "-m", msg]);
-}
 
 /// A repo with three commits: add, modify + add, rename with edit.
 fn repo() -> (tempfile::TempDir, PathBuf) {

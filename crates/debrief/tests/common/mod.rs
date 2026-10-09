@@ -68,3 +68,94 @@ pub fn assert_same(before: &Snapshot, after: &Snapshot) {
         panic!("repo metadata changed: {changed:?}");
     }
 }
+
+/// git with a fixed identity.
+pub fn git(dir: &Path, args: &[&str]) -> String {
+    let mut a = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
+    a.extend_from_slice(args);
+    sh(dir, "git", &a)
+}
+
+/// `git add -A` and commit.
+pub fn commit(dir: &Path, msg: &str) {
+    git(dir, &["add", "-A"]);
+    git(dir, &["commit", "-q", "-m", msg]);
+}
+
+/// jj is on PATH; prints a skip note when it is not.
+pub fn have_jj() -> bool {
+    let ok = Command::new("jj")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !ok {
+        eprintln!("skipping: jj is not installed");
+    }
+    ok
+}
+
+/// A throwaway jj repo with its own user config.
+pub struct JjEnv {
+    pub _tmp: tempfile::TempDir,
+    pub cfg: String,
+    pub root: PathBuf,
+}
+
+impl JjEnv {
+    pub fn new(colocate: bool) -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("jj.toml");
+        std::fs::write(
+            &cfg,
+            "[user]\nname = \"t\"\nemail = \"t@t\"\n[ui]\nconflict-marker-style = \"diff\"\n",
+        )
+        .unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let env = JjEnv {
+            cfg: cfg.to_str().unwrap().to_string(),
+            root,
+            _tmp: tmp,
+        };
+        let mut args = vec!["--quiet", "git", "init"];
+        if colocate {
+            args.push("--colocate");
+        }
+        env.jj(&args);
+        let root = env.root.canonicalize().unwrap();
+        JjEnv { root, ..env }
+    }
+
+    /// Run jj in the repo with the test config (ordinary, writing jj).
+    pub fn jj(&self, args: &[&str]) -> String {
+        sh_env(&self.root, "jj", args, &[("JJ_CONFIG", &self.cfg)])
+    }
+
+    pub fn write(&self, path: &str, text: &str) {
+        std::fs::write(self.root.join(path), text).unwrap();
+    }
+
+    pub fn op_count(&self) -> usize {
+        self.jj(&[
+            "--ignore-working-copy",
+            "--at-op=@",
+            "op",
+            "log",
+            "--no-graph",
+            "-T",
+            "id ++ \"\\n\"",
+        ])
+        .lines()
+        .count()
+    }
+
+    pub fn op_heads(&self) -> Vec<String> {
+        let mut v: Vec<_> = std::fs::read_dir(self.root.join(".jj/repo/op_heads/heads"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+}

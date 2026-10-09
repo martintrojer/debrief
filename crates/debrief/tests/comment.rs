@@ -16,6 +16,7 @@ use debrief::vcs::{self, LineKind};
 use debrief_review::{Comment, Rev, Review, Side};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::text::Span;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -354,11 +355,22 @@ fn press_ctrl(app: &mut App, c: char) {
 #[test]
 fn gutter_marker_jump_preview_and_popup() {
     let f = fixture();
-    let mut app = f.open();
+    // A two-line body comes from the editor; the prompt is one line.
+    let script = f.root.parent().unwrap().join("ed.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf 'first line\\nsecond' > \"$1\"\n",
+    )
+    .unwrap();
+    let mut app = f.open().with_env({
+        let s = format!("sh {}", script.display());
+        move |k| (k == "EDITOR").then(|| s.clone())
+    });
     let row = added(&app, "a40 new");
     goto(&mut app, row);
     keys(&mut app, "cc");
-    type_and_save(&mut app, "first line\nsecond");
+    press_ctrl(&mut app, 'e');
+    app.run_pending_effect();
     assert_eq!(app.review_marked_rows(), [row]);
     let s = screen(&mut app);
     let drawn: Vec<_> = s.iter().filter(|l| l.contains(MARKER)).collect();
@@ -961,4 +973,95 @@ fn send_exports_the_label_and_a_legend_of_the_configured_kinds() {
     assert!(md.contains("## Item 1 [PRAISE]"), "{md}");
     assert!(md.contains("- PRAISE: Keep doing this."), "{md}");
     assert!(!md.contains("ISSUE"), "only used kinds: {md}");
+}
+
+// Editing in the prompt (the shared text box).
+
+fn press_mod(app: &mut App, code: KeyCode, m: KeyModifiers) {
+    app.key(KeyEvent::new(code, m));
+}
+
+#[test]
+fn the_prompt_edits_at_the_cursor() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    keys(&mut app, "why this here");
+    press_mod(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
+    press_mod(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
+    keys(&mut app, "is ");
+    assert_eq!(app.comment_prompt().unwrap(), "comment: why is this here");
+    press_ctrl(&mut app, 'a');
+    press(&mut app, KeyCode::Delete);
+    keys(&mut app, "W");
+    press(&mut app, KeyCode::End);
+    press_ctrl(&mut app, 'w');
+    keys(&mut app, "there?");
+    assert_eq!(app.comment_prompt().unwrap(), "comment: Why is this there?");
+    press(&mut app, KeyCode::Home);
+    press_mod(&mut app, KeyCode::Char('f'), KeyModifiers::ALT);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press_ctrl(&mut app, 'u');
+    press(&mut app, KeyCode::Left);
+    press(&mut app, KeyCode::Backspace);
+    assert_eq!(app.comment_prompt().unwrap(), "comment:  this there?");
+    press(&mut app, KeyCode::Delete);
+    // Pasted text goes in at the cursor too.
+    paste(&mut app, "is\n");
+    assert_eq!(app.comment_prompt().unwrap(), "comment: is this there?");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(f.comments()[0].body, "is this there?");
+}
+
+/// The status row (the last one; a wide grapheme's second cell left
+/// out) and the terminal cursor.
+fn prompt_row(app: &mut App, width: u16) -> (String, (u16, u16)) {
+    let mut t = Terminal::new(TestBackend::new(width, 30)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let buf = t.backend().buffer().clone();
+    let mut row = String::new();
+    let mut x = 0;
+    while x < width {
+        let sym = buf[(x, 29)].symbol();
+        row.push_str(sym);
+        x += Span::raw(sym).width().max(1) as u16;
+    }
+    let pos = t.get_cursor_position().unwrap();
+    (row, (pos.x, pos.y))
+}
+
+#[test]
+fn a_long_comment_scrolls_in_the_prompt_and_shows_the_cursor() {
+    let f = fixture();
+    let mut app = f.open();
+    let r = added(&app, "a3 new");
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    let (row, cur) = prompt_row(&mut app, 40);
+    assert_eq!((row.trim_end(), cur), ("comment:", (9, 29)));
+    let long = "the quick brown fox jumps over the lazy dog again";
+    keys(&mut app, long);
+    // 40 cells: 9 for the label, 30 for text, 1 for the cursor.
+    let (row, cur) = prompt_row(&mut app, 40);
+    assert_eq!(row, format!("comment: {}", &long[long.len() - 30..]) + " ");
+    assert_eq!(cur, (39, 29));
+    press(&mut app, KeyCode::Home);
+    let (row, cur) = prompt_row(&mut app, 40);
+    assert_eq!(row, format!("comment: {}", &long[..31]));
+    assert_eq!(cur, (9, 29));
+    // Wide graphemes count two cells.
+    press_ctrl(&mut app, 'u');
+    press(&mut app, KeyCode::End);
+    press_ctrl(&mut app, 'w');
+    keys(&mut app, "좋아요");
+    press(&mut app, KeyCode::Left);
+    let (row, cur) = prompt_row(&mut app, 40);
+    // The cursor is on 요, so no spare cell: 요 takes the last two.
+    assert_eq!(row, "comment:  jumps over the lazy dog 좋아요");
+    assert_eq!(cur, (38, 29));
+    press(&mut app, KeyCode::Enter);
+    assert!(f.comments()[0].body.ends_with("lazy dog 좋아요"));
 }

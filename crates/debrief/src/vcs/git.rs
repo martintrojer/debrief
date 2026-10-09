@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::{
-    CommitDiff, CommitInfo, CommitStat, DiffLine, FileDiff, FileStat, Hunk, Kind, LineKind,
-    OpenOptions, Vcs, WorkingCopy, parse_unified, run,
+    CommitDiff, CommitInfo, CommitStat, Context as DiffContext, DiffLine, FULL_CONTEXT, FileDiff,
+    FileStat, Hunk, Kind, LineKind, OpenOptions, Vcs, WorkingCopy, parse_unified, run,
 };
 
 /// Bytes of an untracked file sniffed for a NUL (binary).
@@ -192,6 +192,11 @@ fn added_hunk(lines: Vec<String>, no_newline: bool) -> Hunk {
     }
 }
 
+/// `-U<n>` for a full-file diff; nothing (git's default) for hunks.
+fn context_flag(context: DiffContext) -> Option<String> {
+    (context == DiffContext::Full).then(|| format!("-U{FULL_CONTEXT}"))
+}
+
 fn git_in(dir: &Path, args: &[&str]) -> Result<String> {
     let mut argv: Vec<&OsStr> = vec![
         "--no-optional-locks".as_ref(),
@@ -245,7 +250,7 @@ impl Vcs for Git {
             .collect()
     }
 
-    fn show(&self, commit: &str) -> Result<CommitDiff> {
+    fn show(&self, commit: &str, context: DiffContext) -> Result<CommitDiff> {
         let id = self.resolve(commit)?;
         let message = self.git(&["show", "-s", "--no-color", "--format=%B", &id, "--"])?;
         let mut args = vec![
@@ -256,6 +261,8 @@ impl Vcs for Git {
             "--patch",
             "-M",
         ];
+        let unified = context_flag(context);
+        args.extend(unified.as_deref());
         args.extend_from_slice(DIFF_FLAGS);
         args.extend_from_slice(&[&id, "--"]);
         let patch = self.git(&args)?;
@@ -281,7 +288,7 @@ impl Vcs for Git {
         parse_numstat(&self.git(&args)?)
     }
 
-    fn working_copy(&self) -> Result<Option<WorkingCopy>> {
+    fn working_copy(&self, context: DiffContext) -> Result<Option<WorkingCopy>> {
         let head = self.head();
         let against = match &head {
             Some(id) => id.clone(),
@@ -290,6 +297,8 @@ impl Vcs for Git {
         // `diff-index` (plumbing), not `diff`: porcelain `git diff`
         // refreshes the index's stat data even with --no-optional-locks.
         let mut args = vec!["diff-index", "--patch", "-M"];
+        let unified = context_flag(context);
+        args.extend(unified.as_deref());
         args.extend_from_slice(DIFF_FLAGS);
         args.extend_from_slice(&[&against, "--"]);
         let patch = self.git(&args)?;

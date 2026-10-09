@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::{
-    CommitDiff, CommitInfo, CommitStat, Kind, OpenOptions, Vcs, file_stats, parse_unified, run,
+    CommitDiff, CommitInfo, CommitStat, Context as DiffContext, FULL_CONTEXT, Kind, OpenOptions,
+    Vcs, file_stats, parse_unified, run,
 };
 
 const LOG_TEMPLATE: &str = r#"commit_id ++ "\x1f" ++ change_id ++ "\x1f" ++ author.name() ++ "\x1f" ++ author.timestamp().format("%s") ++ "\x1f" ++ description.first_line() ++ "\x1f" ++ parents.map(|c| c.commit_id()).join(" ") ++ "\x1e""#;
@@ -216,13 +217,18 @@ impl Vcs for Jj {
             .collect()
     }
 
-    fn show(&self, commit: &str) -> Result<CommitDiff> {
+    fn show(&self, commit: &str, context: DiffContext) -> Result<CommitDiff> {
         // One operation for all three calls: a consistent snapshot.
         let op = self.at_op()?;
         let id = self.resolve(&op, commit)?;
         let rev = format!("--revisions={id}");
         let message = self.jj(&op, &["log", "--no-graph", &rev, "-T", "description"])?;
-        let patch = self.jj(&op, &["diff", "--git", &rev])?;
+        let full = format!("--context={FULL_CONTEXT}");
+        let mut args = vec!["diff", "--git", &rev];
+        if context == DiffContext::Full {
+            args.push(&full);
+        }
+        let patch = self.jj(&op, &args)?;
         Ok(CommitDiff {
             message: message.trim_end_matches('\n').to_string(),
             files: parse_unified(&patch),

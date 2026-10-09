@@ -304,7 +304,7 @@ impl App {
             (Some(w), true) => w.diff.clone(),
             _ => self
                 .vcs
-                .show(&info.info.commit)
+                .show(&info.info.commit, crate::vcs::Context::Default)
                 .map_err(|e| format!("cannot show the commit: {e:#}"))?,
         };
         let Some(first) = diff.files.first() else {

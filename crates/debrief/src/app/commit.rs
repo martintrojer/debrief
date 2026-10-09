@@ -13,7 +13,9 @@ use std::path::PathBuf;
 
 use ratatui::layout::Rect;
 
-use crate::vcs::{CommitDiff, CommitInfo, FileDiff, Kind, LineKind, OpenOptions, WorkingCopy};
+use crate::vcs::{
+    CommitDiff, CommitInfo, Context, FileDiff, Kind, LineKind, OpenOptions, WorkingCopy,
+};
 
 use super::highlight::{self, DiffSpans, Spans};
 use super::motion::{Cell, Cursor, row_cells};
@@ -337,7 +339,7 @@ fn spawn_show(
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
-            .and_then(|v| v.show(&commit))
+            .and_then(|v| v.show(&commit, Context::Default))
             .map_err(|e| format!("{e:#}"));
         let diff = result.as_ref().ok().filter(|_| colour).cloned();
         if tx.send(AppEvent::Loaded { request, result }).is_err() {
@@ -429,7 +431,10 @@ impl App {
                 spawn_show(at, id, request, colour, tx)
             }
             None => {
-                let result = self.vcs.show(&id).map_err(|e| format!("{e:#}"));
+                let result = self
+                    .vcs
+                    .show(&id, Context::Default)
+                    .map_err(|e| format!("{e:#}"));
                 let diff = result.as_ref().ok().cloned();
                 self.loaded(request, result);
                 if let Some(diff) = diff {

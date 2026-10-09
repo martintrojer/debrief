@@ -3,7 +3,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::{assert_same, commit, git, git_dir_snapshot, sh, snapshot};
-use debrief::vcs::{self, Kind, LineKind};
+use debrief::vcs::{self, Context, Kind, LineKind};
 
 /// A repo with three commits: add, modify + add, rename with edit.
 fn repo() -> (tempfile::TempDir, PathBuf) {
@@ -65,7 +65,7 @@ fn show_parses_files() {
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let log = v.log(None, 10).unwrap();
 
-    let third = v.show(&log[0].commit).unwrap();
+    let third = v.show(&log[0].commit, Context::Default).unwrap();
     assert_eq!(third.message, "third: rename");
     assert_eq!(third.files.len(), 1);
     let f = &third.files[0];
@@ -77,7 +77,7 @@ fn show_parses_files() {
             .any(|l| l.kind == LineKind::Added && l.text == "B5")
     );
 
-    let second = v.show(&log[1].commit).unwrap();
+    let second = v.show(&log[1].commit, Context::Default).unwrap();
     let names: Vec<_> = second
         .files
         .iter()
@@ -88,7 +88,7 @@ fn show_parses_files() {
         [(Some("a.txt"), Some("a.txt")), (None, Some("b.txt"))]
     );
     // Short and symbolic revisions resolve too.
-    assert_eq!(v.show("HEAD~1").unwrap(), second);
+    assert_eq!(v.show("HEAD~1", Context::Default).unwrap(), second);
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn root_commit_shows_added_files() {
     let (_t, root) = repo();
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let first = v.log(None, 10).unwrap().pop().unwrap();
-    let d = v.show(&first.commit).unwrap();
+    let d = v.show(&first.commit, Context::Default).unwrap();
     assert_eq!(d.message, "first\n\nbody line");
     let added: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
     assert_eq!(added, [Some("a.txt"), Some("sub/keep.txt")]);
@@ -109,7 +109,7 @@ fn root_commit_shows_files_despite_show_root_false() {
     git(&root, &["config", "log.showRoot", "false"]);
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let first = v.log(None, 10).unwrap().pop().unwrap();
-    let d = v.show(&first.commit).unwrap();
+    let d = v.show(&first.commit, Context::Default).unwrap();
     let added: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
     assert_eq!(added, [Some("a.txt"), Some("sub/keep.txt")]);
 }
@@ -125,7 +125,7 @@ fn merge_shows_first_parent_diff() {
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let head = &v.log(None, 1).unwrap()[0];
     assert_eq!(head.parents.len(), 2);
-    let d = v.show(&head.commit).unwrap();
+    let d = v.show(&head.commit, Context::Default).unwrap();
     let names: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
     assert_eq!(names, [Some("side.txt")]);
 }
@@ -198,7 +198,7 @@ fn log_and_show_do_not_write() {
     let before = git_snapshot(&root);
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     for c in v.log(None, 200).unwrap() {
-        v.show(&c.commit).unwrap();
+        v.show(&c.commit, Context::Default).unwrap();
     }
     v.log(Some("HEAD~1"), 5).unwrap();
     let after = git_snapshot(&root);
@@ -229,7 +229,7 @@ fn hostile_config_still_parses_and_writes_nothing() {
     let before = git_snapshot(&root);
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let head = &v.log(None, 1).unwrap()[0];
-    let d = v.show(&head.commit).unwrap();
+    let d = v.show(&head.commit, Context::Default).unwrap();
     let names: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
     assert_eq!(names, [Some(".gitattributes"), Some("é.txt")]);
     // No textconv: the original text, not upper-cased.
@@ -275,7 +275,7 @@ fn show_and_log_shape_ignore_output_config() {
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let head = &v.log(None, 1).unwrap()[0];
     assert_eq!(head.summary, "é sub");
-    let d = v.show(&head.commit).unwrap();
+    let d = v.show(&head.commit, Context::Default).unwrap();
     assert_eq!(d.message, "é sub");
     let names: Vec<_> = d.files.iter().map(|f| f.new_path.as_deref()).collect();
     assert_eq!(names, [Some(".gitmodules"), Some("sm"), Some("z.txt")]);
@@ -288,7 +288,7 @@ fn option_like_revisions_are_rejected() {
     let out = t.path().join("x");
     let flag = format!("--output={}", out.display());
     assert!(v.log(Some(&flag), 10).is_err());
-    assert!(v.show(&flag).is_err());
+    assert!(v.show(&flag, Context::Default).is_err());
     assert!(!out.exists());
 }
 
@@ -298,7 +298,7 @@ fn failed_command_carries_stderr() {
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let err = format!("{:#}", v.log(Some("no-such-ref"), 10).err().unwrap());
     assert!(err.contains("no-such-ref"), "{err}");
-    assert!(v.show("no-such-ref").is_err());
+    assert!(v.show("no-such-ref", Context::Default).is_err());
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn partial_clone_missing_objects_error() {
     let log = v.log(None, 10).unwrap();
     assert_eq!(log.len(), 3);
     // Blobs are missing and --no-lazy-fetch forbids fetching them.
-    assert!(v.show(&log[0].commit).is_err());
+    assert!(v.show(&log[0].commit, Context::Default).is_err());
     assert_same(&before, &snapshot(&clone.join(".git")));
 }
 
@@ -344,11 +344,11 @@ fn open(root: &Path) -> Box<dyn vcs::Vcs> {
 #[test]
 fn clean_tree_has_no_working_copy() {
     let (_t, root) = repo();
-    assert_eq!(open(&root).working_copy().unwrap(), None);
+    assert_eq!(open(&root).working_copy(Context::Default).unwrap(), None);
     // An ignored file doesn't count.
     std::fs::write(root.join(".git/info/exclude"), "*.log\n").unwrap();
     std::fs::write(root.join("x.log"), "x\n").unwrap();
-    assert_eq!(open(&root).working_copy().unwrap(), None);
+    assert_eq!(open(&root).working_copy(Context::Default).unwrap(), None);
 }
 
 #[test]
@@ -356,7 +356,7 @@ fn dirty_tracked_file_is_the_working_copy_on_head() {
     let (_t, root) = repo();
     std::fs::write(root.join("a.txt"), "one\nTWO\nthree\nfour\n").unwrap();
     let v = open(&root);
-    let w = v.working_copy().unwrap().unwrap();
+    let w = v.working_copy(Context::Default).unwrap().unwrap();
     assert_eq!(w.files, 1);
     assert_eq!(w.diff.message, "");
     let head = &v.log(None, 1).unwrap()[0];
@@ -377,7 +377,7 @@ fn untracked_files_show_as_added() {
     let (_t, root) = repo();
     std::fs::write(root.join("new.txt"), "n1\nn2").unwrap();
     std::fs::write(root.join("empty.txt"), "").unwrap();
-    let w = open(&root).working_copy().unwrap().unwrap();
+    let w = open(&root).working_copy(Context::Default).unwrap().unwrap();
     assert_eq!(w.files, 2);
     let f = w
         .diff
@@ -423,7 +423,7 @@ fn binary_large_symlink_and_special_untracked_files() {
         vcs::untracked_file(&root, "fifo").note.as_deref(),
         Some(vcs::SPECIAL_FILE)
     );
-    let w = open(&root).working_copy().unwrap().unwrap();
+    let w = open(&root).working_copy(Context::Default).unwrap().unwrap();
     let by = |p: &str| {
         w.diff
             .files
@@ -445,7 +445,7 @@ fn deleted_and_renamed_tracked_files() {
     let (_t, root) = repo();
     std::fs::remove_file(root.join("sub/keep.txt")).unwrap();
     std::fs::rename(root.join("a.txt"), root.join("z.txt")).unwrap();
-    let w = open(&root).working_copy().unwrap().unwrap();
+    let w = open(&root).working_copy(Context::Default).unwrap().unwrap();
     let names: Vec<_> = w
         .diff
         .files
@@ -474,12 +474,12 @@ fn unborn_head_diffs_against_the_empty_tree() {
         let v = open(&root);
         assert!(v.log(None, 10).unwrap().is_empty(), "{format}");
         assert!(v.log(Some("HEAD"), 10).is_err(), "a named revision errors");
-        assert_eq!(v.working_copy().unwrap(), None, "{format}");
+        assert_eq!(v.working_copy(Context::Default).unwrap(), None, "{format}");
         std::fs::write(root.join("staged.txt"), "s\n").unwrap();
         git(&root, &["add", "staged.txt"]);
         std::fs::write(root.join("loose.txt"), "l\n").unwrap();
         let before = git_snapshot(&root);
-        let w = v.working_copy().unwrap().unwrap();
+        let w = v.working_copy(Context::Default).unwrap().unwrap();
         assert_eq!(w.base, None, "{format}");
         let mut names: Vec<_> = w
             .diff
@@ -515,7 +515,7 @@ fn working_copy_writes_nothing() {
     let before = git_snapshot(&root);
     let v = open(&root);
     for _ in 0..2 {
-        v.working_copy().unwrap().unwrap();
+        v.working_copy(Context::Default).unwrap().unwrap();
     }
     let after = git_snapshot(&root);
     assert_same(&before.0, &after.0);
@@ -552,7 +552,7 @@ fn split_index_contents_stay_unchanged() {
     let before = git_snapshot(&root);
     let raw_before = snapshot(&root.join(".git"));
     let v = open(&root);
-    v.working_copy().unwrap().unwrap();
+    v.working_copy(Context::Default).unwrap().unwrap();
     v.log(None, 5).unwrap();
     assert_same(&before.0, &git_snapshot(&root).0);
     // Every file's contents, shared index included, are unchanged.
@@ -632,4 +632,63 @@ fn stat_of_an_empty_commit_has_no_files() {
     let s = v.stat("HEAD").unwrap();
     assert_eq!(s.message, "empty");
     assert!(s.files.is_empty());
+}
+
+/// 40 numbered lines, then line 20 changed.
+fn long_file_repo() -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line {i}")).collect();
+    std::fs::write(root.join("f.txt"), lines.join("\n") + "\n").unwrap();
+    commit(&root, "base");
+    lines[19] = "line twenty".into();
+    std::fs::write(root.join("f.txt"), lines.join("\n") + "\n").unwrap();
+    commit(&root, "change");
+    (tmp, root.canonicalize().unwrap())
+}
+
+fn new_lines(f: &vcs::FileDiff) -> Vec<u32> {
+    f.hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .filter_map(|l| l.new)
+        .collect()
+}
+
+#[test]
+fn full_context_shows_the_whole_file() {
+    let (_t, root) = long_file_repo();
+    let v = open(&root);
+    let hunks = v.show("HEAD", Context::Default).unwrap();
+    // Default is git's three lines of context.
+    assert_eq!(new_lines(&hunks.files[0]), (17..=23).collect::<Vec<_>>());
+    let full = v.show("HEAD", Context::Full).unwrap();
+    assert_eq!(full.message, hunks.message);
+    let f = &full.files[0];
+    assert_eq!(f.hunks.len(), 1, "one hunk header per file");
+    assert_eq!(new_lines(f), (1..=40).collect::<Vec<_>>());
+    assert_eq!(f.hunks[0].lines[0].text, "line 1");
+    let changed = |d: &vcs::CommitDiff| -> usize {
+        d.files[0]
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .filter(|l| l.kind != LineKind::Context)
+            .count()
+    };
+    assert_eq!(changed(&full), changed(&hunks));
+}
+
+#[test]
+fn full_context_working_copy() {
+    let (_t, root) = long_file_repo();
+    let text = std::fs::read_to_string(root.join("f.txt")).unwrap();
+    std::fs::write(root.join("f.txt"), text.replace("line 2\n", "line two\n")).unwrap();
+    let v = open(&root);
+    let w = v.working_copy(Context::Default).unwrap().unwrap();
+    assert_eq!(new_lines(&w.diff.files[0]), (1..=5).collect::<Vec<_>>());
+    let w = v.working_copy(Context::Full).unwrap().unwrap();
+    assert_eq!(new_lines(&w.diff.files[0]), (1..=40).collect::<Vec<_>>());
 }

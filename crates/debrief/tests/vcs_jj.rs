@@ -1,7 +1,7 @@
 mod common;
 
 use common::{JjEnv as Env, assert_same, have_jj, snapshot};
-use debrief::vcs::{self, Kind, LineKind, OpenOptions};
+use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
 
 /// The strict read-only tests open without snapshots (K7).
 const NO_SNAPSHOT: OpenOptions = OpenOptions { snapshot: false };
@@ -51,7 +51,7 @@ fn show_parses_message_and_diff() {
     let e = sample();
     let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let log = v.log(Some("::@ ~ root()"), 200).unwrap();
-    let second = v.show(&log[1].commit).unwrap();
+    let second = v.show(&log[1].commit, Context::Default).unwrap();
     assert_eq!(second.message, "second");
     let names: Vec<_> = second
         .files
@@ -67,10 +67,15 @@ fn show_parses_message_and_diff() {
         l.iter()
             .any(|l| l.kind == LineKind::Added && l.text == "TWO")
     );
-    let first = v.show(&log[2].commit).unwrap();
+    let first = v.show(&log[2].commit, Context::Default).unwrap();
     assert_eq!(first.message, "first\n\nbody");
     // The empty working-copy commit has no files.
-    assert!(v.show(&log[0].commit).unwrap().files.is_empty());
+    assert!(
+        v.show(&log[0].commit, Context::Default)
+            .unwrap()
+            .files
+            .is_empty()
+    );
 }
 
 #[test]
@@ -101,7 +106,7 @@ fn log_and_show_do_not_write() {
     let before = snapshot(&e.root.join(".jj"));
     let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     for c in v.log(None, 200).unwrap() {
-        v.show(&c.commit).unwrap();
+        v.show(&c.commit, Context::Default).unwrap();
     }
     v.log(Some("::@"), 200).unwrap();
     assert_same(&before, &snapshot(&e.root.join(".jj")));
@@ -146,7 +151,10 @@ fn divergent_op_heads_are_left_alone() {
     // We refuse rather than let jj merge (or lock) the op heads.
     let err = format!("{:#}", v.log(None, 10).err().unwrap());
     assert!(err.contains("divergent jj operation heads"), "{err}");
-    assert!(v.show("0000000000000000000000000000000000000000").is_err());
+    assert!(
+        v.show("0000000000000000000000000000000000000000", Context::Default)
+            .is_err()
+    );
     assert_eq!(e.op_heads(), heads);
     assert_same(&before, &snapshot(&e.root.join(".jj")));
 }
@@ -176,8 +184,11 @@ fn option_like_revsets_are_rejected() {
     let out = e.root.parent().unwrap().join("x");
     let flag = format!("--output={}", out.display());
     assert!(v.log(Some(&flag), 10).is_err());
-    assert!(v.show(&flag).is_err());
-    assert!(v.show("@-").is_err(), "show takes IDs, not revsets");
+    assert!(v.show(&flag, Context::Default).is_err());
+    assert!(
+        v.show("@-", Context::Default).is_err(),
+        "show takes IDs, not revsets"
+    );
     assert!(!out.exists());
 }
 
@@ -197,7 +208,7 @@ fn failed_command_carries_stderr() {
 /// The text of `a.txt`'s added lines in `@`'s diff.
 fn at_added(v: &dyn vcs::Vcs) -> Vec<String> {
     let at = v.working_copy_commit().unwrap().unwrap();
-    v.show(&at)
+    v.show(&at, Context::Default)
         .unwrap()
         .files
         .iter()
@@ -311,7 +322,11 @@ fn working_copy_commit_is_this_workspaces_at() {
         "commit_id",
     ]);
     assert_eq!(v.working_copy_commit().unwrap().as_deref(), Some(at.trim()));
-    assert_eq!(v.working_copy().unwrap(), None, "jj has no extra row");
+    assert_eq!(
+        v.working_copy(Context::Default).unwrap(),
+        None,
+        "jj has no extra row"
+    );
 }
 
 #[test]
@@ -377,4 +392,34 @@ fn stat_rename_and_binary() {
             (Some("a.txt"), "z.txt", Some(0), Some(0))
         ]
     );
+}
+
+#[test]
+fn full_context_shows_the_whole_file() {
+    if !have_jj() {
+        return;
+    }
+    let e = Env::new(false);
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line {i}")).collect();
+    e.write("f.txt", &(lines.join("\n") + "\n"));
+    e.jj(&["--quiet", "commit", "-m", "base"]);
+    lines[19] = "line twenty".into();
+    e.write("f.txt", &(lines.join("\n") + "\n"));
+    e.jj(&["--quiet", "commit", "-m", "change"]);
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let id = v.log(Some("@-"), 1).unwrap()[0].commit.clone();
+    let new = |d: &vcs::CommitDiff| -> Vec<u32> {
+        d.files[0]
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .filter_map(|l| l.new)
+            .collect()
+    };
+    let hunks = v.show(&id, Context::Default).unwrap();
+    assert_eq!(new(&hunks), (17..=23).collect::<Vec<_>>());
+    let full = v.show(&id, Context::Full).unwrap();
+    assert_eq!(full.message, hunks.message);
+    assert_eq!(full.files[0].hunks.len(), 1);
+    assert_eq!(new(&full), (1..=40).collect::<Vec<_>>());
 }

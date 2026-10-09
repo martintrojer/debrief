@@ -8,7 +8,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::{App, Screen, StartOptions};
 use debrief::ui::palette;
 use debrief::vcs::{
-    self, CommitDiff, CommitInfo, DiffLine, FileDiff, Hunk, Kind, LineKind, OpenOptions, Vcs,
+    self, CommitDiff, CommitInfo, Context, DiffLine, FileDiff, Hunk, Kind, LineKind, OpenOptions,
+    Vcs,
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -40,7 +41,7 @@ impl Vcs for Fake {
             parents: vec![],
         }])
     }
-    fn show(&self, _: &str) -> anyhow::Result<CommitDiff> {
+    fn show(&self, _: &str, _: Context) -> anyhow::Result<CommitDiff> {
         Ok(self.diff.clone())
     }
     fn stat(&self, _: &str) -> anyhow::Result<vcs::CommitStat> {
@@ -434,7 +435,7 @@ fn a_real_mode_change_is_labelled() {
     git(&["commit", "-q", "-m", "b"]);
     let v = vcs::open(&root, OpenOptions::default()).unwrap();
     let id = v.log(None, 1).unwrap()[0].commit.clone();
-    let f = &v.show(&id).unwrap().files[0];
+    let f = &v.show(&id, Context::Default).unwrap().files[0];
     assert_eq!(
         f.mode_change,
         Some(("100644".to_string(), "100755".to_string()))

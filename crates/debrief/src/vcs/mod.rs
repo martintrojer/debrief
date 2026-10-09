@@ -15,7 +15,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 
 pub use diff::parse_unified;
 pub use git::{Git, MAX_UNTRACKED, SPECIAL_FILE, TOO_LARGE, untracked_file};
@@ -182,6 +182,20 @@ pub enum LineKind {
     Removed,
 }
 
+/// How much unchanged text a diff shows around its changes (spec §3
+/// "View modes").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Context {
+    /// The tool's default context (hunks).
+    #[default]
+    Default,
+    /// The whole file: a diff with [`FULL_CONTEXT`] lines of context.
+    Full,
+}
+
+/// Lines of context of a [`Context::Full`] diff (more than any file has).
+pub const FULL_CONTEXT: u32 = 1_000_000;
+
 /// How a repository is opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenOptions {
@@ -223,7 +237,7 @@ pub trait Vcs {
     }
     /// git: the uncommitted changes, `None` when the tree is clean.
     /// jj: always `None` (`@` is the working copy).
-    fn working_copy(&self) -> Result<Option<WorkingCopy>> {
+    fn working_copy(&self, _context: Context) -> Result<Option<WorkingCopy>> {
         Ok(None)
     }
     /// jj: the operation reads are pinned to (to reopen on another
@@ -239,8 +253,8 @@ pub trait Vcs {
     /// `revsets.log` for jj.
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>>;
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
-    /// revision naming one commit.
-    fn show(&self, commit: &str) -> Result<CommitDiff>;
+    /// revision naming one commit. `context`: hunks or the whole file.
+    fn show(&self, commit: &str, context: Context) -> Result<CommitDiff>;
     /// The message, author and per-file line counts of `commit` (same
     /// IDs as [`Vcs::show`]; merges against the first parent).
     fn stat(&self, commit: &str) -> Result<CommitStat>;

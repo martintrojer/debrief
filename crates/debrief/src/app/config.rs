@@ -1,7 +1,8 @@
 //! `~/.config/debrief/config.toml` over built-in defaults: `[send]` (how
 //! `<leader>rr` hands the review back, shared in meaning with ramble's),
 //! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
-//! (syntax highlighting), `[view]` (what shows at start) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
+//! (syntax highlighting), `[view]` (what shows at start: the stats pane,
+//! hunks or the full file) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one.
@@ -11,6 +12,8 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use debrief_review::Kind;
 use serde::Deserialize;
+
+use crate::vcs::Context as DiffContext;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Config {
@@ -51,11 +54,17 @@ impl Default for RenderConfig {
 pub struct ViewConfig {
     /// The log's stats pane at start (on by default; `<leader>e` toggles).
     pub stats: bool,
+    /// The commit view's context at start: `"hunks"` (the default) or
+    /// `"full"` (the whole file); `T` toggles.
+    pub context: DiffContext,
 }
 
 impl Default for ViewConfig {
     fn default() -> Self {
-        ViewConfig { stats: true }
+        ViewConfig {
+            stats: true,
+            context: DiffContext::Default,
+        }
     }
 }
 
@@ -150,8 +159,15 @@ impl Config {
         if let Some(h) = raw.render.and_then(|r| r.highlight) {
             c.render.highlight = h;
         }
-        if let Some(v) = raw.view.and_then(|v| v.stats) {
-            c.view.stats = v;
+        if let Some(v) = raw.view {
+            if let Some(stats) = v.stats {
+                c.view.stats = stats;
+            }
+            match v.context {
+                Some(RawContext::Hunks) => c.view.context = DiffContext::Default,
+                Some(RawContext::Full) => c.view.context = DiffContext::Full,
+                None => {}
+            }
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
@@ -216,6 +232,15 @@ struct RawRender {
 #[serde(deny_unknown_fields)]
 struct RawView {
     stats: Option<bool>,
+    context: Option<RawContext>,
+}
+
+/// `[view] context`.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RawContext {
+    Hunks,
+    Full,
 }
 
 #[derive(Deserialize)]
@@ -367,6 +392,17 @@ kinds = [
         assert!(Config::defaults().view.stats);
         assert!(!Config::parse("[view]\nstats = false\n").unwrap().view.stats);
         assert!(Config::parse("[view]\nnope = 1\n").is_err());
+    }
+
+    #[test]
+    fn view_context_defaults_to_hunks() {
+        assert_eq!(Config::defaults().view.context, DiffContext::Default);
+        let c = |src: &str| Config::parse(src).map(|c| c.view.context);
+        assert_eq!(c("[view]\n"), Ok(DiffContext::Default));
+        assert_eq!(c("[view]\ncontext = \"hunks\"\n"), Ok(DiffContext::Default));
+        assert_eq!(c("[view]\ncontext = \"full\"\n"), Ok(DiffContext::Full));
+        assert!(c("[view]\ncontext = \"all\"\n").is_err());
+        assert!(c("[view]\ncontext = 3\n").is_err());
     }
 
     #[test]

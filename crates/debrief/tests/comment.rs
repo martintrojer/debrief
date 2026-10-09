@@ -650,3 +650,18 @@ fn a_comment_added_during_a_send_survives() {
     assert_ne!(cs[0].id, sent);
     assert_eq!(cs[0].body, "late");
 }
+
+#[test]
+fn an_open_picker_follows_the_batch_on_the_tick() {
+    let f = fixture();
+    let mut app = f.open();
+    keys(&mut app, " rl");
+    assert!(app.picker().unwrap().items.is_empty());
+    let top = app.rows()[0].info.commit.clone();
+    add_diff(&f, &top, "a.txt", 3, "arrived");
+    let now = Instant::now();
+    app.tick(now + REVIEW_POLL);
+    let v = app.picker().unwrap();
+    assert_eq!(v.items.len(), 1);
+    assert_eq!(v.items[0].detail, "arrived");
+}

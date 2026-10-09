@@ -58,6 +58,7 @@ impl App {
         }
         self.review_polled = Some(now);
         self.review_reload();
+        self.picker_refresh();
     }
 
     /// Comments made on the displayed commit.

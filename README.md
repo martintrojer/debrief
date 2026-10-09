@@ -20,8 +20,10 @@ Design: [docs/specs/2026-10-09-debrief.md](docs/specs/2026-10-09-debrief.md).
 cargo install --path crates/debrief
 ```
 
-You need `git` or `jj` on `PATH`. debrief only reads the repo. It never
-checks out, amends, rebases or writes anything into it.
+You need `git` or `jj` on `PATH`. debrief never changes your files,
+checks out, amends, rebases or writes into a git repo. In jj it
+snapshots the working copy, as every jj command does (see
+[Working copy](#working-copy)); `--no-snapshot` turns that off.
 
 ## Use
 
@@ -30,6 +32,7 @@ debrief                    # the repo holding the working directory
 debrief path/to/repo       # or any path inside a repo
 debrief --revset 'main..'  # jj revset, or git revision range (default: jj's
                            # revsets.log, git's HEAD; --limit N, default 200)
+debrief --no-snapshot      # jj: don't snapshot; @ as of the last jj command
 ```
 
 jj wins when a `.jj` is found above the path, else git. The log shows the
@@ -39,6 +42,42 @@ the oldest unseen commit. The first run on a repo marks everything seen.
 Opening a commit marks it seen, and `m` marks the whole list seen. Seen
 state and reviews live in the user cache dir (`--cache-dir` or
 `$DEBRIEF_CACHE_DIR` overrides it).
+
+## Working copy
+
+Uncommitted changes show in the log too, and take comments like any
+commit.
+
+- **git:** while the tree is dirty (changes to tracked files against
+  `HEAD`, or untracked files that aren't ignored), the log has a
+  `✎ Working copy  N files` row on top and the status line says
+  `working copy dirty`. The row is never new or seen. `Enter` opens it
+  like a commit, headed `Working copy (uncommitted) on <id> <summary>`.
+  Untracked files show as added. Files over 1 MiB, binary files and
+  special files get a one-line placeholder, and a symlink shows its
+  target. debrief watches the tree (skipping `.git` and ignored
+  untracked paths) and refreshes the row when files change. Nothing is
+  written, and the index isn't refreshed either. git itself may touch
+  the timestamps of split-index files when it reads.
+- **jj:** `@` is the working copy, marked `✎`. Before it loads the log,
+  opens `@`, reloads (`r`) or comes back from the editor or a launcher,
+  debrief runs `jj util snapshot`, so `@` shows your uncommitted edits.
+  The snapshot leaves your files alone, but like any jj command it
+  records an operation and rewrites `@` (same change, new commit ID).
+  Anything on top of `@` is rebased and bookmarks on it move. If the
+  snapshot fails (say, another jj holds the lock), the status line says
+  so and debrief shows the last snapshot. `--no-snapshot` skips it:
+  debrief then writes nothing, and `@` is as of the last jj command.
+- **Comments:** on an added or context line the comment carries no
+  revision, just the file's path and its line numbers on disk, as
+  ramble's comments do, so ramble shows it in its gutter. On a removed
+  line it anchors to `HEAD` (git) or `@-` (jj) on the old side. If jj's
+  `@` is a merge, removed-line comments are refused. Paths that resolve
+  outside the repo (through a symlinked directory) are refused for
+  comments and for `<leader>o`.
+- **Refresh:** `r` and a return from the editor reload the working
+  copy's view in place, keeping the cursor row. The view of any other
+  commit stays as it was opened.
 
 ## Keys
 
@@ -52,7 +91,7 @@ after a pause in a key sequence a box shows what can follow.
 | `j` `k` `gg` `G` `C-d` `C-u` | move (with counts) |
 | `Enter` | open the commit |
 | `m` | mark every listed commit seen |
-| `r` | reload (also automatic when the repo changes) |
+| `r` | reload (also automatic when the repo changes; jj: snapshot first) |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `q` | quit |
@@ -66,6 +105,7 @@ a file list on the left (hidden below 80 columns).
 | `gg` `G` `C-d` `C-u` `C-f` `C-b` `C-e` `C-y` `H` `M` `L` `zz` `zt` `zb` | jump and scroll |
 | `]f` `[f` / `]c` `[c` | next / previous file / hunk |
 | `]]` `[[` | open the next / previous commit |
+| `r` | on the working copy: reload its diff in place |
 | `/` `?` `n` `N` | search |
 | `v` `V`, then `y` | select rows, copy them as diff text (OSC 52) |
 | `<leader>e`, `C-w h` / `C-w l` | toggle the file list, move between panes |
@@ -95,7 +135,7 @@ the gutter of the new commit. `Enter` in the list opens a diff comment's
 own commit at its line, and only if that commit is in the log.
 
 `<leader>o` works on every row. An added or context line opens at its
-line. A removed line opens at the new-side line where it was. A hunk
+line (exact on the working copy, which is the file on disk). A removed line opens at the new-side line where it was. A hunk
 header opens at its first new line, and a file header at line 1. Deleted
 files and files missing from the working copy are refused. The line
 number comes from the commit, so it can drift if the file has changed

@@ -553,3 +553,37 @@ fn a_failed_load_shows_the_error() {
     let s = screen(&mut app, 100, 10);
     assert!(s[9].contains("cannot show"), "{}", s[9]);
 }
+
+#[test]
+fn five_digit_line_numbers_widen_the_gutter_and_dollar_stays_visible() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    let filler = "filler\n".repeat(10000);
+    std::fs::write(root.join("large.txt"), &filler).unwrap();
+    commit(&root, "large base");
+    let edited =
+        filler.strip_suffix("filler\n").unwrap().to_string() + "abcdefghijklmnopqrstuvwxyzEND\n";
+    std::fs::write(root.join("large.txt"), edited).unwrap();
+    commit(&root, "large edit");
+    let root = root.canonicalize().unwrap();
+    let mut app = open(&root, &tmp.path().join("cache"));
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_num_width(), 5);
+    screen(&mut app, 40, 20);
+    keys(&mut app, "/abcdefghijklmnopqrstuvwxyz");
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, "$");
+    let s = screen(&mut app, 40, 20);
+    let line = s
+        .iter()
+        .find(|l| l.contains("10000 +"))
+        .expect("the edited line is on screen");
+    assert!(
+        line.ends_with("END"),
+        "the cursor's grapheme is drawn: {line:?}"
+    );
+    assert!(app.commit_scroll().1 > 0);
+}

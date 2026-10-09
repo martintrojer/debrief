@@ -49,8 +49,29 @@ pub struct Row {
     pub text: String,
 }
 
-/// Columns before a row's text: `oooo nnnn ± `.
-pub const GUTTER_W: usize = 12;
+/// Fewest digits a gutter line-number column gets.
+const MIN_NUM_W: usize = 4;
+
+/// Digits of the widest old or new line number in `diff`, at least
+/// [`MIN_NUM_W`].
+pub fn num_width(diff: &CommitDiff) -> usize {
+    let max = diff
+        .files
+        .iter()
+        .flat_map(|f| &f.hunks)
+        .flat_map(|h| &h.lines)
+        .flat_map(|l| [l.old, l.new])
+        .flatten()
+        .max()
+        .unwrap_or(0);
+    max.to_string().len().max(MIN_NUM_W)
+}
+
+/// Columns before a row's text, `old new ± `, for line numbers `num_w`
+/// digits wide.
+pub fn gutter_width(num_w: usize) -> usize {
+    2 * num_w + 4
+}
 
 /// The text of `\ No newline at end of file` rows.
 pub const NO_NEWLINE: &str = "\\ No newline at end of file";
@@ -173,6 +194,8 @@ pub struct CommitView {
     pub(super) loading: bool,
     pub(super) diff: Option<CommitDiff>,
     pub(super) rows: Vec<Row>,
+    /// Digits per gutter line-number column, from [`num_width`].
+    pub(super) num_w: usize,
     pub(super) cells: Vec<Vec<Cell>>,
     pub(super) cur: Cursor,
     pub(super) want_col: usize,
@@ -198,6 +221,7 @@ impl CommitView {
             loading: true,
             diff: None,
             rows: Vec::new(),
+            num_w: MIN_NUM_W,
             cells: Vec::new(),
             cur: Cursor::default(),
             want_col: 0,
@@ -213,6 +237,7 @@ impl CommitView {
 
     pub(super) fn set_diff(&mut self, diff: CommitDiff) {
         self.rows = flatten(&diff);
+        self.num_w = num_width(&diff);
         self.cells = self.rows.iter().map(|r| row_cells(&r.text)).collect();
         self.diff = Some(diff);
         self.loading = false;
@@ -375,6 +400,11 @@ impl App {
             .map_or((0, 0), |v| (v.scroll, v.hscroll))
     }
 
+    /// Digits per gutter line-number column of the open commit.
+    pub fn commit_num_width(&self) -> usize {
+        self.commit.as_ref().map_or(MIN_NUM_W, |v| v.num_w)
+    }
+
     /// The file whose section holds the cursor.
     pub fn current_file(&self) -> Option<usize> {
         let v = self.commit.as_ref()?;
@@ -391,7 +421,9 @@ impl App {
         let diff = self.commit_layout(area).diff;
         if let Some(v) = &mut self.commit {
             v.view_h = (diff.height as usize).max(1);
-            v.text_w = (diff.width as usize).saturating_sub(GUTTER_W).max(1);
+            v.text_w = (diff.width as usize)
+                .saturating_sub(gutter_width(v.num_w))
+                .max(1);
             v.keep_visible();
         }
     }

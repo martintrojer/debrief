@@ -10,7 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::palette;
-use crate::app::commit::GUTTER_W;
+use crate::app::commit::gutter_width;
 use crate::app::{App, DiffRow, Focus, Mode, RowKind};
 use crate::vcs::LineKind;
 
@@ -32,8 +32,8 @@ fn style_of(kind: RowKind) -> Style {
     }
 }
 
-/// The gutter: old and new line numbers (4 digits each) and the sign.
-fn gutter(app: &App, r: &DiffRow) -> String {
+/// The gutter: old and new line numbers (`w` digits each) and the sign.
+fn gutter(app: &App, r: &DiffRow, w: usize) -> String {
     let line = match (app.commit_diff(), r.kind) {
         (Some(d), RowKind::Line(_)) => r
             .file
@@ -49,8 +49,8 @@ fn gutter(app: &App, r: &DiffRow) -> String {
         _ => ' ',
     };
     match line {
-        Some(l) => format!("{:>4} {:>4} {sign} ", num(l.old), num(l.new)),
-        None => " ".repeat(GUTTER_W),
+        Some(l) => format!("{:>w$} {:>w$} {sign} ", num(l.old), num(l.new)),
+        None => " ".repeat(gutter_width(w)),
     }
 }
 
@@ -94,7 +94,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let sel = app.selection_rows();
     let hits = app.search_hits();
     let focused = app.focus() == Focus::Diff || app.mode() != Mode::Normal;
-    let text_w = (area.width as usize).saturating_sub(GUTTER_W);
+    let num_w = app.commit_num_width();
+    let text_w = (area.width as usize).saturating_sub(gutter_width(num_w));
     let lines: Vec<Line> = rows
         .iter()
         .enumerate()
@@ -108,7 +109,10 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             } else if i == cur.row {
                 base = base.bg(palette::SURFACE);
             }
-            let mut spans = vec![Span::styled(gutter(app, r), base.fg(palette::OVERLAY))];
+            let mut spans = vec![Span::styled(
+                gutter(app, r, num_w),
+                base.fg(palette::OVERLAY),
+            )];
             let mut col = hscroll;
             for (c, g) in visible(&r.text, hscroll, text_w) {
                 if c > col {

@@ -159,7 +159,9 @@ pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
-fn stat_lines(app: &App, s: &CommitStat, width: usize) -> Vec<Line<'static>> {
+/// The pane's lines. `cap` limits the message to that many rows (the
+/// last one `…`) when there are files to show below it.
+fn stat_lines(app: &App, s: &CommitStat, width: usize, cap: Option<usize>) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let row = app.rows().get(app.cursor());
     let working = row.is_some_and(|r| r.info.commit == WORKING_ID);
@@ -169,39 +171,51 @@ fn stat_lines(app: &App, s: &CommitStat, width: usize) -> Vec<Line<'static>> {
             Style::new().fg(palette::YELLOW),
         ));
     } else if let Some(r) = row {
+        // One header line first, so a short pane reaches the files soon.
         let c = &r.info.commit;
-        let mut ids = vec![Span::styled(
+        let mut head = vec![Span::styled(
             c.get(..12).unwrap_or(c).to_string(),
             Style::new().fg(palette::MAUVE),
         )];
         if let Some(ch) = &r.info.change {
-            ids.push(Span::styled(
+            head.push(Span::styled(
                 format!("  change {}", ch.get(..12).unwrap_or(ch)),
                 Style::new().fg(palette::PINK),
             ));
         }
-        lines.push(Line::from(ids));
-        lines.push(Line::from(vec![
-            Span::styled(s.author.clone(), Style::new().fg(palette::BLUE)),
-            Span::styled(format!(" <{}>", s.email), Style::new().fg(palette::OVERLAY)),
-        ]));
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
-        lines.push(Line::styled(
-            date_label(now, s.time),
-            Style::new().fg(palette::GREEN),
-        ));
-        lines.push(Line::raw(""));
+        head.extend([
+            Span::styled(format!("  {}", s.author), Style::new().fg(palette::BLUE)),
+            Span::styled(format!(" <{}>", s.email), Style::new().fg(palette::OVERLAY)),
+            Span::styled(
+                format!("  {}", date_label(now, s.time)),
+                Style::new().fg(palette::GREEN),
+            ),
+        ]);
+        lines.push(Line::from(head));
         let msg = Style::new().fg(palette::TEXT);
-        for (i, l) in s.message.lines().enumerate() {
-            let st = if i == 0 {
-                msg.add_modifier(Modifier::BOLD)
-            } else {
-                msg
-            };
-            lines.push(Line::styled(l.to_string(), st));
+        let mut body: Vec<Line<'static>> = s
+            .message
+            .lines()
+            .enumerate()
+            .map(|(i, l)| {
+                let st = if i == 0 {
+                    msg.add_modifier(Modifier::BOLD)
+                } else {
+                    msg
+                };
+                Line::styled(l.to_string(), st)
+            })
+            .collect();
+        if let Some(cap) = cap.filter(|_| !s.files.is_empty())
+            && body.len() > cap.max(2)
+        {
+            body.truncate(cap.max(2) - 1);
+            body.push(Line::styled("…", Style::new().fg(palette::OVERLAY)));
         }
+        lines.extend(body);
     }
     lines.push(Line::raw(""));
     if s.files.is_empty() {
@@ -219,6 +233,9 @@ fn stat_lines(app: &App, s: &CommitStat, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
+/// Draw the pane, scrolled by [`App::stat_scroll`]. At the top a long
+/// message is cut at half the pane so the files show; scrolled, the
+/// whole message is shown.
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool) {
     let block = Block::new()
         .borders(if side_by_side {
@@ -234,15 +251,30 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool)
         width: inner.width.saturating_sub(1),
         ..inner
     };
-    let lines = match app.stat_pane() {
+    let wrap = |lines| Paragraph::new(lines).wrap(Wrap { trim: false });
+    let full = match app.stat_pane() {
         None => return,
         Some(StatPane::Loading) => {
             vec![Line::styled("loading…", Style::new().fg(palette::OVERLAY))]
         }
         Some(StatPane::Error(e)) => vec![Line::styled(e, Style::new().fg(palette::RED))],
-        Some(StatPane::Ready(s)) => stat_lines(app, &s, inner.width as usize),
+        Some(StatPane::Ready(s)) => {
+            let w = inner.width as usize;
+            let h = inner.height as usize;
+            let all = wrap(stat_lines(app, &s, w, None));
+            app.set_stat_max_scroll(all.line_count(inner.width).saturating_sub(h));
+            let scroll = app.stat_scroll();
+            let p = if scroll == 0 {
+                wrap(stat_lines(app, &s, w, Some(h / 2)))
+            } else {
+                all.scroll((scroll.min(u16::MAX as usize) as u16, 0))
+            };
+            frame.render_widget(p, inner);
+            return;
+        }
     };
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    app.set_stat_max_scroll(0);
+    frame.render_widget(wrap(full), inner);
 }
 
 #[cfg(test)]

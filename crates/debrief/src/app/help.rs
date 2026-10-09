@@ -126,6 +126,8 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("m", L, G::Log, "mark every listed commit seen"),
         b("r", L, G::Log, "reload the log"),
         b("<leader>e", L, G::Log, "show or hide the stats pane"),
+        b("J", L, G::Log, "scroll the stats pane down"),
+        b("K", L, G::Log, "scroll the stats pane up"),
         b("/", L, G::Log, "search forward"),
         b("?", L, G::Log, "search backward"),
         b("n", L, G::Log, "next match"),

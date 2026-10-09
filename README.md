@@ -93,6 +93,7 @@ after a pause in a key sequence a box shows what can follow.
 | `m` | mark every listed commit seen |
 | `r` | reload (also automatic when the repo changes; jj: snapshot first) |
 | `<leader>e` | show / hide the stats pane |
+| `J` `K` | scroll the stats pane (the wheel over it too, when the mouse is captured) |
 | `/` `?` `n` `N` | search |
 | `f` | filter; `Enter` keeps it, `Esc` clears it |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
@@ -100,7 +101,9 @@ after a pause in a key sequence a box shows what can follow.
 | `q` | quit |
 
 The stats pane shows the commit under the cursor like `git log --stat`:
-its ID (and jj change ID), author, date, full message, then a
+its ID (and jj change ID), author and date on one line, the full message
+(cut at half the pane with `…` when there are files; `J` scrolls to the
+rest), then a
 `path | N ++--` row per file (renames as `old → new`, binary files as
 `Bin`) and a summary line. It sits beside the log from 120 columns and
 below it on narrower terminals, and loads once the cursor has rested for

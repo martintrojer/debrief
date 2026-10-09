@@ -126,6 +126,8 @@ pub enum Action {
     FilterCommit,
     /// Esc in the filter prompt, or on the log: clear the filter.
     FilterClear,
+    /// Log `J` (true) / `K`: scroll the stats pane a line.
+    StatScroll(bool, Option<usize>),
 }
 
 /// What a key sequence means so far.
@@ -151,6 +153,7 @@ impl App {
     /// Handle one key press.
     pub fn key(&mut self, key: KeyEvent) {
         self.key_inner(key);
+        self.stat_follow();
         self.clue_sync();
     }
 
@@ -430,6 +433,8 @@ impl App {
             KeyCode::Char('n') => A::SearchNext(true, count),
             KeyCode::Char('N') => A::SearchNext(false, count),
             KeyCode::Char('f') => A::FilterStart,
+            KeyCode::Char('J') => A::StatScroll(true, count),
+            KeyCode::Char('K') => A::StatScroll(false, count),
             KeyCode::Esc => A::FilterClear,
             _ => return KeyResult::None,
         };
@@ -475,6 +480,7 @@ impl App {
             A::FilterCommit => self.filter_commit(),
             A::FilterClear => self.filter_clear(),
             A::ToggleSidebar => self.toggle_stats(),
+            A::StatScroll(down, c) => self.stat_scroll_by(if down { n(c) } else { -n(c) }),
             other => self.apply_commit(other),
         }
     }

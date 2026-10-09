@@ -94,6 +94,13 @@ pub enum AppEvent {
         request: u64,
         spans: highlight::DiffSpans,
     },
+    /// The mouse wheel at (column, row), down or up (only arrives when
+    /// the mouse is captured).
+    Wheel {
+        col: u16,
+        row: u16,
+        down: bool,
+    },
     /// A commit's stat for the log's stats pane, tagged with its request.
     Stat {
         request: u64,
@@ -318,6 +325,11 @@ impl App {
             AppEvent::Loaded { request, result } => self.loaded(request, result),
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
+            AppEvent::Wheel { col, row, down } if self.screen == Screen::Log => {
+                self.stat_follow();
+                self.stat_wheel(col, row, down);
+            }
+            AppEvent::Wheel { .. } => {}
         }
     }
 
@@ -356,6 +368,7 @@ impl App {
         self.view_h = self.log_layout(main).log.height.max(1) as usize;
         self.keep_visible();
         self.commit_follow();
+        self.stat_follow();
         crate::ui::draw(frame, self);
     }
 

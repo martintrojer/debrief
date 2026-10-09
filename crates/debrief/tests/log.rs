@@ -443,12 +443,13 @@ fn stats_pane_side_by_side_at_120_columns_stacked_at_119() {
             .contains("commit 2")
     );
     let pane: Vec<String> = s.iter().map(|r| r.chars().skip(74).collect()).collect();
-    assert!(pane[1].starts_with("t <t@t>"), "{pane:#?}");
-    assert!(pane[2].contains(" UTC ("), "{pane:#?}");
-    assert!(pane[4].starts_with("commit 2"), "{pane:#?}");
-    assert!(pane[6].starts_with("f2.txt | 1 +"), "{pane:#?}");
+    // One header line (wrapped here): ID, author, date.
+    assert!(pane[0].contains("  t <t@t>  "), "{pane:#?}");
+    assert!(pane[0].contains(" UTC"), "{pane:#?}");
+    assert!(pane[2].starts_with("commit 2"), "{pane:#?}");
+    assert!(pane[4].starts_with("f2.txt | 1 +"), "{pane:#?}");
     assert!(
-        pane[7].starts_with("1 file changed, 1 insertion(+), 0 deletions(-)"),
+        pane[5].starts_with("1 file changed, 1 insertion(+), 0 deletions(-)"),
         "{pane:#?}"
     );
 
@@ -614,4 +615,81 @@ fn log_search_moves_and_reports_misses() {
     key(&mut app, 'n');
     assert_eq!(app.rows()[app.cursor()].info.summary, "commit 0");
     assert_eq!(app.status(), "search hit TOP, continuing at BOTTOM");
+}
+
+#[test]
+fn stats_pane_shows_files_first_and_scrolls_with_j_k() {
+    let (tmp, root) = git_repo(1);
+    let body: String = (0..30).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(root.join("g.txt"), "g\n").unwrap();
+    commit(&root, &format!("long subject\n\n{body}"));
+    let mut app = open_with_stats(&root, &tmp.path().join("cache"));
+    settle(&mut app);
+    // 119x20: the stacked pane has six rows; a one-line, one-file commit
+    // shows its file row and the summary.
+    key(&mut app, 'j');
+    settle(&mut app);
+    let s = screen_at(&mut app, 119, 20);
+    let pane: Vec<&str> = s[13..19].iter().map(|r| r.trim_start()).collect();
+    assert!(
+        pane[0].contains(&app.rows()[1].info.commit[..12]),
+        "{pane:#?}"
+    );
+    assert!(
+        pane[0].contains("t <t@t>") && pane[0].contains(" UTC ("),
+        "{pane:#?}"
+    );
+    assert!(
+        pane.iter().any(|r| r.starts_with("f0.txt | 1 +")),
+        "{pane:#?}"
+    );
+    assert!(
+        pane.iter().any(|r| r.starts_with("1 file changed")),
+        "{pane:#?}"
+    );
+
+    // The long message is cut at half the pane with `…`; the file row
+    // still shows.
+    key(&mut app, 'k');
+    settle(&mut app);
+    let s = screen_at(&mut app, 119, 20);
+    let pane: Vec<&str> = s[13..19].iter().map(|r| r.trim_start()).collect();
+    assert!(pane[1].starts_with("long subject"), "{pane:#?}");
+    assert!(pane[3].starts_with('…'), "{pane:#?}");
+    assert!(pane[5].starts_with("g.txt | 1 +"), "{pane:#?}");
+    // J scrolls to the end of the message and no further.
+    for _ in 0..100 {
+        key(&mut app, 'J');
+    }
+    let s = screen_at(&mut app, 119, 20);
+    let pane: Vec<&str> = s[13..19].iter().map(|r| r.trim_start()).collect();
+    assert!(pane[5].starts_with("1 file changed"), "{pane:#?}");
+    assert!(pane.iter().any(|r| r.starts_with("line 29")), "{pane:#?}");
+    key(&mut app, 'K');
+    let s = screen_at(&mut app, 119, 20);
+    assert!(
+        !s[18].trim_start().starts_with("1 file changed"),
+        "K scrolls back up"
+    );
+    // The wheel scrolls the pane when over it, not over the log.
+    key(&mut app, 'j');
+    key(&mut app, 'k');
+    use debrief::app::AppEvent::Wheel;
+    app.event(Wheel {
+        col: 5,
+        row: 2,
+        down: true,
+    });
+    assert_eq!(app.stat_scroll(), 0, "over the log");
+    app.event(Wheel {
+        col: 5,
+        row: 15,
+        down: true,
+    });
+    assert_eq!(app.stat_scroll(), 3);
+    // Moving to another commit resets the scroll.
+    key(&mut app, 'j');
+    key(&mut app, 'k');
+    let s = screen_at(&mut app, 119, 20);
+    assert!(s[14].trim_start().starts_with("long subject"), "{s:#?}");
 }

@@ -56,6 +56,21 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
                 Event::Key(key) => app.event(AppEvent::Key(key)),
                 Event::Resize(cols, rows) => app.event(AppEvent::Resize(cols, rows)),
                 Event::Paste(text) => app.event(AppEvent::Paste(text)),
+                Event::Mouse(m) => {
+                    use crossterm::event::MouseEventKind as K;
+                    let down = match m.kind {
+                        K::ScrollDown => Some(true),
+                        K::ScrollUp => Some(false),
+                        _ => None,
+                    };
+                    if let Some(down) = down {
+                        app.event(AppEvent::Wheel {
+                            col: m.column,
+                            row: m.row,
+                            down,
+                        });
+                    }
+                }
                 _ => {}
             }
         }

@@ -53,7 +53,7 @@ after a pause in a key sequence a box shows what can follow.
 | `Enter` | open the commit |
 | `m` | mark every listed commit seen |
 | `r` | reload (also automatic when the repo changes) |
-| `<leader>o` | `$EDITOR` at the commit's first changed file, first hunk |
+| `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `q` | quit |
 

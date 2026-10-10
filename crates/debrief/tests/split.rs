@@ -528,3 +528,42 @@ fn left_comments_on_a_renamed_file_use_the_old_path_and_show_markers() {
         std::fs::remove_dir_all(&f.cache).unwrap();
     }
 }
+
+#[test]
+fn a_left_context_line_is_coloured_by_the_old_side() {
+    let f = fixture_of(
+        "x.c",
+        "/*\nint shared = 1;\n*/\n",
+        "// head\nint shared = 1;\n// tail\n",
+    );
+    for ctx in ["", "T"] {
+        let mut app = f.open_split();
+        keys(&mut app, ctx);
+        let row = row_of(app.split_rows(Side::Old), "int shared = 1;");
+        let backend = TestBackend::new(200, 30);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|fr| app.render(fr)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let diff = app
+            .commit_layout(ratatui::layout::Rect::new(0, 0, 200, 29))
+            .diff;
+        let (l, r) = app.split_panes(diff);
+        let y = diff.y + (row - app.commit_scroll().0) as u16;
+        let fg_of = |pane: ratatui::layout::Rect, word: &str| {
+            let line: String = (pane.x..pane.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect();
+            let at = line
+                .find(word)
+                .unwrap_or_else(|| panic!("{word:?} in {line:?}"));
+            buf[(pane.x + at as u16, y)].fg
+        };
+        // Left: inside the old `/*` comment; right: the keyword `int`.
+        let comment = app
+            .side_spans(&app.split_rows(Side::New)[row - 1], Some(Side::New))
+            .and_then(|s| s[0].0.fg)
+            .expect("// head coloured");
+        assert_eq!(fg_of(l, "int"), comment, "{ctx:?}");
+        assert_ne!(fg_of(r, "int"), comment, "{ctx:?}");
+    }
+}

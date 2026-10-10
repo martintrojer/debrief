@@ -1,6 +1,7 @@
 //! The diff pane side by side (spec §3 "Side by side"): old lines on the
 //! left, new on the right, each half with its own `●` marker column,
-//! line-number column, sign, row backgrounds, syntax colours and
+//! line-number column, sign, row backgrounds, syntax colours (a context
+//! line's on the left from the old side) and
 //! horizontal scroll, and a one-column divider between them. Filler rows
 //! (the shorter side of a change block) are a dim hatch. Message, header,
 //! placeholder and blank rows span both halves. The cursor, the
@@ -58,6 +59,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 }
             }),
             gutter_w: side_gutter_width(num_w),
+            side: Some(side),
         }
     };
     let (left, right) = (pane(Side::Old), pane(Side::New));

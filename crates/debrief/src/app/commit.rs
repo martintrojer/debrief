@@ -872,12 +872,22 @@ impl App {
     /// The syntax colours of a Line row of the open commit, if it has any
     /// (yet).
     pub fn commit_spans(&self, r: &Row) -> Option<&Spans> {
+        self.side_spans(r, None)
+    }
+
+    /// [`App::commit_spans`] on one side of side by side: a context line
+    /// on the left takes the old side's colours.
+    pub fn side_spans(&self, r: &Row, side: Option<Side>) -> Option<&Spans> {
         let v = self.commit.as_ref()?;
         let (f, h, l) = (r.file?, r.hunk?, r.line?);
-        if !matches!(r.kind, RowKind::Line(_)) {
+        let RowKind::Line(kind) = r.kind else {
             return None;
+        };
+        let hunk = v.spans.get(f)?.get(h)?;
+        if side == Some(Side::Old) && kind == LineKind::Context {
+            return hunk.old.get(l)?.as_ref();
         }
-        v.spans.get(f)?.get(h)?.get(l)?.as_ref()
+        hunk.lines.get(l)?.as_ref()
     }
 
     /// The diff flattened into [`App::commit_rows`].

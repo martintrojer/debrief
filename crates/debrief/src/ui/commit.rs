@@ -118,6 +118,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         marked: app.review_marked_rows(),
         gutter: Box::new(|r: &DiffRow| gutter(app, r, num_w)),
         gutter_w: gutter_width(num_w),
+        side: None,
     };
     let scroll = app.commit_scroll().0;
     for (y, (i, r)) in rows
@@ -171,6 +172,8 @@ pub(super) struct Pane<'a> {
     pub gutter: Gutter<'a>,
     /// Columns of `gutter` and the sign.
     pub gutter_w: usize,
+    /// The side drawn in side by side (whose syntax colours).
+    pub side: Option<debrief_review::Side>,
 }
 
 /// Draw row `i` of `p` in the one-row `rect`.
@@ -220,7 +223,7 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
         frame.render_widget(Paragraph::new(Line::from(spans).style(base)), rect);
         return;
     }
-    let syntax = app.commit_spans(r);
+    let syntax = app.side_spans(r, p.side);
     let mut col = p.hscroll;
     for (c, start, end) in visible(&r.text, p.hscroll, text_w) {
         if start > col {

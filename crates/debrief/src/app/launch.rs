@@ -278,8 +278,7 @@ impl App {
                 let v = self.commit.as_ref().ok_or(NO_FILE_HERE)?;
                 let diff = v.diff.as_ref().ok_or(NO_FILE_HERE)?;
                 let (file, line) = if self.focus == Focus::Files {
-                    let f = v.side_sel.min(diff.files.len().saturating_sub(1));
-                    diff.files.get(f).map(|_| (f, 1)).ok_or(NO_FILE_HERE)?
+                    self.selected_file().map(|f| (f, 1)).ok_or(NO_FILE_HERE)?
                 } else {
                     row_line(diff, v, v.cur.row).ok_or(NO_FILE_HERE)?
                 };

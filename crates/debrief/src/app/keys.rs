@@ -31,6 +31,7 @@ pub const TOGGLES: &[(Action, &str, &str)] = &[
     (Action::ToggleSidebar, "<leader>e", "view.stats"),
     (Action::ToggleContext, "T", "view.context"),
     (Action::ToggleLayout, "t", "view.layout"),
+    (Action::ToggleFiles, "`", "view.files"),
 ];
 
 /// Everything a key can do. `Option<usize>` is the typed count.
@@ -125,8 +126,20 @@ pub enum Action {
     /// File list: first / last file.
     FileTop,
     FileBottom,
-    /// File list Enter: jump to the file and focus the diff.
+    /// File list `C-d` / `C-u`: half the list's height.
+    FileHalfDown,
+    FileHalfUp,
+    /// File list Enter: a directory opens or closes; a file is jumped to
+    /// and the diff focused.
     FileOpen,
+    /// File list `h`: close the directory, or go to its parent.
+    FileCollapse,
+    /// File list `l`: open the directory; on a file, as Enter.
+    FileExpand,
+    /// File list `-` (true: collapse all) / `=` (expand all).
+    FileAll(bool),
+    /// File list `` ` ``: tree / flat.
+    ToggleFiles,
     /// A `[[launch]]` key: run launcher `i` of the config.
     Launch(usize),
     /// Enter in the diff: a `.md` file header goes to ramble.
@@ -446,7 +459,11 @@ impl App {
             [a, b] if plain(a) == Some('g') && plain(b) == Some('g') => {
                 KeyResult::Action(A::FileTop)
             }
-            [k] if k.modifiers.contains(KeyModifiers::CONTROL) => KeyResult::None,
+            [k] if k.modifiers.contains(KeyModifiers::CONTROL) => match k.code {
+                KeyCode::Char('d') => KeyResult::Action(A::FileHalfDown),
+                KeyCode::Char('u') => KeyResult::Action(A::FileHalfUp),
+                _ => KeyResult::None,
+            },
             [k] => KeyResult::Action(match (k.code, plain(k)) {
                 (_, Some(c @ '1'..='9')) => return KeyResult::Count(c as usize - '0' as usize),
                 (_, Some('0')) if count.is_some() => return KeyResult::Count(0),
@@ -455,6 +472,11 @@ impl App {
                 (_, Some('k')) | (KeyCode::Up, _) => A::FileUp(count),
                 (_, Some('G')) => A::FileBottom,
                 (KeyCode::Enter, _) => A::FileOpen,
+                (_, Some('h')) | (KeyCode::Left, _) => A::FileCollapse,
+                (_, Some('l')) | (KeyCode::Right, _) => A::FileExpand,
+                (_, Some('-')) => A::FileAll(true),
+                (_, Some('=')) => A::FileAll(false),
+                (_, Some('`')) => A::ToggleFiles,
                 (KeyCode::Esc, _) => A::Focus(Focus::Diff),
                 (_, Some('q')) => A::Back,
                 _ => return KeyResult::None,
@@ -606,17 +628,23 @@ impl App {
             A::Focus(f) => return self.focus_pane(f),
             A::Window(d) => return self.pane_move_or_say(d),
             A::PaneNav(d) => return self.pane_nav(d),
-            A::FileDown(c) => return self.select_file(self.sidebar_selected() + n(c)),
+            A::FileDown(c) => return self.select_row(self.sidebar_selected() + n(c)),
             A::FileUp(c) => {
-                return self.select_file(self.sidebar_selected().saturating_sub(n(c)));
+                return self.select_row(self.sidebar_selected().saturating_sub(n(c)));
             }
-            A::FileTop => return self.select_file(0),
-            A::FileBottom => return self.select_file(usize::MAX),
-            A::FileOpen => {
-                self.select_file(self.sidebar_selected());
-                self.set_focus(Focus::Diff);
-                return;
+            A::FileHalfDown => {
+                return self.select_row(self.sidebar_selected() + self.files_half());
             }
+            A::FileHalfUp => {
+                return self.select_row(self.sidebar_selected().saturating_sub(self.files_half()));
+            }
+            A::FileTop => return self.select_row(0),
+            A::FileBottom => return self.select_row(usize::MAX),
+            A::FileOpen => return self.file_open(),
+            A::FileCollapse => return self.file_collapse(),
+            A::FileExpand => return self.file_expand(),
+            A::FileAll(collapse) => return self.file_all(collapse),
+            A::ToggleFiles => return self.toggle_files(),
             _ => {}
         }
         let full = self.context == crate::vcs::Context::Full;
@@ -692,6 +720,7 @@ fn visual_ok(a: Action) -> bool {
             | A::ToggleLayout
             | A::SwitchSide
             | A::ToggleSidebar
+            | A::ToggleFiles
             | A::Focus(_)
             | A::Window(_)
             | A::PaneNav(_)

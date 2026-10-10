@@ -10,6 +10,7 @@
 //! is no longer open are dropped. git's working copy loads the same way,
 //! as an [`AppEvent::WorkingLoaded`].
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use debrief_review::Side;
@@ -19,6 +20,7 @@ use crate::vcs::{
     CommitDiff, CommitInfo, Context, FileDiff, Kind, LineKind, OpenOptions, WorkingCopy,
 };
 
+use super::file_tree::Entry as FileEntry;
 use super::highlight::{self, DiffSpans, Spans};
 use super::motion::{Cell, Cursor};
 use super::search::Search;
@@ -139,7 +141,15 @@ fn header_text(f: &FileDiff) -> String {
 /// Flatten a commit into rows: message lines, a blank row, then per file
 /// its header, a placeholder or its hunks (header, lines, and a
 /// no-newline row where one applies), files separated by blank rows.
+/// Files in git's order; [`flatten_in`] takes another.
 pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
+    let order: Vec<usize> = (0..diff.files.len()).collect();
+    flatten_in(diff, &order)
+}
+
+/// [`flatten`] with the files in `order` (indices into `diff.files`,
+/// which rows keep): the file list's tree order.
+pub fn flatten_in(diff: &CommitDiff, order: &[usize]) -> Vec<Row> {
     let row = |kind, file, hunk, line, text: &str| Row {
         kind,
         file,
@@ -153,7 +163,7 @@ pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
             rows.push(row(RowKind::Message, None, None, None, l));
         }
     }
-    for (fi, f) in diff.files.iter().enumerate() {
+    for (fi, f) in order.iter().filter_map(|&i| Some((i, diff.files.get(i)?))) {
         if !rows.is_empty() {
             rows.push(row(RowKind::Blank, None, None, None, ""));
         }
@@ -264,8 +274,17 @@ pub struct CommitView {
     pub(super) search: Search,
     /// Visual mode's anchor row.
     pub(super) anchor: usize,
-    /// Selected file in the sidebar.
+    /// The file list's selected entry (an index into `entries`; it may
+    /// be inside a collapsed directory, which then shows it).
     pub(super) side_sel: usize,
+    /// The file list as a tree (else flat, in git's order).
+    pub(super) tree: bool,
+    /// The file list's entries, every directory expanded.
+    pub(super) entries: Vec<FileEntry>,
+    /// The diff's file order: the files of `entries`, top to bottom.
+    pub(super) order: Vec<usize>,
+    /// The collapsed directories' paths.
+    pub(super) collapsed: BTreeSet<String>,
     /// A picked comment to put the cursor on once the diff loads.
     pub(super) goto_comment: Option<debrief_review::Comment>,
     /// The working copy: git's uncommitted changes or jj's `@`.
@@ -311,6 +330,10 @@ impl CommitView {
             search: Search::default(),
             anchor: 0,
             side_sel: 0,
+            tree: true,
+            entries: Vec::new(),
+            order: Vec::new(),
+            collapsed: BTreeSet::new(),
             goto_comment: None,
             working: false,
             base: None,
@@ -324,6 +347,7 @@ impl CommitView {
     }
 
     pub(super) fn set_diff(&mut self, diff: CommitDiff) {
+        self.build_entries(&diff);
         self.build_rows(&diff);
         self.spans = Vec::new();
         self.num_w = num_width(&diff);
@@ -391,7 +415,7 @@ impl CommitView {
     /// The row of `a` in the current rows: the same line when it is still
     /// shown, else the nearest line of the same file (by that side's line
     /// number), else the file's header.
-    fn anchor_row(&self, a: &Anchor) -> Option<usize> {
+    pub(super) fn anchor_row(&self, a: &Anchor) -> Option<usize> {
         let diff = self.diff.as_ref()?;
         let (path, new, line) = match a {
             Anchor::Row(r) => return Some(*r),
@@ -537,6 +561,10 @@ impl App {
         self.commit = Some(CommitView::new(id, request));
         // Before the load: a session sets the context it loads in.
         self.session_enter(i);
+        let tree = self.files_tree;
+        if let Some(v) = &mut self.commit {
+            v.tree = tree;
+        }
         request
     }
 

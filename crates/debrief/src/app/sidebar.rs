@@ -6,7 +6,7 @@ use unicode_width::UnicodeWidthStr;
 
 use debrief_review::Side;
 
-use super::commit::{Focus, file_counts, file_path};
+use super::commit::Focus;
 use super::config::{SidebarShow, SidebarSide, SidebarWidth};
 use super::pane_nav::Dir;
 use super::{App, Screen};
@@ -248,7 +248,7 @@ impl App {
         self.set_focus(f);
         if let Some(v) = &mut self.commit
             && f == Focus::Files
-            && let Some(cur) = v.file_at(v.cur.row)
+            && let Some(cur) = v.file_at(v.cur.row).and_then(|f| v.entry_of(f))
         {
             v.side_sel = cur;
         }
@@ -336,37 +336,28 @@ impl App {
         }
     }
 
-    /// The selected row of the file list.
+    /// The selected row of the file list (its visible rows, top to
+    /// bottom).
     pub fn sidebar_selected(&self) -> usize {
-        self.commit.as_ref().map_or(0, |v| v.side_sel)
+        self.file_list().map_or(0, |l| l.selected)
     }
 
-    /// Select file `i` in the list and jump the diff to its header.
-    pub(super) fn select_file(&mut self, i: usize) {
-        let Some(v) = &mut self.commit else { return };
-        let n = v.file_count();
-        if n == 0 {
-            return;
-        }
-        v.side_sel = i.min(n - 1);
-        if let Some(r) = v.header_row(v.side_sel) {
-            v.goto_row(r);
-            v.cursor_to_top();
-            v.keep_visible();
-        }
-    }
-
-    /// Columns each file row needs: gutter, status letter, path and counts.
+    /// Columns each visible row needs: gutter, status letter or folder
+    /// arrow, indent, name and counts.
     fn sidebar_needs(&self) -> Vec<u16> {
-        let Some(d) = self.commit_diff() else {
+        let Some(l) = self.file_list() else {
             return Vec::new();
         };
-        d.files
+        l.visible
+            .rows
             .iter()
-            .map(|f| {
-                let (a, r) = file_counts(f);
-                let n =
-                    GUTTER_COLS + STATUS_COLS + file_path(f).width() + counts_label(a, r).width();
+            .map(|&i| {
+                let e = &l.entries[i];
+                let n = GUTTER_COLS
+                    + 2 * e.depth
+                    + STATUS_COLS
+                    + e.name.width()
+                    + counts_label(e.add, e.del).width();
                 n.min(u16::MAX as usize) as u16
             })
             .collect()

@@ -19,7 +19,7 @@
 use debrief_review::Side;
 use ratatui::layout::Rect;
 
-use super::commit::{CommitView, Row, RowKind, flatten};
+use super::commit::{CommitView, Row, RowKind, flatten_in};
 use super::motion::{Cell, row_cells};
 use super::{App, Mode};
 use crate::vcs::{CommitDiff, DiffLine, LineKind};
@@ -48,7 +48,14 @@ pub(super) struct Split {
 
 /// The side by side rows of `diff`: (left, right), the same length.
 pub fn flatten_split(diff: &CommitDiff) -> (Vec<Row>, Vec<Row>) {
-    let unified = flatten(diff);
+    let order: Vec<usize> = (0..diff.files.len()).collect();
+    flatten_split_in(diff, &order)
+}
+
+/// [`flatten_split`] with the files in `order` (see
+/// [`flatten_in`](super::commit::flatten_in)).
+pub fn flatten_split_in(diff: &CommitDiff, order: &[usize]) -> (Vec<Row>, Vec<Row>) {
+    let unified = flatten_in(diff, order);
     let (mut left, mut right) = (Vec::new(), Vec::new());
     for r in unified {
         match r.kind {
@@ -192,7 +199,7 @@ impl CommitView {
     /// `rows`.
     pub(super) fn build_rows(&mut self, diff: &CommitDiff) {
         if self.split_on {
-            let (left, right) = flatten_split(diff);
+            let (left, right) = flatten_split_in(diff, &self.order);
             let (mine, theirs) = match self.side {
                 Side::Old => (left, right),
                 Side::New => (right, left),
@@ -204,7 +211,7 @@ impl CommitView {
                 hscroll: 0,
             });
         } else {
-            self.rows = flatten(diff);
+            self.rows = flatten_in(diff, &self.order);
             self.split = None;
         }
         self.cells = self.rows.iter().map(|r| row_cells(&r.text)).collect();

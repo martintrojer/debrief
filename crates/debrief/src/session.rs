@@ -53,6 +53,15 @@ pub enum ViewLayout {
     Split,
 }
 
+/// `[view] files` as saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewFiles {
+    #[default]
+    Tree,
+    Flat,
+}
+
 /// The pane with the keys, as saved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -74,6 +83,12 @@ pub struct View {
     #[serde(deserialize_with = "crate::app::config::sidebar_show_compat")]
     pub sidebar: SidebarShow,
     pub focus: ViewFocus,
+    /// The file list: tree or flat (`` ` ``); `None` in sessions saved
+    /// before it, which open as `[view] files` says.
+    pub files: Option<ViewFiles>,
+    /// The file list's collapsed directories (paths from the root);
+    /// sessions saved before it open with every directory expanded.
+    pub collapsed: Vec<String>,
     /// The cursor row; `None` when the diff hadn't loaded.
     pub anchor: Option<Anchor>,
     /// Fallbacks: the cursor's row index and display column.

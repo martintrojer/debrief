@@ -20,7 +20,8 @@ use super::commit::Focus;
 use super::keys::{Action, KeyResult, plain};
 use super::{App, Mode, Screen};
 use crate::session::{
-    self, SavedComment, Session, Store, View, ViewContext, ViewFocus, ViewLayout, WORKING,
+    self, SavedComment, Session, Store, View, ViewContext, ViewFiles, ViewFocus, ViewLayout,
+    WORKING,
 };
 use crate::vcs::{Context, Kind};
 
@@ -168,6 +169,12 @@ fn touches_view(a: Action) -> bool {
             | A::FileTop
             | A::FileBottom
             | A::FileOpen
+            | A::FileHalfDown
+            | A::FileHalfUp
+            | A::FileCollapse
+            | A::FileExpand
+            | A::FileAll(_)
+            | A::ToggleFiles
             | A::ReviewJump(..)
     )
 }
@@ -297,6 +304,12 @@ impl App {
                 ViewLayout::Unified
             },
             sidebar: self.sidebar_show(),
+            files: Some(if self.files_tree {
+                ViewFiles::Tree
+            } else {
+                ViewFiles::Flat
+            }),
+            collapsed: v.collapsed.iter().cloned().collect(),
             // A restore still waiting for the diff holds the wanted focus.
             focus: match (&v.restore, self.focus) {
                 (Some(r), _) if v.diff.is_none() => r.focus,
@@ -358,7 +371,11 @@ impl App {
         self.context = from_view_context(view.context);
         self.split = view.layout == ViewLayout::Split;
         self.set_sidebar_show(view.sidebar);
+        if let Some(f) = view.files {
+            self.files_tree = f == ViewFiles::Tree;
+        }
         let Some(v) = &mut self.commit else { return };
+        v.collapsed = view.collapsed.iter().cloned().collect();
         let side = match &view.anchor {
             Some(session::Anchor::Line { side, .. }) => Some(*side),
             _ => None,

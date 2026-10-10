@@ -7,6 +7,7 @@ pub mod comment;
 pub mod commit;
 pub mod config;
 pub mod display;
+pub mod file_tree;
 mod help;
 pub mod highlight;
 mod keys;
@@ -232,6 +233,9 @@ pub struct App {
     /// `t`: side by side wanted for this session (shown when the diff pane
     /// is `[view] split_min_width` wide).
     split: bool,
+    /// `` ` ``: the file list as a tree (else flat), for every commit
+    /// opened this session.
+    files_tree: bool,
     /// Bytes for the terminal (OSC 52).
     output: Vec<u8>,
     config: config::Config,
@@ -317,6 +321,7 @@ impl App {
             sidebar: sidebar::SidebarState::default(),
             context: crate::vcs::Context::Default,
             split: false,
+            files_tree: true,
             output: Vec::new(),
             config: config::Config::default(),
             launch_keys: Vec::new(),
@@ -340,6 +345,7 @@ impl App {
         app.stat.on = app.config.view.stats;
         app.context = app.config.view.context;
         app.split = app.config.view.layout == config::Layout::Split;
+        app.files_tree = app.config.view.files == config::FilesLayout::Tree;
         let (keys, mut errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;
         errors.extend(app.config.warnings.iter().cloned());

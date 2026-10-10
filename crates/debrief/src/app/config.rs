@@ -101,6 +101,9 @@ pub struct ViewConfig {
     /// The commit view's layout at start: `"unified"` (the default) or
     /// `"split"` (side by side); `t` toggles.
     pub layout: Layout,
+    /// The commit view's file list at start: `"tree"` (the default) or
+    /// `"flat"` (whole paths in git's order); `` ` `` toggles.
+    pub files: FilesLayout,
     /// The narrowest diff pane (not counting the file list) side by side
     /// shows in; below it the view is unified.
     pub split_min_width: u16,
@@ -248,6 +251,15 @@ pub enum Layout {
     Split,
 }
 
+/// `[view] files`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilesLayout {
+    #[default]
+    Tree,
+    Flat,
+}
+
 impl Default for ViewConfig {
     fn default() -> Self {
         ViewConfig {
@@ -260,6 +272,7 @@ impl Default for ViewConfig {
             stats: true,
             context: DiffContext::Default,
             layout: Layout::Unified,
+            files: FilesLayout::Tree,
             split_min_width: SPLIT_MIN_WIDTH,
         }
     }
@@ -422,6 +435,9 @@ impl Config {
             }
             if let Some(l) = v.layout {
                 c.view.layout = l;
+            }
+            if let Some(f) = v.files {
+                c.view.files = f;
             }
             if let Some(w) = v.split_min_width {
                 c.view.split_min_width = w;
@@ -602,6 +618,7 @@ struct RawView {
     stats: Option<bool>,
     context: Option<RawContext>,
     layout: Option<Layout>,
+    files: Option<FilesLayout>,
     split_min_width: Option<u16>,
 }
 

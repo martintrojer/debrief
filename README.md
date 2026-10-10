@@ -29,7 +29,8 @@ agent as one markdown review.
   comments and view; reopening the commit restores them, and quitting with
   unsaved work asks first.
 - **It never writes to your repo.** No checkout, amend or index refresh,
-  and reviews live in your cache and state dirs. The one exception is jj's
+  and reviews live outside it: the comment batch and seen marks in your
+  cache dir, saved sessions in your state dir. The one exception is jj's
   working-copy snapshot, which ordinary jj commands take too;
   `--no-snapshot` turns it off.
 - **Your fingers already know it.** Vim motions, search and visual mode;

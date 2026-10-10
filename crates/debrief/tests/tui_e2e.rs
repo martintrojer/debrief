@@ -77,7 +77,8 @@ fn quote(p: &Path) -> String {
 }
 
 /// Start the binary on `repo` in a fresh tmux server; the shell writes
-/// debrief's exit status to `status_file`.
+/// debrief's exit status to `status_file`. Sessions go to `<cache>/state`,
+/// never the real state dir.
 fn start(repo: &Path, cache: &Path, status_file: &Path, env: &str) -> Option<Tmux> {
     start_with(repo, cache, status_file, env, "")
 }
@@ -102,10 +103,11 @@ fn start_with(
     };
     let bin = env!("CARGO_BIN_EXE_debrief");
     let shell_cmd = format!(
-        "env {env} {} {} --cache-dir {} {flags}; echo $? > {}",
+        "env {env} {} {} --cache-dir {} --state-dir {} {flags}; echo $? > {}",
         quote(Path::new(bin)),
         quote(repo),
         quote(cache),
+        quote(&cache.join("state")),
         quote(status_file)
     );
     let out = tmux.cmd(&[
@@ -186,6 +188,8 @@ fn not_a_repo_exits_2_with_the_error() {
         .arg(dir.path())
         .arg("--cache-dir")
         .arg(dir.path().join("cache"))
+        .arg("--state-dir")
+        .arg(dir.path().join("state"))
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
@@ -327,4 +331,43 @@ fn jj_snapshot_and_no_snapshot() {
     tmux.keys(&["q"]);
     tmux.wait_for("the log", |s| s.contains("jj first"));
     assert_eq!(tmux.quit(&status), "0");
+}
+
+#[test]
+fn a_saved_session_goes_to_the_test_state_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    commit(&root, "first");
+    let status = dir.path().join("status");
+    let cache = dir.path().join("cache");
+    let Some(tmux) = start(&root, &cache, &status, "") else {
+        return;
+    };
+    tmux.wait_for("the log", |s| s.contains("first"));
+    tmux.keys(&["Enter"]);
+    tmux.wait_for("the diff", |s| s.contains("+ one"));
+    tmux.keys(&["Space", "s", "s"]);
+    tmux.wait_for("saved", |s| s.contains("Session saved"));
+    let n = walk(&cache.join("state"))
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .count();
+    assert_eq!(n, 1, "one session file under the test state dir");
+    tmux.keys(&["q"]);
+    tmux.wait_for("the log", |s| s.contains("first"));
+    assert_eq!(tmux.quit(&status), "0");
+}
+
+fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    rd.flat_map(|e| {
+        let p = e.unwrap().path();
+        if p.is_dir() { walk(&p) } else { vec![p] }
+    })
+    .collect()
 }

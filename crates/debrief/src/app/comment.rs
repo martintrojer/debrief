@@ -347,9 +347,10 @@ impl App {
     }
 
     /// The diff pane the box goes in, from the terminal size.
+    /// Side by side, the cursor side's half: the box sits by its rows.
     fn comment_pane(&self) -> Rect {
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
-        self.commit_layout(area).diff
+        self.side_pane(self.commit_layout(area).diff)
     }
 
     /// The comment box in the diff pane `pane`: [`BOX_MARGIN`] in from its
@@ -581,7 +582,11 @@ impl App {
         if lines.iter().any(|&(f, _)| f != file) {
             return Err(SPANS_FILES.into());
         }
-        let new_side = lines.iter().any(|(_, l)| l.kind != LineKind::Removed);
+        // Side by side: the cursor's side (its rows are that side's).
+        let new_side = match v.split_side() {
+            Some(s) => s == Side::New,
+            None => lines.iter().any(|(_, l)| l.kind != LineKind::Removed),
+        };
         let (side, nums): (Side, Vec<u32>) = if new_side {
             (Side::New, lines.iter().filter_map(|(_, l)| l.new).collect())
         } else {

@@ -176,7 +176,8 @@ fn row_line(diff: &CommitDiff, v: &CommitView, row: usize) -> Option<(usize, u32
     let file = r.file?;
     let hunk = r.hunk.and_then(|h| diff.files.get(file)?.hunks.get(h));
     let line = match (r.kind, hunk, r.line) {
-        (RowKind::Line(_) | RowKind::NoNewline, Some(h), Some(li)) => {
+        // A side by side filler row stands for its paired line's place.
+        (RowKind::Line(_) | RowKind::NoNewline | RowKind::Filler, Some(h), Some(li)) => {
             match h.lines.get(li).and_then(|l| l.new) {
                 Some(n) => n,
                 None => {

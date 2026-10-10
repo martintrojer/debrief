@@ -9,6 +9,7 @@ mod log;
 mod picker;
 mod popup;
 mod sidebar;
+mod split;
 mod stat;
 mod status;
 
@@ -77,7 +78,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 sidebar::draw(frame, app, side);
             }
             commit::draw(frame, app, l.diff);
-            comment_box::draw(frame, app, l.diff);
+            // Side by side, the box sits on the cursor's half, by its rows.
+            comment_box::draw(frame, app, app.side_pane(l.diff));
         }
     }
     status::draw(frame, app, status);

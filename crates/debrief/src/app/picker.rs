@@ -282,6 +282,14 @@ impl App {
     /// Put the cursor on the first row of `c` in the open commit (its file
     /// header when no row shows its lines).
     pub(super) fn goto_comment(&mut self, c: &Comment) {
+        // Side by side: the comment's side.
+        let want = c.side.unwrap_or(debrief_review::Side::New);
+        if let Some(v) = &mut self.commit
+            && v.split_side().is_some_and(|s| s != want)
+        {
+            v.swap_side();
+            self.refresh_search();
+        }
         let n = self.commit_rows().len();
         let row = (0..n).find(|&r| self.row_in(r, c)).or_else(|| {
             let diff = self.commit_diff()?;

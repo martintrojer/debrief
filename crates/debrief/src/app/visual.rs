@@ -62,7 +62,12 @@ impl App {
         };
         let rows = self.commit_rows();
         let hi = hi.min(rows.len().saturating_sub(1));
-        let text: String = rows[lo..=hi].iter().map(|r| diff_text(r) + "\n").collect();
+        // Side by side: the selected side's rows, no padding.
+        let text: String = rows[lo..=hi]
+            .iter()
+            .filter(|r| r.kind != super::commit::RowKind::Filler)
+            .map(|r| diff_text(r) + "\n")
+            .collect();
         if text.is_empty() {
             return;
         }

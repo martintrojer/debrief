@@ -19,7 +19,7 @@ use ratatui::layout::Rect;
 use unicode_width::UnicodeWidthChar;
 
 use super::commit::{RowKind, file_path};
-use super::{App, Mode};
+use super::{App, DiffRow, Mode};
 use crate::vcs::LineKind;
 
 /// The gutter marker.
@@ -98,10 +98,20 @@ impl App {
 
     /// Whether diff row `row` lies in comment `c` (its file, side and line).
     pub(super) fn row_in(&self, row: usize, c: &Comment) -> bool {
-        let (Some(v), Some(diff)) = (&self.commit, self.commit_diff()) else {
+        let side = self.split_side();
+        self.row_in_side(self.commit_rows(), side, row, c)
+    }
+
+    /// [`App::row_in`] over `rows`: unified rows (`side` `None`), or one
+    /// side by side's, where a comment marks only the side it is on.
+    fn row_in_side(&self, rows: &[DiffRow], side: Option<Side>, row: usize, c: &Comment) -> bool {
+        let Some(diff) = self.commit_diff() else {
             return false;
         };
-        let Some(r) = v.rows.get(row) else {
+        if side.is_some_and(|s| s != c.side.unwrap_or(Side::New)) {
+            return false;
+        }
+        let Some(r) = rows.get(row) else {
             return false;
         };
         let RowKind::Line(kind) = r.kind else {
@@ -147,6 +157,18 @@ impl App {
         }
         (0..self.commit_rows().len())
             .filter(|&r| cs.iter().any(|c| self.row_in(r, c)))
+            .collect()
+    }
+
+    /// Side by side: the marked rows of one side, sorted.
+    pub fn split_marked_rows(&self, side: Side) -> Vec<usize> {
+        let cs = self.comments_here();
+        let rows = self.split_rows(side);
+        if cs.is_empty() {
+            return Vec::new();
+        }
+        (0..rows.len())
+            .filter(|&r| cs.iter().any(|c| self.row_in_side(rows, Some(side), r, c)))
             .collect()
     }
 

@@ -176,6 +176,8 @@ pub(crate) const BINDINGS: &[Binding] = {
             "previous hunk (full file: previous change)",
         ),
         b("T", C, G::Commit, "hunks / full file"),
+        b("t", C, G::Commit, "unified / side by side"),
+        b("Tab", C, G::Commit, "side by side: the other side"),
         b("r", C, G::Commit, "refresh the working-copy diff in place"),
         b("]]", C, G::Commit, "open the next commit"),
         b("[[", C, G::Commit, "open the previous commit"),

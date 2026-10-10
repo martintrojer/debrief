@@ -268,7 +268,8 @@ impl CommitView {
     }
 
     fn blank_row(&self, row: usize) -> bool {
-        self.cells(row).iter().all(|c| c.class == Class::Blank)
+        let filler = self.rows.get(row).map(|r| r.kind) == Some(RowKind::Filler);
+        !filler && self.cells(row).iter().all(|c| c.class == Class::Blank)
     }
 
     /// `}`: the next blank row after the current paragraph (or the last row).
@@ -331,7 +332,7 @@ impl CommitView {
         let edit = |r: usize| {
             matches!(
                 self.rows[r].kind,
-                RowKind::Line(LineKind::Added | LineKind::Removed)
+                RowKind::Line(LineKind::Added | LineKind::Removed) | RowKind::Filler
             )
         };
         // A no-newline row belongs to the line above it.

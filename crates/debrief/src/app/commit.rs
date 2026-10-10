@@ -12,6 +12,7 @@
 
 use std::path::PathBuf;
 
+use debrief_review::Side;
 use ratatui::layout::Rect;
 
 use crate::vcs::{
@@ -19,7 +20,7 @@ use crate::vcs::{
 };
 
 use super::highlight::{self, DiffSpans, Spans};
-use super::motion::{Cell, Cursor, row_cells};
+use super::motion::{Cell, Cursor};
 use super::search::Search;
 use super::{App, AppEvent, Mode, Screen};
 
@@ -42,6 +43,9 @@ pub enum RowKind {
     Binary,
     /// Spacing between the message and files, and between files.
     Blank,
+    /// Side by side: the padding of the shorter side of a change block.
+    /// `line` is the paired line on the other side.
+    Filler,
 }
 
 /// One row of the commit view. `file`, `hunk` and `line` index into
@@ -79,6 +83,12 @@ pub fn num_width(diff: &CommitDiff) -> usize {
 /// digits wide.
 pub fn gutter_width(num_w: usize) -> usize {
     2 * num_w + 4
+}
+
+/// Columns before a row's text on one side of the side by side layout,
+/// `num ± `.
+pub fn side_gutter_width(num_w: usize) -> usize {
+    num_w + 3
 }
 
 /// The placeholder row of a file with no hunks that is not binary (a
@@ -267,6 +277,13 @@ pub struct CommitView {
     /// A `T` reload: the line to put the cursor back on once it loads,
     /// and the cursor's row on screen to keep.
     pub(super) keep_anchor: Option<(Anchor, usize)>,
+    /// Side by side wanted: the layout `set_diff` builds.
+    pub(super) split_on: bool,
+    /// Side by side as shown: the other side's rows (`rows` holds the
+    /// cursor's side).
+    pub(super) split: Option<super::split::Split>,
+    /// The cursor's side in side by side.
+    pub(super) side: Side,
 }
 
 /// Where the cursor was, in terms that survive a change of context
@@ -307,14 +324,16 @@ impl CommitView {
             base: None,
             keep_row: None,
             keep_anchor: None,
+            split_on: false,
+            split: None,
+            side: Side::New,
         }
     }
 
     pub(super) fn set_diff(&mut self, diff: CommitDiff) {
-        self.rows = flatten(&diff);
+        self.build_rows(&diff);
         self.spans = Vec::new();
         self.num_w = num_width(&diff);
-        self.cells = self.rows.iter().map(|r| row_cells(&r.text)).collect();
         self.diff = Some(diff);
         self.loading = false;
         self.cur = Cursor::default();
@@ -351,8 +370,15 @@ impl CommitView {
             (Some(h), Some(l)) => f.hunks.get(h)?.lines.get(l),
             _ => None,
         };
+        // Side by side's left side prefers its own (old) numbers.
+        let old_first = self.split_side() == Some(Side::Old);
         Some(match line {
             Some(l) => match (l.new, l.old) {
+                (_, Some(o)) if old_first => Anchor::Line {
+                    path,
+                    new: false,
+                    line: o,
+                },
                 (Some(n), _) => Anchor::Line {
                     path,
                     new: true,
@@ -511,6 +537,8 @@ impl App {
         self.focus = Focus::Diff;
         self.next_request += 1;
         let request = self.next_request;
+        // The session's layout follows once the diff (and the file list
+        // that narrows the pane) is in: `loaded` -> `commit_follow`.
         self.commit = Some(CommitView::new(id, request));
         request
     }
@@ -750,6 +778,12 @@ impl App {
                 let keep = v.keep_row.take();
                 let anchor = v.keep_anchor.take();
                 v.set_diff(diff);
+                // Side by side: the anchor's line is on its side.
+                if let Some((Anchor::Line { new, .. }, _)) = &anchor
+                    && v.split_side().is_some_and(|s| (s == Side::New) != *new)
+                {
+                    v.swap_side();
+                }
                 if let Some(row) = keep {
                     v.goto_row(row.min(v.rows.len().saturating_sub(1)));
                 }
@@ -892,14 +926,19 @@ impl App {
     pub(super) fn commit_follow(&mut self) {
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
         let diff = self.commit_layout(area).diff;
+        self.layout_sync(diff.width);
         let marks = self.review_gutter();
         let over = self.comment_overscroll();
+        let side_w = self.side_pane(diff).width as usize;
         if let Some(v) = &mut self.commit {
             v.view_h = (diff.height as usize).max(1);
             v.overscroll = over;
-            v.text_w = (diff.width as usize)
-                .saturating_sub(gutter_width(v.num_w) + marks)
-                .max(1);
+            let gutter = if v.is_split() {
+                side_gutter_width(v.num_w)
+            } else {
+                gutter_width(v.num_w)
+            };
+            v.text_w = side_w.saturating_sub(gutter + marks).max(1);
             v.keep_visible();
         }
         self.comment_fit();

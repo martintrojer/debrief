@@ -73,6 +73,10 @@ pub enum Action {
     Hunk(bool, Option<usize>),
     /// `T`: hunks / the full file.
     ToggleContext,
+    /// `t`: unified / side by side.
+    ToggleLayout,
+    /// `Tab` side by side: the cursor to the other side.
+    SwitchSide,
     /// `]]` / `[[`: the next (older) / previous commit of the log.
     Commit(bool),
     /// `/` (true) or `?`.
@@ -335,6 +339,8 @@ impl App {
             KeyCode::Char('K') => A::Hover,
             KeyCode::Char('r') => A::Reload,
             KeyCode::Char('T') => A::ToggleContext,
+            KeyCode::Char('t') => A::ToggleLayout,
+            KeyCode::Tab => A::SwitchSide,
             _ => return KeyResult::None,
         };
         KeyResult::Action(action)
@@ -496,6 +502,8 @@ impl App {
             A::Back => return self.close_commit(),
             A::Reload => return self.reload_view(),
             A::ToggleContext => return self.toggle_context(),
+            A::ToggleLayout => return self.toggle_layout(),
+            A::SwitchSide => return self.switch_side(),
             A::Commit(forward) => return self.step_commit(forward),
             A::SearchStart(f) => return self.search_start(f),
             A::SearchNext(same, c) => return self.search_next(same, n(c)),
@@ -600,6 +608,8 @@ fn visual_ok(a: Action) -> bool {
         A::Back
             | A::Commit(_)
             | A::ToggleContext
+            | A::ToggleLayout
+            | A::SwitchSide
             | A::ToggleSidebar
             | A::Focus(_)
             | A::Help(_)

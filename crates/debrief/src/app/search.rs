@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use super::commit::RowKind;
 use super::display::col_of;
 use super::{App, Mode};
 
@@ -14,6 +15,8 @@ pub(super) struct Search {
     forward: bool,
     /// (row, byte range in the row's text), in order.
     hits: Vec<(usize, Range<usize>)>,
+    /// Side by side: the hits on the side the cursor is not on.
+    other: Vec<(usize, Range<usize>)>,
     /// The prompt text while typing.
     prompt: Option<String>,
     /// The pattern before the prompt opened (restored by Esc).
@@ -48,6 +51,32 @@ pub fn find_all(text: &str, pat: &str) -> Vec<Range<usize>> {
     out
 }
 
+impl Search {
+    /// Side by side: the cursor changed sides.
+    pub(super) fn swap_sides(&mut self) {
+        std::mem::swap(&mut self.hits, &mut self.other);
+    }
+}
+
+fn hits_in(rows: &[super::commit::Row], pat: &str) -> Vec<(usize, Range<usize>)> {
+    rows.iter()
+        .enumerate()
+        .flat_map(|(i, r)| find_all(&r.text, pat).into_iter().map(move |h| (i, h)))
+        .collect()
+}
+
+fn columns(
+    rows: &[super::commit::Row],
+    hits: &[(usize, Range<usize>)],
+) -> Vec<(usize, usize, usize)> {
+    hits.iter()
+        .map(|(r, h)| {
+            let t = &rows[*r].text;
+            (*r, col_of(t, h.start), col_of(t, h.end))
+        })
+        .collect()
+}
+
 impl App {
     /// The search prompt (`/foo` or `?foo`) while typing; on the log
     /// also the filter prompt (`filter: foo`).
@@ -65,26 +94,29 @@ impl App {
         let Some(v) = &self.commit else {
             return Vec::new();
         };
-        v.search
-            .hits
-            .iter()
-            .map(|(r, h)| {
-                let t = &v.rows[*r].text;
-                (*r, col_of(t, h.start), col_of(t, h.end))
-            })
-            .collect()
+        columns(&v.rows, &v.search.hits)
+    }
+
+    /// Side by side: the search hits of one side, as [`App::search_hits`].
+    pub fn split_search_hits(&self, side: debrief_review::Side) -> Vec<(usize, usize, usize)> {
+        let Some(v) = &self.commit else {
+            return Vec::new();
+        };
+        match &v.split {
+            Some(s) if v.side != side => columns(&s.rows, &v.search.other),
+            _ => self.search_hits(),
+        }
     }
 
     /// Recompute the hits of the active pattern over the current rows.
     pub(super) fn refresh_search(&mut self) {
         let Some(v) = &mut self.commit else { return };
         let pat = v.search.pattern.clone();
-        v.search.hits = v
-            .rows
-            .iter()
-            .enumerate()
-            .flat_map(|(i, r)| find_all(&r.text, &pat).into_iter().map(move |h| (i, h)))
-            .collect();
+        v.search.hits = hits_in(&v.rows, &pat);
+        v.search.other = v
+            .split
+            .as_ref()
+            .map_or_else(Vec::new, |s| hits_in(&s.rows, &pat));
     }
 
     /// `/` (forward) or `?`: open the prompt.
@@ -158,11 +190,37 @@ impl App {
             self.set_status("no previous search");
             return;
         }
-        let mut starts: Vec<(usize, usize)> = self
+        // (row, side: 0 left / 1 right, column); unified rows are all
+        // one side.
+        use debrief_review::Side;
+        let order = |s: Side| usize::from(s == Side::New);
+        let mine = v.split_side().map_or(0, order);
+        let mut starts: Vec<(usize, usize, usize)> = self
             .search_hits()
             .into_iter()
-            .map(|(r, c, _)| (r, c))
+            .map(|(r, c, _)| (r, mine, c))
             .collect();
+        // A selection stays on its side.
+        if let Some(side) = v.split_side().filter(|_| self.mode != Mode::Visual) {
+            let theirs = super::split::other(side);
+            let rows = self.split_rows(theirs);
+            // Rows drawn across both halves count once, on this side.
+            let own = |r: usize| {
+                rows.get(r).is_some_and(|r| {
+                    matches!(
+                        r.kind,
+                        RowKind::Line(_) | RowKind::NoNewline | RowKind::Filler
+                    )
+                })
+            };
+            starts.extend(
+                self.split_search_hits(theirs)
+                    .into_iter()
+                    .filter(|&(r, _, _)| own(r))
+                    .map(|(r, c, _)| (r, order(theirs), c)),
+            );
+            starts.sort_unstable();
+        }
         starts.dedup();
         let (Some(&first), Some(&last)) = (starts.first(), starts.last()) else {
             let p = v.search.pattern.clone();
@@ -170,7 +228,7 @@ impl App {
             return;
         };
         let forward = v.search.forward == same;
-        let mut cur = (v.cur.row, v.cur.col);
+        let mut cur = (v.cur.row, mine, v.cur.col);
         let mut wrapped = false;
         for _ in 0..count.max(1) {
             let next = if forward {
@@ -184,8 +242,11 @@ impl App {
             });
         }
         let Some(v) = &mut self.commit else { return };
+        if v.split_side().is_some_and(|s| order(s) != cur.1) {
+            v.swap_side();
+        }
         v.cur.row = cur.0;
-        v.set_col(cur.1);
+        v.set_col(cur.2);
         if wrapped {
             self.set_status(if forward {
                 "search hit BOTTOM, continuing at TOP"

@@ -1,5 +1,5 @@
 //! Saved review sessions: `<leader>ss`, restore on
-//! open (view and comments), `▣N` on the log, the quit prompt, the
+//! open (view and comments), `N` on the log, the quit prompt, the
 //! `<leader>rs` list, and a jj rewrite. A temp repo, cache and state dir
 //! per test.
 
@@ -395,20 +395,20 @@ fn the_log_marks_sessions_with_their_unsent_count() {
     let (top, _) = save_top_with_comment(&f);
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("▣1 top"), "{}", s[0]);
-    assert!(!s[1].contains('▣'), "{}", s[1]);
+    assert!(s[0].contains("1 top"), "{}", s[0]);
+    assert!(!s[1].contains(''), "{}", s[1]);
     // Kept by a filter.
     keys(&mut app, "ftop");
     press(&mut app, KeyCode::Enter);
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("▣1 top"), "{}", s[0]);
+    assert!(s[0].contains("1 top"), "{}", s[0]);
     // No comments: the bare marker.
     let mut s = f.store().load(&top).unwrap().unwrap();
     s.comments.clear();
     f.store().save(&s).unwrap();
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("▣ top"), "{}", s[0]);
+    assert!(s[0].contains(" top"), "{}", s[0]);
 }
 
 #[test]
@@ -597,7 +597,7 @@ fn quit_prompt_y_copies_marks_sent_and_quits() {
     // A sent comment is never restored and the marker counts unsent ones.
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("▣ top"), "{}", s[0]);
+    assert!(s[0].contains(" top"), "{}", s[0]);
     open(&mut app, 0);
     assert!(f.comments().is_empty());
 }
@@ -713,7 +713,7 @@ fn session_list_opens_and_deletes() {
     assert!(f.store().load(&top).unwrap().is_none());
     press(&mut app, KeyCode::Esc);
     let s = screen(&mut app, 80, 8);
-    assert!(!s.iter().any(|l| l.contains('▣')), "{s:?}");
+    assert!(!s.iter().any(|l| l.contains('')), "{s:?}");
 }
 
 #[test]
@@ -777,7 +777,7 @@ fn the_working_copy_has_one_session_file() {
     assert_eq!(s.comments[0].comment.rev, None);
     press(&mut app, KeyCode::Esc);
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("▣1"), "{}", s[0]);
+    assert!(s[0].contains("1"), "{}", s[0]);
 }
 
 #[test]
@@ -883,7 +883,7 @@ fn a_jj_rewrite_leaves_the_session_on_the_old_commit() {
     let mut app = new_app();
     assert_ne!(app.rows()[0].info.commit, old, "rewritten");
     let s = screen(&mut app, 80, 8);
-    assert!(!s.iter().any(|l| l.contains('▣')), "{s:?}");
+    assert!(!s.iter().any(|l| l.contains('')), "{s:?}");
     keys(&mut app, " rs");
     let v = app.picker().unwrap();
     assert_eq!(v.items.len(), 1);

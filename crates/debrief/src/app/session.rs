@@ -2,7 +2,7 @@
 //! `<leader>ss` saves the open commit's comments and view;
 //! opening a commit with a session restores its view (and, the first time
 //! this run, its unsent comments into the batch); the log marks such rows
-//! `▣N`; quitting with unsaved review work asks first; `<leader>rs` lists
+//! `N`; quitting with unsaved review work asks first; `<leader>rs` lists
 //! the sessions.
 //!
 //! Every commit visited this run has a [`Visit`]: its view as last seen
@@ -26,7 +26,7 @@ use crate::session::{
 use crate::vcs::{Context, Kind};
 
 /// The log marker of a commit with a session.
-pub const SESSION_MARKER: char = '▣';
+pub const SESSION_MARKER: char = '\u{f02e}'; // nf-fa-bookmark
 /// The quit prompt, in the status row.
 pub const QUIT_PROMPT: &str = "Unsaved review: s save · y copy · q quit · Esc cancel";
 /// Status of `<leader>ss` on the log.
@@ -246,7 +246,7 @@ impl App {
         })
     }
 
-    /// The `▣` marker of a log row: `▣`, or `▣3` with unsent comments.
+    /// The `` marker of a log row: ``, or `3` with unsent comments.
     pub fn session_marker(&self, row: &super::Row) -> Option<String> {
         let key = if row.working {
             WORKING

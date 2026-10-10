@@ -254,8 +254,9 @@ working copy's is `working-copy.json`. Nothing is saved automatically.
   that commit (for the working copy: its comments without a revision and
   removed-line comments on its base) and the view: context, layout, file
   list, focused pane and cursor. Saving again replaces it.
-- **Indicator:** log rows of commits with a session end in `▣`, with the
-  number of unsent comments when there are any (`▣3`).
+- **Indicator:** log rows of commits with a session end in ``, with the
+  number of unsent comments when there are any (`3`); the
+  glyph is Nerd Font `nf-fa-bookmark`.
 - **Restore:** opening a commit with a session puts its view back. The
   first time this run, its unsent comments that the batch lacks are added
   back. Opening the same commit again in this run shows the view you left.

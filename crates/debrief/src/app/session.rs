@@ -371,9 +371,12 @@ impl App {
         self.context = from_view_context(view.context);
         self.split = view.layout == ViewLayout::Split;
         self.set_sidebar_show(view.sidebar);
-        if let Some(f) = view.files {
-            self.files_tree = f == ViewFiles::Tree;
-        }
+        // Sessions saved before `files` open as `[view] files` says,
+        // not in the mode the last commit left.
+        self.files_tree = match view.files {
+            Some(f) => f == ViewFiles::Tree,
+            None => self.config.view.files == super::config::FilesLayout::Tree,
+        };
         let Some(v) = &mut self.commit else { return };
         v.collapsed = view.collapsed.iter().cloned().collect();
         let side = match &view.anchor {

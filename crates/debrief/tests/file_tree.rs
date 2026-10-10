@@ -442,3 +442,35 @@ fn old_sessions_open_expanded_in_the_config_mode() {
     assert!(app.files_tree());
     assert_eq!(list(&mut app).len(), 8, "every directory open");
 }
+
+#[test]
+fn an_old_session_opens_in_the_config_mode_after_a_flat_one() {
+    let f = fixture();
+    let mut app = f.open("");
+    keys(&mut app, " ss");
+    let top = app.commit_id().unwrap().to_string();
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    let base = app.commit_id().unwrap().to_string();
+    assert_ne!(top, base);
+    keys(&mut app, " ss");
+    // The top commit's session is flat; base's is from before `files`.
+    let mut s = f.store().load(&top).unwrap().unwrap();
+    s.view.files = Some(ViewFiles::Flat);
+    f.store().save(&s).unwrap();
+    let path = f.store().path(&base).unwrap();
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let view = json["view"].as_object_mut().unwrap();
+    view.remove("files");
+    view.remove("collapsed");
+    std::fs::write(&path, json.to_string()).unwrap();
+    let mut app = f.open("[view]\nfiles = \"tree\"\n");
+    assert!(!app.files_tree(), "the flat session");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_id().unwrap(), base);
+    assert!(app.files_tree(), "[view] files, not the last session's");
+}

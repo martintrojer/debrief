@@ -18,8 +18,9 @@
 ## left | right: the file list's screen edge. Pane moves follow the
 ## screen: on the right, C-l goes to the list.
 # sidebar_side = "left"
-## Hide the file list below this many columns (0: never); it comes back
-## when the terminal grows, unless <leader>e hid it.
+## Hide an always list below this many columns (0: never); it comes back
+## when the terminal grows, unless <leader>e hid it. An auto list still
+## peeks there, over the diff.
 # sidebar_auto_hide_below = 80
 ## Width in columns, not counting the border. "auto" fits most paths
 ## within sidebar_min_width and sidebar_max_width; a number is used as is.
@@ -76,7 +77,8 @@
 ## ---------------------------------------------------------------------------
 ## <leader>rr sends the batch: the markdown goes to `command` on stdin (with
 ## DEBRIEF_ROOT set). An empty command, a failure, or a 10 s timeout copies
-## it to the clipboard instead. Either way the batch is then cleared.
+## it to the clipboard instead. Once delivered, the sent comments leave
+## the batch; on an error they stay and the status line says why.
 ##   command = ["sh", "-c", "mu agent send worker-1 \"$(cat)\""]
 ## `preamble` replaces the export's opening paragraph ("" drops it):
 ##   preamble = "Please address these review comments."
@@ -87,11 +89,11 @@
 ## Launchers: run a command with the TUI suspended, then come back.
 ## Arguments are not passed through a shell. Variables: ${file} ${line}
 ## ${root} ${editor} (an argument that is exactly "${editor}" expands to
-## $VISUAL / $EDITOR / vi, split into words). `key` is <leader> and plain
-## keys; a launcher key wins over a built-in <leader> key it shares a
-## prefix with. An entry with the same name replaces a default (keeping
-## what it leaves out); new names are added; `disabled = true` removes a
-## default, e.g.:
+## $VISUAL / $EDITOR / vi, split into words). `key` is <leader> followed
+## by plain characters; a bad key is skipped with a warning. A launcher
+## key wins over a built-in <leader> key it shares a prefix with. An entry
+## with the same name replaces a default (keeping what it leaves out); new
+## names are added; `disabled = true` removes a default, e.g.:
 ##   [[launch]]
 ##   name = "lazygit"
 ##   key = "<leader>g"

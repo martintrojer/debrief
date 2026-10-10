@@ -1,7 +1,7 @@
 # debrief guide
 
-What debrief does and how to drive it. Inside debrief, `g?` lists every key
-that works where you are. Every config option, with its default, is in
+What debrief does and how to drive it. For in-app key help, see
+[Help](#help). Every config option, with its default, is in
 [config.default.toml](../crates/debrief/config.default.toml).
 
 ## Starting
@@ -20,8 +20,8 @@ revset is jj's `revsets.log`, or git's `HEAD`.
 
 debrief keeps seen state and the review batch in the user cache dir
 (`--cache-dir` or `$DEBRIEF_CACHE_DIR` moves it), and saved sessions in
-`$XDG_STATE_HOME/debrief`, else `~/.local/state/debrief` (`--state-dir`
-or `$DEBRIEF_STATE_DIR` moves it, used as is).
+`~/.local/state/debrief` (on Linux `$XDG_STATE_HOME/debrief` when set;
+`--state-dir` or `$DEBRIEF_STATE_DIR` moves it, used as is).
 
 ## The log
 
@@ -65,12 +65,11 @@ Uncommitted changes show in the log and take comments like any commit.
 
 - **git:** while the tree is dirty (tracked files changed against `HEAD`,
   or untracked files that aren't ignored), the log has a
-  `✎ Working copy  N files` row on top, never new or seen. It opens like a
-  commit, headed `Working copy (uncommitted) on <id> <summary>`.
-  Untracked files show as added. Files over 1 MiB, binary files and
-  special files get a one-line placeholder, and a symlink shows its
-  target. debrief watches the tree and refreshes the row when files
-  change.
+  `✎ Working copy  N files` row on top, never new or seen. It opens like a commit, headed
+  `Working copy (uncommitted) on <id> <summary>`. Untracked files show as
+  added; untracked files over 1 MiB, binary untracked files and special
+  files get a one-line placeholder, and a symlink shows its target.
+  debrief watches the tree and refreshes the row when files change.
 - **jj:** `@` is the working copy, marked `✎`. Before it loads the log,
   opens `@`, reloads, or comes back from the editor or a launcher, debrief
   runs `jj util snapshot`, so `@` shows your uncommitted edits. If the
@@ -143,6 +142,9 @@ while the editor runs and comes back on the same row.
 
 ### The file list
 
+Each row is a status letter (`A` `M` `D` `R` `C`), the path and
+`+n −m`; `▎` marks the file holding the diff cursor.
+
 `[view] sidebar` is `"always"` (shown, `<leader>e` hides it), `"never"`
 (hidden, `<leader>e` shows it) or `"auto"`, a peek: hidden while you read
 the diff, shown while you move toward it (`C-h` or `C-w h`; on the right
@@ -152,8 +154,9 @@ beside the diff when the diff keeps at least 80 columns (`split_min_width`
 side by side); otherwise it draws over the diff without reflowing it.
 
 `sidebar_side = "right"` puts the list after the diff. Below
-`sidebar_auto_hide_below` (80) columns the list hides, and comes back when
-the terminal grows unless `<leader>e` hid it. `sidebar_width = "auto"`
+`sidebar_auto_hide_below` (80) columns an always list hides, and comes
+back when the terminal grows unless `<leader>e` hid it; an auto list
+still peeks and pins there, drawn over the diff. `sidebar_width = "auto"`
 fits most paths within `sidebar_min_width` (16) and `sidebar_max_width`
 (48), and at most 35% of the terminal.
 
@@ -189,13 +192,15 @@ set -g @vim_navigator_pattern '(\S+/)?g?\.?(view|l?n?vim?x?|fzf|debrief|ramble)(
 | box: `Tab` / `S-Tab` | next / previous kind, back round to untyped |
 | box: `PageUp` / `PageDown` | scroll the diff behind the box |
 | `]r` `[r` | next / previous commented line (`●` in the gutter) |
-| `K` | show the comments on this line |
+| `K` | show the comments on this line; `j` `k` `C-d` `C-u` `gg` `G` scroll, `q` `K` `Esc` close |
 | `<leader>rl` | list the batch: type to filter, `Enter` go, `C-d` remove, `C-e` edit |
 | `<leader>rr` | send the batch |
 
 The comment box opens directly below the commented lines, or above them
-when there's no room, and never covers them: if neither side has room the
-diff scrolls. Its title shows the kind and the lines
+when there's no room; if neither side has room the diff scrolls so the
+box doesn't cover them. It can still cover them when the selection fills
+the pane, after you scroll the diff behind the box, or in a pane too
+short for the box and a row. Its title shows the kind and the lines
 (`comment [ISSUE] L12-18`). It grows with the text up to 8 rows, then
 scrolls; readline keys and Up/Down edit it.
 
@@ -206,12 +211,14 @@ adds a legend of the kinds it uses, with their definitions.
 
 **Anchoring.** A comment uses the new-side line numbers of the selected
 lines, or the old side if you select only removed lines; a mixed selection
-uses the new side and puts both in the excerpt. It stores the commit (and
-jj change ID) it was made on and the first 40 selected lines as its
-excerpt. Comments are never re-anchored: after a jj rewrite a comment
-shows in `<leader>rl` but not in the new commit's gutter. `Enter` in the
-list opens a comment's own commit at its line, if that commit is in the
-log.
+uses the new side and puts both in the excerpt. Side by side, it uses the
+cursor's side. It stores the first 40 selected lines as its excerpt, and a
+comment on a commit also stores that commit (and jj change ID); a
+working-copy comment is anchored as described under [The working
+copy](#the-working-copy). Comments are never re-anchored: after a jj
+rewrite a comment shows in `<leader>rl` but not in the new commit's
+gutter. `Enter` in the list opens a comment's own commit at its line, if
+that commit is in the log.
 
 **Pasting** types into the comment box with its newlines, or into a
 search prompt or filter as one line. A paste anywhere else is ignored,
@@ -233,6 +240,7 @@ working copy's is `working-copy.json`. Nothing is saved automatically.
 - **Restore:** opening a commit with a session puts its view back. The
   first time this run, its unsent comments that the batch lacks are added
   back. Opening the same commit again in this run shows the view you left.
+  If the saved cursor's file is gone, the cursor starts on the first row.
 - **Sent comments:** comments debrief sends or copies stay in their
   session marked sent and are never restored. debrief doesn't see comments
   sent from ramble, so those may come back.
@@ -242,10 +250,13 @@ working copy's is `working-copy.json`. Nothing is saved automatically.
   clipboard and quits, `q` or a second `C-c` quits, `Esc` stays. Unsaved
   work is a commit you changed this run (cursor, `T`, `t`, `<leader>e`,
   comments) since it was last saved or sent, if it has a session or
-  comments, or a commit with comments from an earlier run and no session.
+  comments, or a commit visited this run with comments from an earlier
+  run and no session.
 - **List:** `<leader>rs` lists the repo's sessions, newest first, also
   for commits no longer in the log (a jj rewrite is a new commit with no
-  session). `Enter` opens one and `C-d` deletes it.
+  session). `Enter` opens the commit (`Commit not in the log` if it's
+  gone) and `C-d` deletes the session. A session file that can't be read
+  is skipped and reported once.
 
 ## Sending a review
 
@@ -253,8 +264,10 @@ Comments collect in one batch per repo root, in the cache dir.
 `<leader>rr` exports the batch as markdown and pipes it to `[send]
 command`, with `DEBRIEF_ROOT=<repo root>` in its environment. If no
 command is set, or it fails or takes over 10 s, the markdown goes to the
-clipboard (OSC 52). Either way the sent comments leave the batch;
-comments added during the send stay.
+clipboard (OSC 52). Once the review is delivered and marked sent in its
+sessions, the exported comments leave the batch; comments added during
+the send stay. If the clipboard write, the session update or the removal
+fails, the batch keeps the comments and the status line says why.
 
 `scripts/debrief-send` routes the review to the mu agent working in that
 repo: it finds the one workspace in `mu workspace list --all --json` whose
@@ -274,8 +287,9 @@ ramble and debrief read and write the same batch file for a repo root,
 under a lock, so you can comment on a plan in ramble and on its commit in
 debrief, then send both from either tool. ramble shows its working-copy
 comments in its gutter and lists debrief's diff comments in its
-`<leader>rl`; debrief lists ramble's, and `Enter` on one opens it in
-ramble.
+`<leader>rl`; debrief lists ramble's, and `Enter` on one in an existing
+`.md` file opens it in ramble (on any other working-copy comment it shows
+the path and line).
 
 Both tools must use the same cache dir: if you move it, set
 `DEBRIEF_CACHE_DIR` for both (`--cache-dir` only changes debrief).
@@ -293,7 +307,9 @@ in another, and there debrief refuses to hand those `.md` files to ramble
 [config.default.toml](../crates/debrief/config.default.toml) there, every
 option commented out, and refuses to overwrite a file. An unknown key or a
 bad value stops debrief at start (exit 2) with one line naming the file,
-line, key and what it allows.
+line, key and what it allows. Two exceptions start anyway with a warning
+on the status line: a launcher with a bad `key` is left unbound, and an
+empty or repeated `[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
 (highlighting), `[keys]`, `[review]` (comment kinds), `[send]` (where
@@ -331,8 +347,9 @@ A launcher runs a command with the TUI suspended, then reloads. Arguments
 are not passed through a shell. Variables: `${file}` `${line}` `${root}`
 `${editor}` (`$VISUAL`, `$EDITOR` or `vi`). The defaults are `edit`
 (`<leader>o`, the editor) and `md` (`Enter` on a `.md` file header,
-ramble). Entries merge into the defaults by name; `disabled = true` drops
-one. A launcher key wins over a built-in `<leader>` key it shares a
+ramble). A `key` is `<leader>` followed by plain characters. Entries
+merge into the defaults by name; `disabled = true` drops one. A launcher
+key wins over a built-in `<leader>` key it shares a
 prefix with.
 
 ```toml

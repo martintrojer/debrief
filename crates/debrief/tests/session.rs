@@ -437,6 +437,22 @@ fn quit_prompt_esc_stays_and_q_quits() {
 }
 
 #[test]
+fn quit_prompt_shows_over_a_search_or_filter_prompt() {
+    for (commit, prompt) in [(true, "/needle"), (false, "ftop"), (false, "/top")] {
+        let f = fixture();
+        let mut app = with_unsaved(&f);
+        if commit {
+            open(&mut app, 0);
+        }
+        keys(&mut app, prompt);
+        ctrl(&mut app, 'c');
+        assert_eq!(app.mode(), Mode::QuitPrompt);
+        let s = screen(&mut app, 120, 20);
+        assert!(s[19].contains(QUIT_PROMPT), "{prompt}: {}", s[19]);
+    }
+}
+
+#[test]
 fn quit_prompt_c_c_twice_quits_from_the_commit_view() {
     let f = fixture();
     let mut app = with_unsaved(&f);

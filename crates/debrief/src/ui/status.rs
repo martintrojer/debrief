@@ -29,15 +29,16 @@ fn elide_left(s: &str, max: usize) -> String {
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
+    // The quit prompt draws over a search or filter prompt it interrupted.
+    if app.mode() == Mode::QuitPrompt {
+        let p = format!(" {}", crate::app::session::QUIT_PROMPT);
+        frame.render_widget(Paragraph::new(p).style(base.fg(palette::YELLOW)), area);
+        return;
+    }
     if let Some(p) = app.search_prompt() {
         let x = area.x + Span::raw(p.as_str()).width() as u16;
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
         frame.render_widget(Paragraph::new(p).style(base), area);
-        return;
-    }
-    if app.mode() == Mode::QuitPrompt {
-        let p = format!(" {}", crate::app::session::QUIT_PROMPT);
-        frame.render_widget(Paragraph::new(p).style(base.fg(palette::YELLOW)), area);
         return;
     }
     if let Screen::Commit(_) = app.screen() {

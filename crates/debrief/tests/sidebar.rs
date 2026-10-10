@@ -290,6 +290,30 @@ fn side_by_side_a_peek_needs_split_min_width_beside_it() {
 }
 
 #[test]
+fn an_open_split_peek_stays_over_the_diff_through_a_resize_on_both_sides() {
+    for side in ["left", "right"] {
+        let f = fixture();
+        let toml =
+            format!("[view]\nsidebar = \"auto\"\nlayout = \"split\"\nsidebar_side = \"{side}\"\n");
+        let mut app = f.open(&toml, 170);
+        if side == "left" {
+            ctrl(&mut app, 'h');
+            ctrl(&mut app, 'h');
+        } else {
+            ctrl(&mut app, 'l');
+        }
+        assert_eq!(app.focus(), Focus::Files, "{side}");
+        assert!(app.sidebar_overlay() && app.commit_split(), "{side}");
+        app.event(AppEvent::Resize(139, ROWS));
+        assert!(!app.commit_split(), "{side}: too narrow for side by side");
+        app.event(AppEvent::Resize(170, ROWS));
+        assert!(app.sidebar_overlay(), "{side}: over the diff again");
+        assert!(app.commit_split(), "{side}: side by side again");
+        assert_eq!(layout(&app, 170).diff.width, 170, "{side}: no reflow");
+    }
+}
+
+#[test]
 fn a_narrow_terminal_overlays_an_auto_list_even_pinned() {
     let f = fixture();
     let mut app = f.open("[view]\nsidebar = \"auto\"\n", 70);

@@ -200,11 +200,14 @@ impl App {
 
     /// An auto peek goes beside the diff when the diff keeps its minimum
     /// width next to it, so it doesn't reflow: `[view] split_min_width`
-    /// while side by side shows, else [`DIFF_MIN_WIDTH`].
+    /// when the wanted layout is side by side and the whole width shows
+    /// it (the layout without the peek, not the one on screen, which a
+    /// resize hasn't laid out yet), else [`DIFF_MIN_WIDTH`].
     fn peek_fits_beside(&self) -> bool {
         let cols = self.size.0;
-        let min = if self.commit_split() {
-            self.config.view.split_min_width
+        let split_min = self.config.view.split_min_width;
+        let min = if self.split_wanted() && cols >= split_min {
+            split_min
         } else {
             DIFF_MIN_WIDTH
         };

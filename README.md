@@ -125,6 +125,8 @@ a file list on the left (hidden below 80 columns).
 | `gg` `G` `C-d` `C-u` `C-f` `C-b` `C-e` `C-y` `H` `M` `L` `zz` `zt` `zb` | jump and scroll |
 | `]f` `[f` / `]c` `[c` | next / previous file / hunk (full file: change) |
 | `T` | hunks / full file (for the rest of the session) |
+| `t` | unified / side by side (for the rest of the session) |
+| `Tab` | side by side: move the cursor to the other side |
 | `]]` `[[` | open the next / previous commit |
 | `r` | on the working copy: reload its diff in place |
 | `/` `?` `n` `N` | search |
@@ -140,6 +142,20 @@ and copy work as before. The cursor stays on its line (or the nearest
 shown line of its file). Each file keeps one hunk header; `]c` `[c` jump
 between runs of added and removed lines instead. Highlighting then starts
 at the file's first line. The start mode is `[view] context`.
+
+`t` shows old lines on the left and new lines on the right, each with its
+own line numbers. Context lines appear on both sides; the removed and
+added lines of a change are paired row by row and the shorter side is
+hatched. It works with `T` too. Side by side needs a diff pane at least
+`[view] split_min_width` (140) columns wide, not counting the file list:
+below that `t` says so, and a terminal shrunk below it shows unified until
+it grows back. The cursor is on one side (the new side to start with);
+`Tab` moves it across, `h` `l` `w` `b` `e` `0` `$` move within that side's
+text, and each side scrolls sideways on its own. Selections, `cc`,
+markers, `]r` `[r`, `K` and `<leader>o` act on the cursor's side: left is
+the old side with old line numbers, right the new side. Search matches
+both sides and lands on the side of the match. The start layout is
+`[view] layout`.
 
 **Comments**
 
@@ -223,6 +239,8 @@ highlight = true
 [view]
 stats = true                 # the log's stats pane at start (<leader>e toggles)
 context = "hunks"            # the commit view: "hunks" or "full" (whole files; T toggles)
+layout = "unified"           # the commit view: "unified" or "split" (side by side; t toggles)
+split_min_width = 140        # narrowest diff pane (without the file list) shown side by side
 
 # Launchers run with the TUI suspended, as in ramble. Arguments are not
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}

@@ -193,6 +193,7 @@ fn not_a_repo_exits_2_with_the_error() {
         .arg(dir.path().join("cache"))
         .arg("--state-dir")
         .arg(dir.path().join("state"))
+        .env("XDG_CONFIG_HOME", dir.path().join("config"))
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));

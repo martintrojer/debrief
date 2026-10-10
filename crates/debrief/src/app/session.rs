@@ -161,7 +161,7 @@ fn touches_view(a: Action) -> bool {
             | A::SearchNext(..)
             | A::SearchCommit
             | A::ToggleSidebar
-            | A::Focus(_)
+            | A::FocusDiff
             | A::Window(_)
             | A::PaneNav(_)
             | A::FileDown(_)

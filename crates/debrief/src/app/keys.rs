@@ -113,17 +113,18 @@ pub enum Action {
     /// `<leader>e`.
     ToggleSidebar,
     /// File list `Esc`: back to the diff.
-    Focus(Focus),
+    FocusDiff,
     /// `C-w h` / `C-w l`: the pane that way (side by side, the halves
     /// are panes).
     Window(super::pane_nav::Dir),
     /// `C-h/j/k/l` (`[keys] pane_nav`): as `C-w`, and at the edge the
     /// tmux pane that way.
     PaneNav(super::pane_nav::Dir),
-    /// File list: select the next / previous file (jumps the diff).
+    /// File list: select the next / previous row, a file or a directory
+    /// (a file jumps the diff).
     FileDown(Option<usize>),
     FileUp(Option<usize>),
-    /// File list: first / last file.
+    /// File list: first / last row.
     FileTop,
     FileBottom,
     /// File list `C-d` / `C-u`: half the list's height.
@@ -477,7 +478,7 @@ impl App {
                 (_, Some('-')) => A::FileAll(true),
                 (_, Some('=')) => A::FileAll(false),
                 (_, Some('`')) => A::ToggleFiles,
-                (KeyCode::Esc, _) => A::Focus(Focus::Diff),
+                (KeyCode::Esc, _) => A::FocusDiff,
                 (_, Some('q')) => A::Back,
                 _ => return KeyResult::None,
             }),
@@ -595,6 +596,13 @@ impl App {
         }
     }
 
+    /// `f`, then refit the file list: `f` changes which rows show, so
+    /// the list's width.
+    fn refitting(&mut self, f: impl FnOnce(&mut Self)) {
+        f(self);
+        self.sidebar_refit();
+    }
+
     /// Commit-screen actions.
     fn apply_commit(&mut self, action: Action) {
         use Action as A;
@@ -625,7 +633,7 @@ impl App {
             A::PopupClose => return self.popup_close(),
             A::PopupMove(m) => return self.popup_move(m),
             A::ToggleSidebar => return self.toggle_sidebar(),
-            A::Focus(f) => return self.focus_pane(f),
+            A::FocusDiff => return self.focus_pane(Focus::Diff),
             A::Window(d) => return self.pane_move_or_say(d),
             A::PaneNav(d) => return self.pane_nav(d),
             A::FileDown(c) => return self.select_row(self.sidebar_selected() + n(c)),
@@ -640,17 +648,11 @@ impl App {
             }
             A::FileTop => return self.select_row(0),
             A::FileBottom => return self.select_row(usize::MAX),
-            A::FileOpen | A::FileCollapse | A::FileExpand | A::FileAll(_) | A::ToggleFiles => {
-                match action {
-                    A::FileOpen => self.file_open(),
-                    A::FileCollapse => self.file_collapse(),
-                    A::FileExpand => self.file_expand(),
-                    A::FileAll(collapse) => self.file_all(collapse),
-                    _ => self.toggle_files(),
-                }
-                // They change which rows show, so the list's width.
-                return self.sidebar_refit();
-            }
+            A::FileOpen => return self.refitting(Self::file_open),
+            A::FileCollapse => return self.refitting(Self::file_collapse),
+            A::FileExpand => return self.refitting(Self::file_expand),
+            A::FileAll(collapse) => return self.refitting(|a| a.file_all(collapse)),
+            A::ToggleFiles => return self.refitting(Self::toggle_files),
             _ => {}
         }
         let full = self.context == crate::vcs::Context::Full;
@@ -727,7 +729,7 @@ fn visual_ok(a: Action) -> bool {
             | A::SwitchSide
             | A::ToggleSidebar
             | A::ToggleFiles
-            | A::Focus(_)
+            | A::FocusDiff
             | A::Window(_)
             | A::PaneNav(_)
             | A::Help(_)

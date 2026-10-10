@@ -141,14 +141,8 @@ fn header_text(f: &FileDiff) -> String {
 /// Flatten a commit into rows: message lines, a blank row, then per file
 /// its header, a placeholder or its hunks (header, lines, and a
 /// no-newline row where one applies), files separated by blank rows.
-/// Files in git's order; [`flatten_in`] takes another.
-pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
-    let order: Vec<usize> = (0..diff.files.len()).collect();
-    flatten_in(diff, &order)
-}
-
-/// [`flatten`] with the files in `order` (indices into `diff.files`,
-/// which rows keep): the file list's tree order.
+/// Files in `order` (indices into `diff.files`, which rows keep): the
+/// file list's tree order.
 pub fn flatten_in(diff: &CommitDiff, order: &[usize]) -> Vec<Row> {
     let row = |kind, file, hunk, line, text: &str| Row {
         kind,
@@ -773,8 +767,12 @@ impl App {
         let request = self.next_request;
         if let Some(v) = &mut self.commit {
             v.request = request;
-            v.keep_anchor = anchor;
-            v.keep_row = None;
+            // While the diff loads there is no cursor yet: the pending
+            // anchor or row (a restored session's) stays.
+            if anchor.is_some() {
+                v.keep_anchor = anchor;
+                v.keep_row = None;
+            }
         }
         if working && self.vcs.kind() == Kind::Git {
             return self.start_working(request);
@@ -1033,7 +1031,7 @@ mod tests {
                 },
             ],
         };
-        let rows = flatten(&diff);
+        let rows = flatten_in(&diff, &[0, 1]);
         let kinds: Vec<_> = rows.iter().map(|r| r.kind).collect();
         use RowKind::*;
         assert_eq!(
@@ -1078,7 +1076,7 @@ mod tests {
                 hunks: vec![],
             }],
         };
-        let rows = flatten(&diff);
+        let rows = flatten_in(&diff, &[0]);
         let got: Vec<_> = rows.iter().map(|r| (r.kind, r.text.as_str())).collect();
         assert_eq!(
             got,

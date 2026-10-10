@@ -2,7 +2,7 @@
 //! `<leader>rr` hands the review back, shared in meaning with ramble's),
 //! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
 //! (syntax highlighting), `[view]` (what shows at start: the stats pane,
-//! hunks or the full file) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
+//! hunks or the full file, unified or side by side) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one.
@@ -57,6 +57,24 @@ pub struct ViewConfig {
     /// The commit view's context at start: `"hunks"` (the default) or
     /// `"full"` (the whole file); `T` toggles.
     pub context: DiffContext,
+    /// The commit view's layout at start: `"unified"` (the default) or
+    /// `"split"` (side by side); `t` toggles.
+    pub layout: Layout,
+    /// The narrowest diff pane (not counting the file list) side by side
+    /// shows in; below it the view is unified.
+    pub split_min_width: u16,
+}
+
+/// The default `[view] split_min_width`.
+pub const SPLIT_MIN_WIDTH: u16 = 140;
+
+/// `[view] layout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Unified,
+    Split,
 }
 
 impl Default for ViewConfig {
@@ -64,6 +82,8 @@ impl Default for ViewConfig {
         ViewConfig {
             stats: true,
             context: DiffContext::Default,
+            layout: Layout::Unified,
+            split_min_width: SPLIT_MIN_WIDTH,
         }
     }
 }
@@ -168,6 +188,12 @@ impl Config {
                 Some(RawContext::Full) => c.view.context = DiffContext::Full,
                 None => {}
             }
+            if let Some(l) = v.layout {
+                c.view.layout = l;
+            }
+            if let Some(w) = v.split_min_width {
+                c.view.split_min_width = w;
+            }
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
@@ -233,6 +259,8 @@ struct RawRender {
 struct RawView {
     stats: Option<bool>,
     context: Option<RawContext>,
+    layout: Option<Layout>,
+    split_min_width: Option<u16>,
 }
 
 /// `[view] context`.
@@ -403,6 +431,29 @@ kinds = [
         assert_eq!(c("[view]\ncontext = \"full\"\n"), Ok(DiffContext::Full));
         assert!(c("[view]\ncontext = \"all\"\n").is_err());
         assert!(c("[view]\ncontext = 3\n").is_err());
+    }
+
+    #[test]
+    fn view_layout_defaults_to_unified_at_140() {
+        let d = Config::defaults();
+        assert_eq!(
+            (d.view.layout, d.view.split_min_width),
+            (Layout::Unified, 140)
+        );
+        let c = Config::parse("[view]\nlayout = \"split\"\nsplit_min_width = 100\n").unwrap();
+        assert_eq!(
+            (c.view.layout, c.view.split_min_width),
+            (Layout::Split, 100)
+        );
+        assert_eq!(
+            Config::parse("[view]\nlayout = \"unified\"\n")
+                .unwrap()
+                .view
+                .layout,
+            Layout::Unified
+        );
+        assert!(Config::parse("[view]\nlayout = \"side\"\n").is_err());
+        assert!(Config::parse("[view]\nsplit_min_width = -1\n").is_err());
     }
 
     #[test]

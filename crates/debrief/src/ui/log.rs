@@ -1,8 +1,8 @@
 //! The log: one row per commit, newest first:
 //! `<marker> <short id> <age> <author> <summary>`. git's working copy
 //! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker. A
-//! commit with a saved review session ends its row with `` (`3`: three
-//! unsent comments).
+//! commit with a saved review session shows `` (`3`: three unsent
+//! comments) before its summary; git's working-copy row ends with it.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

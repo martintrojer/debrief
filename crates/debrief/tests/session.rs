@@ -1,5 +1,5 @@
 //! Saved review sessions: `<leader>ss`, restore on
-//! open (view and comments), `N` on the log, the quit prompt, the
+//! open (view and comments), `N` on the log, the quit prompt, the
 //! `<leader>rs` list, and a jj rewrite. A temp repo, cache and state dir
 //! per test.
 
@@ -395,13 +395,13 @@ fn the_log_marks_sessions_with_their_unsent_count() {
     let (top, _) = save_top_with_comment(&f);
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("1 top"), "{}", s[0]);
+    assert!(s[0].contains("1 top"), "{}", s[0]);
     assert!(!s[1].contains(''), "{}", s[1]);
     // Kept by a filter.
     keys(&mut app, "ftop");
     press(&mut app, KeyCode::Enter);
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("1 top"), "{}", s[0]);
+    assert!(s[0].contains("1 top"), "{}", s[0]);
     // No comments: the bare marker.
     let mut s = f.store().load(&top).unwrap().unwrap();
     s.comments.clear();
@@ -777,7 +777,7 @@ fn the_working_copy_has_one_session_file() {
     assert_eq!(s.comments[0].comment.rev, None);
     press(&mut app, KeyCode::Esc);
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("1"), "{}", s[0]);
+    assert!(s[0].ends_with("1"), "{}", s[0]);
 }
 
 #[test]
@@ -891,4 +891,206 @@ fn a_jj_rewrite_leaves_the_session_on_the_old_commit() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.status(), SESSION_NOT_IN_LOG);
     assert_eq!(app.screen(), Screen::Log);
+}
+
+/// Delete the batch file (a batch that reads as empty).
+fn drop_batch(f: &Fixture) {
+    for e in std::fs::read_dir(f.cache.join("reviews")).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "json") {
+            std::fs::remove_file(p).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_batch_unreadable_at_startup_restores_nothing_and_saves_nothing() {
+    let f = fixture();
+    let (top, id) = save_top_with_comment(&f);
+    corrupt_batch(&f);
+    let mut app = f.app();
+    open(&mut app, 0);
+    assert!(
+        app.status().contains("1 comment not restored: "),
+        "{}",
+        app.status()
+    );
+    keys(&mut app, " ss");
+    assert!(
+        app.status()
+            .starts_with("session not saved: review batch: "),
+        "{}",
+        app.status()
+    );
+    let s = f.store().load(&top).unwrap().unwrap();
+    assert_eq!(s.unsent().map(|c| c.id).collect::<Vec<_>>(), [id]);
+    keys(&mut app, "k");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "q");
+    assert_eq!(app.mode(), Mode::QuitPrompt);
+    keys(&mut app, "s");
+    assert!(!app.should_quit());
+    assert!(
+        app.status()
+            .starts_with("session not saved: review batch: "),
+        "{}",
+        app.status()
+    );
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
+}
+
+#[test]
+fn a_failed_restore_is_retried_before_a_save() {
+    let f = fixture();
+    let (top, id) = save_top_with_comment(&f);
+    let mut app = f.app();
+    corrupt_batch(&f);
+    open(&mut app, 0);
+    assert!(
+        app.status().contains("1 comment not restored: "),
+        "{}",
+        app.status()
+    );
+    // The batch reads again (empty): the save brings the comment back first.
+    drop_batch(&f);
+    keys(&mut app, " ss");
+    assert_eq!(app.status(), "Session saved (1 comment)");
+    assert_eq!(f.comments().iter().map(|c| c.id).collect::<Vec<_>>(), [id]);
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
+}
+
+/// Mark every comment of `key`'s session sent on disk, as another
+/// debrief's send does, and empty the batch.
+fn send_elsewhere(f: &Fixture, key: &str) {
+    let mut s = f.store().load(key).unwrap().unwrap();
+    for c in &mut s.comments {
+        c.sent = Some(1);
+    }
+    f.store().save(&s).unwrap();
+    f.review().clear().unwrap();
+}
+
+#[test]
+fn a_comment_sent_by_another_debrief_is_not_restored() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut app = f.app();
+    send_elsewhere(&f, &top);
+    open(&mut app, 0);
+    assert!(f.comments().is_empty(), "{:?}", f.comments());
+}
+
+#[test]
+fn a_save_keeps_a_comment_another_debrief_sent() {
+    let f = fixture();
+    let (top, id) = save_top_with_comment(&f);
+    let mut app = f.app();
+    open(&mut app, 0);
+    send_elsewhere(&f, &top);
+    keys(&mut app, " ss");
+    assert_eq!(app.status(), "Session saved (0 comments)");
+    let s = f.store().load(&top).unwrap().unwrap();
+    assert_eq!(s.comments.len(), 1);
+    assert_eq!(s.comments[0].comment.id, id);
+    assert!(s.comments[0].sent.is_some());
+}
+
+#[test]
+fn a_send_keeps_comments_another_debrief_saved() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config.send.command = vec!["true".into()];
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    // Another debrief saved a second comment, since gone from the batch.
+    let mut s = f.store().load(&top).unwrap().unwrap();
+    let mut other = s.comments[0].clone();
+    other.comment.id += 1;
+    other.comment.body = "elsewhere".into();
+    s.comments.push(other);
+    f.store().save(&s).unwrap();
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert!(app.status().starts_with("Review sent"), "{}", app.status());
+    let s = f.store().load(&top).unwrap().unwrap();
+    assert_eq!(s.comments.len(), 2, "{s:?}");
+    let unsent: Vec<_> = s.unsent().map(|c| c.body.as_str()).collect();
+    assert_eq!(unsent, ["elsewhere"]);
+}
+
+#[test]
+fn removing_a_saved_comment_of_an_unvisited_commit_is_unsaved_work() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut app = f.app();
+    keys(&mut app, " rl");
+    assert_eq!(app.picker().unwrap().items.len(), 1);
+    ctrl(&mut app, 'd');
+    assert!(f.comments().is_empty());
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "q");
+    assert_eq!(app.mode(), Mode::QuitPrompt, "{}", app.status());
+    keys(&mut app, "s");
+    assert!(app.should_quit(), "{}", app.status());
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 0);
+    let mut app = f.app();
+    open(&mut app, 0);
+    assert!(f.comments().is_empty(), "not restored");
+}
+
+#[test]
+fn t_while_a_restored_diff_loads_keeps_the_saved_cursor() {
+    let f = fixture();
+    let _ = save_top_with_comment(&f);
+    let mut app = f.app();
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    open(&mut app, 0);
+    assert!(app.commit_loading());
+    keys(&mut app, "T");
+    while app.commit_loading() {
+        app.event(rx.recv_timeout(Duration::from_secs(20)).unwrap());
+    }
+    assert_eq!(app.context(), Context::Full);
+    assert_eq!(cursor_text(&app), "a40 new");
+}
+
+#[test]
+fn the_working_copy_session_holds_old_side_comments_on_its_base() {
+    let f = fixture();
+    std::fs::write(f.root.join("b.txt"), "b2 new\n").unwrap();
+    let mut app = f.app();
+    let head = app.rows()[1].info.commit.clone();
+    open(&mut app, 0);
+    let r = row_of(&app, "b1", RowKind::Line(LineKind::Removed));
+    goto(&mut app, r);
+    comment_here(&mut app, "gone");
+    keys(&mut app, " ss");
+    assert_eq!(app.status(), "Session saved (1 comment)");
+    let s = f.store().load(WORKING).unwrap().unwrap();
+    let c = &s.comments[0].comment;
+    assert_eq!(c.side, Some(Side::Old));
+    assert_eq!(c.rev.as_ref().unwrap().commit, head);
+    drop(app);
+    f.review().clear().unwrap();
+    let mut app = f.app();
+    open(&mut app, 0);
+    assert_eq!(f.comments().len(), 1, "restored");
+    assert_eq!(app.review_marked_rows().len(), 1);
+}
+
+#[test]
+fn a_save_replaces_a_corrupt_session_file() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    std::fs::write(f.store().path(&top).unwrap(), "{oops").unwrap();
+    let mut app = f.app();
+    open(&mut app, 0);
+    keys(&mut app, " ss");
+    assert_eq!(app.status(), "Session saved (1 comment)");
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
 }

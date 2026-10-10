@@ -40,6 +40,17 @@ pub fn kind_tag(c: &Comment) -> String {
     })
 }
 
+/// Comment `c` was made on `commit`: its revision is `commit`; on the
+/// working copy (`working`) also every comment without a revision and
+/// removed-line comments on its base commit `base`.
+pub(super) fn made_on(c: &Comment, commit: &str, working: bool, base: Option<&str>) -> bool {
+    match &c.rev {
+        None => working,
+        Some(rev) if rev.commit == commit => true,
+        Some(rev) => working && c.side == Some(Side::Old) && base == Some(rev.commit.as_str()),
+    }
+}
+
 impl App {
     /// Open the batch for the repo root; a failure leaves the status.
     pub(super) fn review_open(&mut self) {
@@ -86,13 +97,7 @@ impl App {
             .flatten();
         r.comments()
             .iter()
-            .filter(|c| match &c.rev {
-                None => working,
-                Some(rev) if rev.commit == id => true,
-                Some(rev) => {
-                    working && c.side == Some(Side::Old) && base.as_deref() == Some(&rev.commit)
-                }
-            })
+            .filter(|c| made_on(c, id, working, base.as_deref()))
             .collect()
     }
 

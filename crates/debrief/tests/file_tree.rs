@@ -208,6 +208,29 @@ fn the_diff_and_bracket_f_follow_the_tree_and_flat_keeps_git_order() {
 }
 
 #[test]
+fn side_by_side_follows_the_tree_and_flat_keeps_git_order() {
+    let f = fixture();
+    let mut app = f.open("[view]\nlayout = \"split\"\nsplit_min_width = 1\n");
+    assert!(app.split_side().is_some(), "side by side");
+    assert_eq!(diff_order(&app), TREE);
+    assert_eq!(bracket_order(&mut app), TREE);
+    to_list(&mut app);
+    keys(&mut app, "`");
+    assert!(!app.files_tree());
+    assert!(app.split_side().is_some(), "still side by side");
+    let git_order = [
+        "b.txt",
+        "pkg/gui/helpers/a.go",
+        "src/app/x.rs",
+        "src/main.rs",
+        "z.txt",
+    ];
+    assert_eq!(diff_order(&app), git_order);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(bracket_order(&mut app), git_order);
+}
+
+#[test]
 fn backtick_keeps_the_cursor_on_its_file() {
     let f = fixture();
     let mut app = f.open("");

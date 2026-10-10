@@ -1,4 +1,4 @@
-//! Helpers shared by the VCS integration tests.
+//! Helpers shared by the integration tests.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
@@ -6,6 +6,24 @@ use std::hash::{DefaultHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use debrief::app::App;
+
+/// Press `code` with no modifiers.
+pub fn press(app: &mut App, code: KeyCode) {
+    app.key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+/// Press `C-<c>`.
+pub fn ctrl(app: &mut App, c: char) {
+    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+}
+
+/// Type each char of `s`.
+pub fn keys(app: &mut App, s: &str) {
+    s.chars().for_each(|c| press(app, KeyCode::Char(c)));
+}
 
 /// Run a command in `dir` and return stdout; panic with stderr on failure.
 pub fn sh(dir: &Path, program: &str, args: &[&str]) -> String {

@@ -8,8 +8,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{commit, git};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use common::{commit, ctrl, git, keys, press};
+use crossterm::event::KeyCode;
 use debrief::app::config::Config;
 use debrief::app::sidebar::Pane;
 use debrief::app::{App, AppEvent, Exit, Focus, HelpLine, Mode, Screen, StartOptions};
@@ -71,18 +71,6 @@ impl Fixture {
         assert_eq!(app.screen(), Screen::Commit(0));
         (app, ran)
     }
-}
-
-fn press(app: &mut App, code: KeyCode) {
-    app.key(KeyEvent::new(code, KeyModifiers::NONE));
-}
-
-fn ctrl(app: &mut App, c: char) {
-    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
-}
-
-fn keys(app: &mut App, s: &str) {
-    s.chars().for_each(|c| press(app, KeyCode::Char(c)));
 }
 
 fn ran(r: &Ran) -> Vec<String> {

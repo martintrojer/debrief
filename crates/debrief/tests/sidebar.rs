@@ -8,8 +8,8 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{commit, git};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use common::{commit, ctrl, git, keys, press};
+use crossterm::event::KeyCode;
 use debrief::app::config::{Config, FilesLayout, SidebarShow};
 use debrief::app::sidebar::Pane;
 use debrief::app::{App, AppEvent, Focus, HelpLine, Screen, StartOptions};
@@ -76,22 +76,10 @@ impl Fixture {
     }
 }
 
-fn press(app: &mut App, code: KeyCode) {
-    app.key(KeyEvent::new(code, KeyModifiers::NONE));
-}
-
-fn ctrl(app: &mut App, c: char) {
-    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
-}
-
 /// `C-w` then `c`.
 fn win(app: &mut App, c: char) {
     ctrl(app, 'w');
     keys(app, &c.to_string());
-}
-
-fn keys(app: &mut App, s: &str) {
-    s.chars().for_each(|c| press(app, KeyCode::Char(c)));
 }
 
 /// The layout above the status line of a terminal `cols` wide.

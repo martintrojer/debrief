@@ -6,8 +6,8 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{commit, git};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use common::{commit, ctrl, git, keys, press};
+use crossterm::event::KeyCode;
 use debrief::app::config::Config;
 use debrief::app::{App, AppEvent, Focus, RowKind, Screen, StartOptions};
 use debrief::session::{Store, ViewFiles};
@@ -72,18 +72,6 @@ impl Fixture {
     fn store(&self) -> Store {
         Store::new(&self.cache.join("state"), &self.root)
     }
-}
-
-fn press(app: &mut App, code: KeyCode) {
-    app.key(KeyEvent::new(code, KeyModifiers::NONE));
-}
-
-fn ctrl(app: &mut App, c: char) {
-    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
-}
-
-fn keys(app: &mut App, s: &str) {
-    s.chars().for_each(|c| press(app, KeyCode::Char(c)));
 }
 
 fn to_list(app: &mut App) {

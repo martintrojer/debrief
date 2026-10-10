@@ -11,8 +11,8 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{JjEnv, commit, git, have_jj};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use common::{JjEnv, commit, ctrl, git, have_jj, keys, press};
+use crossterm::event::KeyCode;
 use debrief::app::session::{OPEN_TO_SAVE, QUIT_PROMPT, SESSION_DELETED, SESSION_NOT_IN_LOG};
 use debrief::app::{App, AppEvent, Focus, Mode, PickerKind, RowKind, Screen, StartOptions};
 use debrief::session::{Anchor, Store, WORKING};
@@ -81,18 +81,6 @@ fn app_at(root: &Path, cache: &Path) -> App {
         StartOptions::new(cache.to_path_buf()),
     )
     .unwrap()
-}
-
-fn press(app: &mut App, code: KeyCode) {
-    app.key(KeyEvent::new(code, KeyModifiers::NONE));
-}
-
-fn ctrl(app: &mut App, c: char) {
-    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
-}
-
-fn keys(app: &mut App, s: &str) {
-    s.chars().for_each(|c| press(app, KeyCode::Char(c)));
 }
 
 /// Open log row `i`.

@@ -1,11 +1,11 @@
 //! Command line: `debrief [PATH] [--revset R] [--limit N] [--cache-dir DIR]
-//! [--config PATH] [--no-snapshot]`.
+//! [--config PATH] [--no-snapshot]`, or `debrief --init-config [--config PATH]`.
 
 use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::app::config::Config;
+use crate::app::config::{self, Config};
 use crate::app::{DEFAULT_LIMIT, StartOptions};
 use crate::vcs::OpenOptions;
 
@@ -36,6 +36,10 @@ pub struct Cli {
     /// command and debrief writes nothing to the repo.
     #[arg(long)]
     pub no_snapshot: bool,
+    /// Write the commented default config to the config path (or
+    /// `--config`) and exit; an existing file is left alone (exit 1).
+    #[arg(long)]
+    pub init_config: bool,
 }
 
 /// A startup failure: the message for stderr, and exit code 2.
@@ -76,6 +80,17 @@ impl Cli {
             config,
         })
     }
+}
+
+/// `--init-config`: write [`config::DEFAULT_TOML`] to `--config`, else
+/// `default_config`. `Ok` is the path written (for stdout); `Err` the
+/// stderr line (exit 1).
+pub fn init_config(cli: &Cli, default_config: Option<PathBuf>) -> Result<PathBuf, String> {
+    let path = cli.config.clone().or(default_config).ok_or_else(|| {
+        "debrief: cannot find a config directory (set HOME or XDG_CONFIG_HOME)".to_string()
+    })?;
+    config::write_default(&path).map_err(|e| format!("debrief: {e:#}"))?;
+    Ok(path)
 }
 
 /// The stderr line for an error while opening: `debrief: ` and the whole

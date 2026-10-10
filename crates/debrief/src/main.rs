@@ -2,10 +2,22 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use debrief::app::{App, run};
-use debrief::cli::{Cli, StartError, open_error};
+use debrief::cli::{Cli, StartError, init_config, open_error};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if cli.init_config {
+        return match init_config(&cli, debrief::app::config::Config::default_path()) {
+            Ok(path) => {
+                println!("{}", path.display());
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match start(&cli) {
         Ok(app) => match run::run(app) {
             Ok(()) => ExitCode::SUCCESS,

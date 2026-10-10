@@ -5,15 +5,19 @@
 //! hunks or the full file, unified or side by side) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
-//! drops one.
+//! drops one. `config.default.toml` documents every key with its default
+//! (`debrief --init-config` writes it).
 
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use debrief_review::Kind;
 use serde::Deserialize;
 
 use crate::vcs::Context as DiffContext;
+
+/// The commented default config written by `--init-config`.
+pub const DEFAULT_TOML: &str = include_str!("../../config.default.toml");
 
 /// The built-in config, [`Config::defaults`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,6 +302,26 @@ impl Default for Config {
     }
 }
 
+/// Write the commented default config to `path`, creating parent
+/// directories. Refuses to overwrite an existing file.
+pub fn write_default(path: &Path) -> anyhow::Result<()> {
+    if path.exists() {
+        bail!("{} already exists", path.display());
+    }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| anyhow!("cannot create {}: {e}", dir.display()))?;
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| anyhow!("cannot write {}: {e}", path.display()))?;
+    std::io::Write::write_all(&mut f, DEFAULT_TOML.as_bytes())
+        .map_err(|e| anyhow!("cannot write {}: {e}", path.display()))?;
+    Ok(())
+}
+
 /// 1-based line of byte offset `at` in `src`.
 fn line_of(src: &str, at: usize) -> usize {
     src.as_bytes()[..at.min(src.len())]
@@ -548,6 +572,18 @@ kinds = [
         assert!(e.starts_with("launch.kye: unknown field"), "{e}");
         assert_eq!(key_at("# x = 1\n", 0), None);
         assert_eq!(key_at("a = 1\n", 4).as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn write_default_creates_dirs_and_refuses_overwrite() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a/b/config.toml");
+        write_default(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), DEFAULT_TOML);
+        std::fs::write(&p, "keep").unwrap();
+        let e = format!("{:#}", write_default(&p).unwrap_err());
+        assert_eq!(e, format!("{} already exists", p.display()));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "keep");
     }
 
     #[test]

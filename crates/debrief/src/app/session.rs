@@ -161,6 +161,8 @@ fn touches_view(a: Action) -> bool {
             | A::SearchCommit
             | A::ToggleSidebar
             | A::Focus(_)
+            | A::Window(_)
+            | A::PaneNav(_)
             | A::FileDown(_)
             | A::FileUp(_)
             | A::FileTop
@@ -294,7 +296,7 @@ impl App {
             } else {
                 ViewLayout::Unified
             },
-            sidebar: self.sidebar_on,
+            sidebar: self.sidebar_show(),
             // A restore still waiting for the diff holds the wanted focus.
             focus: match (&v.restore, self.focus) {
                 (Some(r), _) if v.diff.is_none() => r.focus,
@@ -355,7 +357,7 @@ impl App {
         let view = captured.unwrap_or_else(|| saved.view.clone());
         self.context = from_view_context(view.context);
         self.split = view.layout == ViewLayout::Split;
-        self.sidebar_on = view.sidebar;
+        self.set_sidebar_show(view.sidebar);
         let Some(v) = &mut self.commit else { return };
         let side = match &view.anchor {
             Some(session::Anchor::Line { side, .. }) => Some(*side),
@@ -427,7 +429,8 @@ impl App {
             v.center_cursor();
         }
         self.refresh_search();
-        if r.focus == ViewFocus::Files && self.sidebar_visible() {
+        // An auto list peeks for a saved file-list focus.
+        if r.focus == ViewFocus::Files && self.files_reachable() {
             self.focus_pane(Focus::Files);
         }
         if let Some(msg) = r.status {

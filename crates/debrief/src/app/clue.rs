@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::help::{Tok, placeholder_key, show_key, tokens};
 use super::keys::KeyResult;
@@ -87,7 +87,17 @@ impl App {
         if !self.clue_active() {
             return Vec::new();
         }
-        self.clue_rows_for(&self.pending)
+        let mut rows = self.clue_rows_for(&self.pending);
+        // After `C-w`, name the one-key forms of `h` and `l` (`pane_nav`).
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        if self.config.keys.pane_nav && matches!(&self.pending[..], [k] if same_key(k, &ctrl_w)) {
+            for r in &mut rows {
+                if matches!(r.key.as_str(), "h" | "l") && !r.group {
+                    r.desc = format!("{} (or C-{})", r.desc, r.key);
+                }
+            }
+        }
+        rows
     }
 
     fn clue_rows_for(&self, pending: &[KeyEvent]) -> Vec<ClueRow> {
@@ -150,7 +160,6 @@ mod tests {
     use super::*;
     use crate::app::App;
     use crate::app::test_support::app;
-    use crossterm::event::KeyCode;
 
     fn ch(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
@@ -193,6 +202,30 @@ mod tests {
         let keys: Vec<_> = rows.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(keys, ["]", "c", "f", "r"]);
         assert_eq!(rows[2].desc, "next file");
+    }
+
+    #[test]
+    fn after_c_w_the_clue_names_c_h_and_c_l_while_pane_nav_is_on() {
+        use crate::app::help::{Ctx, tests::in_ctx};
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        let (_t, mut a) = in_ctx(Ctx::Commit);
+        a.key(ctrl_w);
+        let rows = a.clue_rows();
+        let descs: Vec<_> = rows
+            .iter()
+            .map(|r| (r.key.as_str(), r.desc.as_str()))
+            .collect();
+        assert_eq!(
+            descs,
+            [
+                ("h", "to the pane on the left (or C-h)"),
+                ("l", "to the pane on the right (or C-l)")
+            ]
+        );
+        let (_t, mut a) = in_ctx(Ctx::Commit);
+        a.config.keys.pane_nav = false;
+        a.key(ctrl_w);
+        assert_eq!(a.clue_rows()[0].desc, "to the pane on the left");
     }
 
     fn pending_prefixes_have_clue_rows(a: &App) {

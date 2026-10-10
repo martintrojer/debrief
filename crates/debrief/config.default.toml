@@ -8,8 +8,28 @@
 ## ---------------------------------------------------------------------------
 ## What shows at start
 # [view]
-## The commit view's file list (<leader>e on the commit screen).
-# sidebar = true
+## The commit view's file list: always | never | auto. always: shown,
+## <leader>e hides it. never: hidden, <leader>e shows it. auto (peek):
+## hidden while you read the diff, shown while you use it (C-h / C-w h
+## toward it), hidden again on Enter (jump to a file), Esc in the list, or
+## a move back to the diff; <leader>e pins it. A peek with no room beside
+## the diff (below sidebar_auto_hide_below, or the diff would get narrower
+## than 80 columns, or split_min_width side by side) draws over the diff.
+# sidebar = "always"
+## left | right: the screen edge the file list sits at. C-h / C-l and
+## C-w h / C-w l follow the screen: on the right, C-l goes to the list.
+# sidebar_side = "left"
+## Hide the file list while the terminal is narrower than this many
+## columns; it comes back when the terminal grows, unless <leader>e hid it.
+## 0 never hides it.
+# sidebar_auto_hide_below = 80
+## Width in columns, not counting the border. "auto" fits most rows (one
+## very long path doesn't stretch it) within sidebar_min_width and
+## sidebar_max_width; a number is used as given.
+# sidebar_width = "auto"
+# sidebar_min_width = 16
+## Also capped at 35% of the terminal width.
+# sidebar_max_width = 48
 ## The log's stats pane (<leader>e on the log).
 # stats = true
 ## hunks | full: the commit view shows the hunks or whole files (T).
@@ -35,6 +55,11 @@
 # leader = " "
 ## After a pause in a key sequence, show the keys that can come next.
 # clue = true
+## C-h / C-l move between the file list and the diff (side by side, its
+## old and new halves too), as C-w h / C-w l do. At the edge, and for C-j /
+## C-k and on the log, inside tmux they move to the tmux pane there. false
+## unbinds them (the C-w keys stay).
+# pane_nav = true
 
 ## ---------------------------------------------------------------------------
 ## Comments on diff lines, kept in debrief-review's batch for the repo (the

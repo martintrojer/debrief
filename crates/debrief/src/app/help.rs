@@ -210,10 +210,10 @@ pub(crate) const BINDINGS: &[Binding] = {
             "on a .md file header: open it in ramble",
         ),
         b("<leader>e", C, G::Files, "show or hide the file list"),
-        b("C-w h", C, G::Files, "to the file list"),
-        b("C-w l", C, G::Files, "to the diff"),
-        b("C-w h", F, G::Files, "to the file list"),
-        b("C-w l", F, G::Files, "to the diff"),
+        b("C-w h", C, G::Files, "to the pane on the left"),
+        b("C-w l", C, G::Files, "to the pane on the right"),
+        b("C-w h", F, G::Files, "to the pane on the left"),
+        b("C-w l", F, G::Files, "to the pane on the right"),
         b("<leader>e", F, G::Files, "show or hide the file list"),
         b("g?", F, G::General, "help"),
         b("j, Down", F, G::Files, "next file"),
@@ -345,12 +345,35 @@ pub(crate) const BINDINGS: &[Binding] = {
     ]
 };
 
+/// `C-h/j/k/l` (`[keys] pane_nav`): the panes, then tmux's past the edge.
+const PANE_NAV: &[Binding] = {
+    use Ctx::{Commit as C, Files as F, Log as L};
+    use Group as G;
+    &[
+        b("C-h", C, G::Files, "as C-w h (at the edge: tmux)"),
+        b("C-l", C, G::Files, "as C-w l (at the edge: tmux)"),
+        b("C-j, C-k", C, G::Files, "the tmux pane below, above"),
+        b("C-h", F, G::Files, "as C-w h (at the edge: tmux)"),
+        b("C-l", F, G::Files, "as C-w l (at the edge: tmux)"),
+        b("C-j, C-k", F, G::Files, "the tmux pane below, above"),
+        b(
+            "C-h, C-j, C-k, C-l",
+            L,
+            G::General,
+            "the tmux pane left, below, above, right",
+        ),
+    ]
+};
+
 impl App {
-    /// [`BINDINGS`], the comment box's Tab row when `[review] kinds`
-    /// lists some, and a row per `[[launch]]` key on the log, the diff and
-    /// the file list.
+    /// [`BINDINGS`], the `C-h/j/k/l` rows while `[keys] pane_nav` is on,
+    /// the comment box's Tab row when `[review] kinds` lists some, and a
+    /// row per `[[launch]]` key on the log, the diff and the file list.
     pub(crate) fn bindings(&self) -> Vec<Binding> {
         let mut out: Vec<Binding> = BINDINGS.to_vec();
+        if self.config.keys.pane_nav {
+            out.extend_from_slice(PANE_NAV);
+        }
         if self.has_comment_kinds() {
             out.push(b(
                 "Tab, S-Tab",

@@ -74,10 +74,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
         Screen::Commit(_) => {
             let l = app.commit_layout(main);
+            // The diff first: an overlaid file list is drawn over it.
+            commit::draw(frame, app, l.diff);
             if let Some(side) = l.sidebar {
                 sidebar::draw(frame, app, side);
             }
-            commit::draw(frame, app, l.diff);
             // Side by side, the box sits on the cursor's half, by its rows.
             comment_box::draw(frame, app, app.side_pane(l.diff));
         }

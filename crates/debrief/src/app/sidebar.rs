@@ -4,14 +4,17 @@
 use ratatui::layout::Rect;
 use unicode_width::UnicodeWidthStr;
 
+use debrief_review::Side;
+
 use super::commit::{Focus, file_counts, file_path};
+use super::config::{SidebarShow, SidebarSide, SidebarWidth};
+use super::pane_nav::Dir;
 use super::{App, Screen};
 
-/// Narrowest and widest sidebar, in columns (not counting its border).
-pub const SIDEBAR_MIN: u16 = 16;
-pub const SIDEBAR_MAX: u16 = 48;
-/// Below this terminal width the sidebar is hidden.
-pub const SIDEBAR_HIDE_BELOW: u16 = 80;
+/// The narrowest unified diff pane an auto peek leaves beside it; with
+/// less room the peek draws over the diff. Side by side the minimum is
+/// `[view] split_min_width`.
+pub const DIFF_MIN_WIDTH: u16 = 80;
 /// The current-file marker gutter at the left of each row.
 pub const GUTTER_COLS: usize = 1;
 /// The status letter and its space after the gutter.
@@ -20,9 +23,40 @@ pub const STATUS_COLS: usize = 2;
 /// Where the commit screen's panes go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitLayout {
-    /// The file list, border included (on its right edge).
+    /// The file list, border included (on its edge toward the diff).
     pub sidebar: Option<Rect>,
     pub diff: Rect,
+    /// The file list is drawn over the diff (an auto peek without room
+    /// beside it); `diff` is then the whole area.
+    pub overlay: bool,
+}
+
+/// The file list's runtime state, owned by [`App`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) struct SidebarState {
+    /// always / never / auto: `[view] sidebar`, flipped by `<leader>e`
+    /// (always / never) and set by a restored session.
+    pub(super) show: SidebarShow,
+    /// auto: `<leader>e` pinned the list (shown until toggled).
+    pub(super) pinned: bool,
+    /// auto: the peek is open.
+    pub(super) peeked: bool,
+    /// The open peek draws over the diff; decided when it opens and on a
+    /// resize.
+    pub(super) overlay: bool,
+    /// A `<leader>e` choice made below `sidebar_auto_hide_below`; it
+    /// holds until the terminal width changes.
+    pub(super) narrow_override: Option<bool>,
+}
+
+/// A pane of the commit screen, left to right on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Files,
+    /// The unified diff.
+    Diff,
+    /// Side by side: the old (left) or new (right) half.
+    Half(Side),
 }
 
 /// The sidebar width for rows that need `need` columns each, on a
@@ -47,21 +81,150 @@ pub fn counts_label(add: usize, del: usize) -> String {
 }
 
 impl App {
-    /// `<leader>e`: show or hide the file list.
-    pub(super) fn toggle_sidebar(&mut self) {
-        self.sidebar_on = !self.sidebar_on;
-        if !self.sidebar_on {
-            self.focus = Focus::Diff;
+    /// The terminal is narrower than `[view] sidebar_auto_hide_below`.
+    fn sidebar_narrow(&self) -> bool {
+        let below = self.config.view.sidebar_auto_hide_below;
+        below > 0 && self.size.0 < below
+    }
+
+    /// A loaded commit with files is on screen: there is a list to show.
+    fn sidebar_has_files(&self) -> bool {
+        matches!(self.screen, Screen::Commit(_))
+            && self.commit.as_ref().is_some_and(|v| v.file_count() > 0)
+    }
+
+    /// `[view] sidebar` as the session has it now (`<leader>e` flips
+    /// always / never; a pinned auto list counts as always).
+    pub fn sidebar_show(&self) -> SidebarShow {
+        match self.sidebar.show {
+            SidebarShow::Auto if self.sidebar.pinned => SidebarShow::Always,
+            s => s,
         }
     }
 
-    /// The file list is drawn: switched on, a loaded commit with files,
-    /// and a terminal at least 80 columns wide.
+    /// Put back a saved `sidebar` (a session), as if `<leader>e` had left
+    /// it so. While auto, always / never pin / unpin the list (it stays a
+    /// peek); a saved auto starts peeking. No peek is open after.
+    pub(super) fn set_sidebar_show(&mut self, show: SidebarShow) {
+        match (self.sidebar.show, show) {
+            (SidebarShow::Auto, SidebarShow::Always) => self.sidebar.pinned = true,
+            (SidebarShow::Auto, _) => self.sidebar.pinned = false,
+            (_, s) => {
+                self.sidebar.show = s;
+                self.sidebar.pinned = false;
+            }
+        }
+        self.sidebar.peeked = false;
+        self.sidebar.narrow_override = None;
+    }
+
+    /// `sidebar = "auto"`: the list is hidden and a move into it would
+    /// open a peek.
+    pub fn peek_could_open(&self) -> bool {
+        self.sidebar.show == SidebarShow::Auto
+            && !self.sidebar.pinned
+            && !self.sidebar.peeked
+            && self.sidebar_has_files()
+    }
+
+    /// The file list is shown, or a move into it would peek.
+    pub(super) fn files_reachable(&self) -> bool {
+        self.sidebar_visible() || self.peek_could_open()
+    }
+
+    /// `<leader>e`: show or hide the file list. always / never flip (a
+    /// choice made below `sidebar_auto_hide_below` holds until the width
+    /// changes); auto pins a hidden list and hides a shown one (a peek or
+    /// a pin), back to peeking.
+    pub(super) fn toggle_sidebar(&mut self) {
+        let shown = self.sidebar_visible();
+        match self.sidebar.show {
+            SidebarShow::Auto => {
+                self.sidebar.pinned = !shown;
+                self.sidebar.peeked = false;
+            }
+            _ => {
+                self.sidebar.show = if shown {
+                    SidebarShow::Never
+                } else {
+                    SidebarShow::Always
+                };
+                if self.sidebar_narrow() {
+                    self.sidebar.narrow_override = Some(!shown);
+                }
+            }
+        }
+        if !self.sidebar_visible() {
+            self.set_focus(Focus::Diff);
+        }
+    }
+
+    /// The file list is drawn: a loaded commit with files, and then by
+    /// `[view] sidebar`: always (unless the terminal is narrower than
+    /// `sidebar_auto_hide_below`, or `<leader>e` chose otherwise while it
+    /// was), never (unless `<leader>e` showed it), auto (pinned or
+    /// peeking).
     pub fn sidebar_visible(&self) -> bool {
-        self.sidebar_on
-            && self.size.0 >= SIDEBAR_HIDE_BELOW
-            && matches!(self.screen, Screen::Commit(_))
-            && self.commit.as_ref().is_some_and(|v| v.file_count() > 0)
+        if !self.sidebar_has_files() {
+            return false;
+        }
+        match self.sidebar.show {
+            SidebarShow::Auto => self.sidebar.pinned || self.sidebar.peeked,
+            show => match self.sidebar.narrow_override {
+                Some(v) => v,
+                None => show == SidebarShow::Always && !self.sidebar_narrow(),
+            },
+        }
+    }
+
+    /// The file list is drawn over the diff instead of beside it: auto,
+    /// shown, and a narrow terminal or a peek without room beside.
+    pub fn sidebar_overlay(&self) -> bool {
+        self.sidebar.show == SidebarShow::Auto
+            && self.sidebar_visible()
+            && (self.sidebar_narrow() || (self.sidebar.peeked && self.sidebar.overlay))
+    }
+
+    /// The terminal width changed: a narrow `<leader>e` choice ends and an
+    /// open peek decides again between beside and over the diff.
+    pub(super) fn sidebar_resized(&mut self, cols: u16) {
+        if cols != self.size.0 {
+            self.sidebar.narrow_override = None;
+        }
+        self.size.0 = cols;
+        if self.sidebar.peeked {
+            self.sidebar.overlay = !self.peek_fits_beside();
+        }
+    }
+
+    /// An auto peek goes beside the diff when the diff keeps its minimum
+    /// width next to it, so it doesn't reflow: `[view] split_min_width`
+    /// while side by side shows, else [`DIFF_MIN_WIDTH`].
+    fn peek_fits_beside(&self) -> bool {
+        let cols = self.size.0;
+        let min = if self.commit_split() {
+            self.config.view.split_min_width
+        } else {
+            DIFF_MIN_WIDTH
+        };
+        let side = self.sidebar_cols(cols) + 1;
+        cols.saturating_sub(side) >= min
+    }
+
+    /// Open an auto peek (focus is the caller's).
+    fn peek_open(&mut self) {
+        if self.peek_could_open() {
+            self.sidebar.peeked = true;
+            self.sidebar.overlay = !self.peek_fits_beside();
+        }
+    }
+
+    /// Give `f` the keys; leaving the list closes an auto peek.
+    pub(super) fn set_focus(&mut self, f: Focus) {
+        self.focus = f;
+        if f == Focus::Diff {
+            self.sidebar.peeked = false;
+        }
     }
 
     /// Keys go to the file list.
@@ -69,18 +232,103 @@ impl App {
         self.focus == Focus::Files && self.sidebar_visible()
     }
 
-    /// `C-w h` / `C-w l`.
+    /// Focus the file list (opening an auto peek) or the diff.
     pub(super) fn focus_pane(&mut self, f: Focus) {
-        if f == Focus::Files && !self.sidebar_visible() {
-            self.set_status("no file list");
-            return;
+        if f == Focus::Files {
+            self.peek_open();
+            if !self.sidebar_visible() {
+                self.set_status("no file list");
+                return;
+            }
         }
-        self.focus = f;
+        self.set_focus(f);
         if let Some(v) = &mut self.commit
             && f == Focus::Files
             && let Some(cur) = v.file_at(v.cur.row)
         {
             v.side_sel = cur;
+        }
+    }
+
+    /// The commit screen's panes left to right: the file list (when shown
+    /// or a peek could open) on its side, and the diff, or its old and
+    /// new halves side by side. Empty on the log.
+    pub fn panes(&self) -> Vec<Pane> {
+        if !matches!(self.screen, Screen::Commit(_)) {
+            return Vec::new();
+        }
+        let mut out = if self.commit_split() {
+            vec![Pane::Half(Side::Old), Pane::Half(Side::New)]
+        } else {
+            vec![Pane::Diff]
+        };
+        if self.files_reachable() {
+            match self.config.view.sidebar_side {
+                SidebarSide::Left => out.insert(0, Pane::Files),
+                SidebarSide::Right => out.push(Pane::Files),
+            }
+        }
+        out
+    }
+
+    /// The pane with the keys.
+    pub fn current_pane(&self) -> Option<Pane> {
+        if !matches!(self.screen, Screen::Commit(_)) {
+            return None;
+        }
+        Some(if self.files_focused() {
+            Pane::Files
+        } else {
+            match self.split_side() {
+                Some(s) => Pane::Half(s),
+                None => Pane::Diff,
+            }
+        })
+    }
+
+    /// Move to the pane toward `dir`; false when there is none (the
+    /// screen edge, or up / down: debrief stacks no panes).
+    pub(super) fn pane_move(&mut self, dir: Dir) -> bool {
+        let step: isize = match dir {
+            Dir::Left => -1,
+            Dir::Right => 1,
+            Dir::Up | Dir::Down => return false,
+        };
+        let panes = self.panes();
+        let Some(cur) = self.current_pane() else {
+            return false;
+        };
+        let Some(i) = panes.iter().position(|p| *p == cur) else {
+            return false;
+        };
+        let Some(&to) = i.checked_add_signed(step).and_then(|j| panes.get(j)) else {
+            return false;
+        };
+        match to {
+            Pane::Files => self.focus_pane(Focus::Files),
+            Pane::Diff => self.set_focus(Focus::Diff),
+            Pane::Half(s) => {
+                self.set_focus(Focus::Diff);
+                if self.split_side() != Some(s) {
+                    self.switch_side();
+                }
+            }
+        }
+        true
+    }
+
+    /// `C-w h` / `C-w l`: [`App::pane_move`]; at the edge toward a hidden
+    /// list, say so.
+    pub(super) fn pane_move_or_say(&mut self, dir: Dir) {
+        if self.pane_move(dir) {
+            return;
+        }
+        let toward_list = matches!(
+            (dir, self.config.view.sidebar_side),
+            (Dir::Left, SidebarSide::Left) | (Dir::Right, SidebarSide::Right)
+        );
+        if toward_list && !self.files_focused() {
+            self.set_status("no file list");
         }
     }
 
@@ -120,25 +368,50 @@ impl App {
             .collect()
     }
 
-    /// Split the main area (above the status line) into sidebar and diff.
+    /// The list's width on a terminal `cols` wide, not counting its
+    /// border: the auto fit or `[view] sidebar_width`, at most `cols - 1`.
+    fn sidebar_cols(&self, cols: u16) -> u16 {
+        let v = &self.config.view;
+        let w = match v.sidebar_width {
+            SidebarWidth::Auto => sidebar_width(
+                &self.sidebar_needs(),
+                cols,
+                v.sidebar_min_width,
+                v.sidebar_max_width,
+            ),
+            SidebarWidth::Fixed(n) => n,
+        };
+        w.min(cols.saturating_sub(1))
+    }
+
+    /// Split the main area (above the status line) into the file list
+    /// (on `[view] sidebar_side`) and the diff; an overlay leaves the
+    /// diff the whole area.
     pub fn commit_layout(&self, area: Rect) -> CommitLayout {
         if !self.sidebar_visible() {
             return CommitLayout {
                 sidebar: None,
                 diff: area,
+                overlay: false,
             };
         }
-        let w = sidebar_width(&self.sidebar_needs(), area.width, SIDEBAR_MIN, SIDEBAR_MAX);
-        let side = Rect::new(area.x, area.y, (w + 1).min(area.width), area.height);
-        let diff = Rect::new(
-            side.right(),
-            area.y,
-            area.width.saturating_sub(side.width),
-            area.height,
-        );
+        let w = (self.sidebar_cols(area.width) + 1).min(area.width);
+        let rest = area.width - w;
+        let overlay = self.sidebar_overlay();
+        let (side, diff) = match self.config.view.sidebar_side {
+            SidebarSide::Left => (
+                Rect::new(area.x, area.y, w, area.height),
+                Rect::new(area.x + w, area.y, rest, area.height),
+            ),
+            SidebarSide::Right => (
+                Rect::new(area.x + rest, area.y, w, area.height),
+                Rect::new(area.x, area.y, rest, area.height),
+            ),
+        };
         CommitLayout {
             sidebar: Some(side),
-            diff,
+            diff: if overlay { area } else { diff },
+            overlay,
         }
     }
 }

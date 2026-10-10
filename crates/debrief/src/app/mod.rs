@@ -14,6 +14,7 @@ pub mod launch;
 mod log;
 mod log_search;
 mod motion;
+pub mod pane_nav;
 pub mod picker;
 pub mod review;
 pub mod run;
@@ -224,8 +225,8 @@ pub struct App {
     /// The last commit-load request number.
     next_request: u64,
     focus: Focus,
-    /// `<leader>e` state of the file list.
-    sidebar_on: bool,
+    /// The file list: always / never / auto, pin and peek.
+    sidebar: sidebar::SidebarState,
     /// `T`: hunks or the full file, for every commit opened this session.
     context: crate::vcs::Context,
     /// `t`: side by side wanted for this session (shown when the diff pane
@@ -239,6 +240,10 @@ pub struct App {
     /// A side effect waiting for the suspended TUI.
     effect: Option<Effect>,
     runner: Box<launch::Runner>,
+    /// Runs `tmux select-pane` for a pane move at the edge
+    /// (`pane_nav::spawn_capped` by default: never blocks long).
+    pane_runner: Box<launch::Runner>,
+    /// Environment lookup for `${editor}` and `$TMUX`.
     env: Box<launch::EnvLookup>,
     /// The review batch for `vcs.root()`, shared with ramble.
     review: Option<debrief_review::Review>,
@@ -309,7 +314,7 @@ impl App {
             commit: None,
             next_request: 0,
             focus: Focus::Diff,
-            sidebar_on: true,
+            sidebar: sidebar::SidebarState::default(),
             context: crate::vcs::Context::Default,
             split: false,
             output: Vec::new(),
@@ -317,6 +322,7 @@ impl App {
             launch_keys: Vec::new(),
             effect: None,
             runner: Box::new(launch::system_run),
+            pane_runner: Box::new(pane_nav::spawn_capped),
             env: Box::new(|k| std::env::var(k).ok()),
             review: None,
             review_polled: None,
@@ -330,7 +336,7 @@ impl App {
         };
         app.review_open();
         app.config = app.opts.config.clone();
-        app.sidebar_on = app.config.view.sidebar;
+        app.sidebar.show = app.config.view.sidebar;
         app.stat.on = app.config.view.stats;
         app.context = app.config.view.context;
         app.split = app.config.view.layout == config::Layout::Split;
@@ -357,6 +363,7 @@ impl App {
         match ev {
             AppEvent::Key(k) => self.key(k),
             AppEvent::Resize(c, r) => {
+                self.sidebar_resized(c);
                 self.size = (c, r);
                 self.commit_follow();
             }
@@ -413,6 +420,11 @@ impl App {
         self.commit_follow();
         self.stat_follow();
         crate::ui::draw(frame, self);
+    }
+
+    /// The config in effect.
+    pub fn config(&self) -> &config::Config {
+        &self.config
     }
 
     pub fn should_quit(&self) -> bool {

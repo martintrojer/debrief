@@ -8,6 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::commit::{Focus, RowKind};
 use super::help::HelpAction;
+use super::pane_nav::Dir;
 use super::{App, Mode, Screen};
 
 /// Cap on a typed count.
@@ -108,8 +109,14 @@ pub enum Action {
     Yank,
     /// `<leader>e`.
     ToggleSidebar,
-    /// `C-w h` / `C-w l`.
+    /// File list `Esc`: back to the diff.
     Focus(Focus),
+    /// `C-w h` / `C-w l`: the pane that way (side by side, the halves
+    /// are panes).
+    Window(super::pane_nav::Dir),
+    /// `C-h/j/k/l` (`[keys] pane_nav`): as `C-w`, and at the edge the
+    /// tmux pane that way.
+    PaneNav(super::pane_nav::Dir),
     /// File list: select the next / previous file (jumps the diff).
     FileDown(Option<usize>),
     FileUp(Option<usize>),
@@ -279,8 +286,8 @@ impl App {
         let r = if ctrl_w {
             match second.map(plain) {
                 None => KeyResult::Pending,
-                Some(Some('h')) => KeyResult::Action(A::Focus(Focus::Files)),
-                Some(Some('l')) => KeyResult::Action(A::Focus(Focus::Diff)),
+                Some(Some('h')) => KeyResult::Action(A::Window(Dir::Left)),
+                Some(Some('l')) => KeyResult::Action(A::Window(Dir::Right)),
                 _ => KeyResult::None,
             }
         } else if let [a, b] = keys
@@ -289,7 +296,7 @@ impl App {
         {
             KeyResult::Action(A::Help(HelpAction::Open))
         } else {
-            return None;
+            self.pane_nav_keymap(keys)?
         };
         Some(if keys.len() > 2 { KeyResult::None } else { r })
     }
@@ -415,7 +422,8 @@ impl App {
             }
         }
         if self.pane_keymap(keys).is_some() {
-            // `<leader>e`, `C-w h/l` and `g?` don't apply in visual mode.
+            // `<leader>e`, `C-w h/l`, `C-h/j/k/l` and `g?` don't apply in
+            // visual mode.
             return KeyResult::None;
         }
         match self.commit_keymap(keys) {
@@ -457,6 +465,9 @@ impl App {
         use Action as A;
         if keys.first().and_then(plain) == Some(LEADER) {
             return self.leader_keymap(&keys[1..]);
+        }
+        if let Some(r) = self.pane_nav_keymap(keys) {
+            return r;
         }
         let count = self.count;
         let [key] = keys else {
@@ -553,6 +564,8 @@ impl App {
             A::FilterCommit => self.filter_commit(),
             A::FilterClear => self.filter_clear(),
             A::ToggleSidebar => self.toggle_stats(),
+            // The log has no panes to move between: tmux's, if any.
+            A::PaneNav(d) => self.pane_nav(d),
             A::StatScroll(down, c) => self.stat_scroll_by(if down { n(c) } else { -n(c) }),
             other => self.apply_commit(other),
         }
@@ -589,6 +602,8 @@ impl App {
             A::PopupMove(m) => return self.popup_move(m),
             A::ToggleSidebar => return self.toggle_sidebar(),
             A::Focus(f) => return self.focus_pane(f),
+            A::Window(d) => return self.pane_move_or_say(d),
+            A::PaneNav(d) => return self.pane_nav(d),
             A::FileDown(c) => return self.select_file(self.sidebar_selected() + n(c)),
             A::FileUp(c) => {
                 return self.select_file(self.sidebar_selected().saturating_sub(n(c)));
@@ -597,7 +612,7 @@ impl App {
             A::FileBottom => return self.select_file(usize::MAX),
             A::FileOpen => {
                 self.select_file(self.sidebar_selected());
-                self.focus = Focus::Diff;
+                self.set_focus(Focus::Diff);
                 return;
             }
             _ => {}
@@ -676,6 +691,8 @@ fn visual_ok(a: Action) -> bool {
             | A::SwitchSide
             | A::ToggleSidebar
             | A::Focus(_)
+            | A::Window(_)
+            | A::PaneNav(_)
             | A::Help(_)
             | A::SearchStart(_)
             | A::DiffEnter

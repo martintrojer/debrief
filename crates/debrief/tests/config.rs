@@ -192,10 +192,13 @@ fn unknown_keys_name_the_key_and_the_allowed_ones() {
         e.contains(" line 2: view.sidebr: unknown field `sidebr`"),
         "{e}"
     );
-    assert!(e.contains("`sidebar`, `stats`, `context`, `layout`"), "{e}");
+    assert!(e.contains("`sidebar`, `sidebar_side`"), "{e}");
     let e = err_at("[keys]\nleadr = \",\"\n");
     assert!(e.contains("keys.leadr: unknown field"), "{e}");
-    assert!(e.contains("expected `leader` or `clue`"), "{e}");
+    assert!(
+        e.contains("expected one of `leader`, `clue`, `pane_nav`"),
+        "{e}"
+    );
     let e = err_at("[viw]\n");
     assert!(e.contains("line 1: viw: unknown field `viw`"), "{e}");
     assert!(e.contains("`view`, `keys`"), "{e}");
@@ -214,7 +217,27 @@ fn bad_values_name_the_key_and_the_allowed_values() {
         ),
         (
             "[view]\nsidebar = 1\n",
-            "line 2: view.sidebar: invalid type",
+            "line 2: view.sidebar: expected \"always\", \"never\" or \"auto\", got 1",
+        ),
+        (
+            "[view]\nsidebar = true\n",
+            "line 2: view.sidebar: expected \"always\", \"never\" or \"auto\", got true",
+        ),
+        (
+            "[view]\nsidebar = false\n",
+            "line 2: view.sidebar: expected \"always\", \"never\" or \"auto\", got false",
+        ),
+        (
+            "[view]\nsidebar_width = \"wide\"\n",
+            "line 2: view.sidebar_width: expected \"auto\" or a number of columns, got \"wide\"",
+        ),
+        (
+            "[view]\nsidebar_side = \"top\"\n",
+            "line 2: view.sidebar_side: unknown variant `top`, expected `left` or `right`",
+        ),
+        (
+            "[keys]\npane_nav = 1\n",
+            "line 2: keys.pane_nav: invalid type",
         ),
         ("[keys]\nclue = \"no\"\n", "line 2: keys.clue: invalid type"),
         ("[keys]\nleader = \"ab\"\n", "keys.leader: invalid value"),
@@ -358,7 +381,7 @@ fn view_sidebar_sets_the_file_list_at_start() {
         s[0].contains("x.rs") && s[0].contains('│'),
         "file list: {s:#?}"
     );
-    let mut app = f.open("[view]\nsidebar = false\n", 120);
+    let mut app = f.open("[view]\nsidebar = \"never\"\n", 120);
     assert!(!app.sidebar_visible());
     let s = screen(&mut app, 120);
     assert!(!s.iter().any(|l| l.contains('│')), "no file list: {s:#?}");

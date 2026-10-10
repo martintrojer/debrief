@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail};
 use debrief_review::Kind;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::vcs::Context as DiffContext;
 
@@ -62,6 +62,9 @@ pub struct KeysConfig {
     pub leader: char,
     /// After a pause in a key sequence, show the keys that can come next.
     pub clue: bool,
+    /// `C-h/j/k/l` move between panes, and on into tmux panes at the
+    /// edge; false leaves them unbound (the `C-w` keys stay).
+    pub pane_nav: bool,
 }
 
 impl Default for KeysConfig {
@@ -69,6 +72,7 @@ impl Default for KeysConfig {
         KeysConfig {
             leader: crate::app::LEADER,
             clue: true,
+            pane_nav: true,
         }
     }
 }
@@ -76,9 +80,19 @@ impl Default for KeysConfig {
 /// `[view]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewConfig {
-    /// The commit view's file list at start (on by default; `<leader>e`
-    /// toggles).
-    pub sidebar: bool,
+    /// The commit view's file list: always, never or auto (a peek).
+    pub sidebar: SidebarShow,
+    /// The screen edge the file list sits at.
+    pub sidebar_side: SidebarSide,
+    /// Below this many columns the file list hides (a peek draws over the
+    /// diff); 0 never hides it.
+    pub sidebar_auto_hide_below: u16,
+    /// The file list's width, not counting its border.
+    pub sidebar_width: SidebarWidth,
+    /// Bounds of the auto width (the max is also capped at 35% of the
+    /// terminal).
+    pub sidebar_min_width: u16,
+    pub sidebar_max_width: u16,
     /// The log's stats pane at start (on by default; `<leader>e` toggles).
     pub stats: bool,
     /// The commit view's context at start: `"hunks"` (the default) or
@@ -95,6 +109,136 @@ pub struct ViewConfig {
 /// The default `[view] split_min_width`.
 pub const SPLIT_MIN_WIDTH: u16 = 140;
 
+/// `[view] sidebar`: `"always"`, `"never"` or `"auto"`. Anything else,
+/// `true`/`false` included, is an error naming the three values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarShow {
+    /// Shown; `<leader>e` hides it.
+    #[default]
+    Always,
+    /// Hidden; `<leader>e` shows it.
+    Never,
+    /// Peek: hidden while you read the diff, shown while you use it.
+    Auto,
+}
+
+/// The `[view] sidebar` error, before what was found.
+pub const SIDEBAR_EXPECTED: &str = "expected \"always\", \"never\" or \"auto\"";
+
+impl SidebarShow {
+    fn named(v: &str) -> Option<SidebarShow> {
+        Some(match v {
+            "always" => SidebarShow::Always,
+            "never" => SidebarShow::Never,
+            "auto" => SidebarShow::Auto,
+            _ => return None,
+        })
+    }
+}
+
+/// [`SidebarShow`]'s values; `compat` also reads the old `true` /
+/// `false` (always / never), as saved sessions hold them.
+struct ShowVisitor {
+    compat: bool,
+}
+
+impl serde::de::Visitor<'_> for ShowVisitor {
+    type Value = SidebarShow;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(r#""always", "never" or "auto""#)
+    }
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<SidebarShow, E> {
+        SidebarShow::named(v).ok_or_else(|| E::custom(format!("{SIDEBAR_EXPECTED}, got \"{v}\"")))
+    }
+    fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<SidebarShow, E> {
+        match (self.compat, v) {
+            (true, true) => Ok(SidebarShow::Always),
+            (true, false) => Ok(SidebarShow::Never),
+            _ => Err(E::custom(format!("{SIDEBAR_EXPECTED}, got {v}"))),
+        }
+    }
+    fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<SidebarShow, E> {
+        Err(E::custom(format!("{SIDEBAR_EXPECTED}, got {v}")))
+    }
+    fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<SidebarShow, E> {
+        Err(E::custom(format!("{SIDEBAR_EXPECTED}, got {v}")))
+    }
+    fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<SidebarShow, E> {
+        Err(E::custom(format!("{SIDEBAR_EXPECTED}, got {v}")))
+    }
+}
+
+impl<'de> Deserialize<'de> for SidebarShow {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(ShowVisitor { compat: false })
+    }
+}
+
+/// A saved session's `view.sidebar`: [`SidebarShow`], or the `true` /
+/// `false` of sessions saved before it (always / never).
+pub fn sidebar_show_compat<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<SidebarShow, D::Error> {
+    d.deserialize_any(ShowVisitor { compat: true })
+}
+
+/// `[view] sidebar_side`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarSide {
+    #[default]
+    Left,
+    Right,
+}
+
+/// `[view] sidebar_width`: `"auto"` fits the rows, a number is used as
+/// given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarWidth {
+    #[default]
+    Auto,
+    Fixed(u16),
+}
+
+/// The `[view] sidebar_width` error, before what was found.
+const WIDTH_EXPECTED: &str = "expected \"auto\" or a number of columns";
+
+impl<'de> Deserialize<'de> for SidebarWidth {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl serde::de::Visitor<'_> for V {
+            type Value = SidebarWidth;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str(r#""auto" or a number"#)
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<SidebarWidth, E> {
+                match v {
+                    "auto" => Ok(SidebarWidth::Auto),
+                    _ => Err(E::custom(format!("{WIDTH_EXPECTED}, got \"{v}\""))),
+                }
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<SidebarWidth, E> {
+                u16::try_from(v)
+                    .ok()
+                    .filter(|&n| n > 0)
+                    .map(SidebarWidth::Fixed)
+                    .ok_or_else(|| E::custom(format!("{WIDTH_EXPECTED}, got {v}")))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<SidebarWidth, E> {
+                self.visit_i64(i64::try_from(v).unwrap_or(-1))
+            }
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<SidebarWidth, E> {
+                Err(E::custom(format!("{WIDTH_EXPECTED}, got {v}")))
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<SidebarWidth, E> {
+                Err(E::custom(format!("{WIDTH_EXPECTED}, got {v}")))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
 /// `[view] layout`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -107,7 +251,12 @@ pub enum Layout {
 impl Default for ViewConfig {
     fn default() -> Self {
         ViewConfig {
-            sidebar: true,
+            sidebar: SidebarShow::Always,
+            sidebar_side: SidebarSide::Left,
+            sidebar_auto_hide_below: 80,
+            sidebar_width: SidebarWidth::Auto,
+            sidebar_min_width: 16,
+            sidebar_max_width: 48,
             stats: true,
             context: DiffContext::Default,
             layout: Layout::Unified,
@@ -249,11 +398,20 @@ impl Config {
             if let Some(clue) = k.clue {
                 c.keys.clue = clue;
             }
+            if let Some(p) = k.pane_nav {
+                c.keys.pane_nav = p;
+            }
         }
         if let Some(v) = raw.view {
-            if let Some(sidebar) = v.sidebar {
-                c.view.sidebar = sidebar;
-            }
+            set(&mut c.view.sidebar, v.sidebar);
+            set(&mut c.view.sidebar_side, v.sidebar_side);
+            set(
+                &mut c.view.sidebar_auto_hide_below,
+                v.sidebar_auto_hide_below,
+            );
+            set(&mut c.view.sidebar_width, v.sidebar_width);
+            set(&mut c.view.sidebar_min_width, v.sidebar_min_width);
+            set(&mut c.view.sidebar_max_width, v.sidebar_max_width);
             if let Some(stats) = v.stats {
                 c.view.stats = stats;
             }
@@ -310,6 +468,13 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Config::defaults()
+    }
+}
+
+/// `to = v` when the file sets `v`.
+fn set<T>(to: &mut T, v: Option<T>) {
+    if let Some(v) = v {
+        *to = v;
     }
 }
 
@@ -410,6 +575,7 @@ struct RawConfig {
 struct RawKeys {
     leader: Option<char>,
     clue: Option<bool>,
+    pane_nav: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -427,7 +593,12 @@ struct RawRender {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawView {
-    sidebar: Option<bool>,
+    sidebar: Option<SidebarShow>,
+    sidebar_side: Option<SidebarSide>,
+    sidebar_auto_hide_below: Option<u16>,
+    sidebar_width: Option<SidebarWidth>,
+    sidebar_min_width: Option<u16>,
+    sidebar_max_width: Option<u16>,
     stats: Option<bool>,
     context: Option<RawContext>,
     layout: Option<Layout>,
@@ -587,6 +758,66 @@ kinds = [
     }
 
     #[test]
+    fn view_sidebar_is_always_never_or_auto() {
+        let c = |src: &str| Config::parse(src).map(|c| c.view.sidebar);
+        assert_eq!(c("[view]\n"), Ok(SidebarShow::Always));
+        for (v, want) in [
+            ("always", SidebarShow::Always),
+            ("never", SidebarShow::Never),
+            ("auto", SidebarShow::Auto),
+        ] {
+            assert_eq!(c(&format!("[view]\nsidebar = \"{v}\"\n")), Ok(want));
+        }
+        let want = r#"view.sidebar: expected "always", "never" or "auto", got"#;
+        for (v, got) in [("true", "true"), ("false", "false"), ("\"on\"", "\"on\"")] {
+            let e = c(&format!("[view]\nsidebar = {v}\n")).unwrap_err();
+            assert_eq!(e, format!("{want} {got}"));
+        }
+    }
+
+    #[test]
+    fn view_sidebar_geometry() {
+        let d = Config::defaults().view;
+        assert_eq!(
+            (
+                d.sidebar_side,
+                d.sidebar_auto_hide_below,
+                d.sidebar_width,
+                d.sidebar_min_width,
+                d.sidebar_max_width
+            ),
+            (SidebarSide::Left, 80, SidebarWidth::Auto, 16, 48)
+        );
+        let v = Config::parse(
+            "[view]\nsidebar_side = \"right\"\nsidebar_auto_hide_below = 0\nsidebar_width = 30\nsidebar_min_width = 10\nsidebar_max_width = 60\n",
+        )
+        .unwrap()
+        .view;
+        assert_eq!(
+            (
+                v.sidebar_side,
+                v.sidebar_auto_hide_below,
+                v.sidebar_width,
+                v.sidebar_min_width,
+                v.sidebar_max_width
+            ),
+            (SidebarSide::Right, 0, SidebarWidth::Fixed(30), 10, 60)
+        );
+        let w = |s: &str| {
+            Config::parse(&format!("[view]\nsidebar_width = {s}\n")).map(|c| c.view.sidebar_width)
+        };
+        assert_eq!(w("\"auto\""), Ok(SidebarWidth::Auto));
+        for bad in ["\"wide\"", "0", "-1", "true", "70000"] {
+            let e = w(bad).unwrap_err();
+            assert!(
+                e.starts_with("view.sidebar_width: expected \"auto\" or a number"),
+                "{bad}: {e}"
+            );
+        }
+        assert!(Config::parse("[view]\nsidebar_side = \"top\"\n").is_err());
+    }
+
+    #[test]
     fn view_stats_defaults_on() {
         assert!(Config::defaults().view.stats);
         assert!(!Config::parse("[view]\nstats = false\n").unwrap().view.stats);
@@ -596,11 +827,13 @@ kinds = [
     #[test]
     fn view_sidebar_and_keys_default_on() {
         let d = Config::defaults();
-        assert!(d.view.sidebar && d.keys.clue);
+        assert!(d.view.sidebar == SidebarShow::Always && d.keys.clue && d.keys.pane_nav);
         assert_eq!(d.keys.leader, ' ');
-        let c = Config::parse("[view]\nsidebar = false\n[keys]\nleader = \",\"\nclue = false\n")
-            .unwrap();
-        assert!(!c.view.sidebar && !c.keys.clue);
+        let c = Config::parse(
+            "[view]\nsidebar = \"never\"\n[keys]\nleader = \",\"\nclue = false\npane_nav = false\n",
+        )
+        .unwrap();
+        assert!(c.view.sidebar == SidebarShow::Never && !c.keys.clue && !c.keys.pane_nav);
         assert_eq!(c.keys.leader, ',');
         assert!(Config::parse("[keys]\nleader = \"\"\n").is_err());
     }
@@ -608,7 +841,7 @@ kinds = [
     #[test]
     fn errors_name_the_table_and_key() {
         let e = Config::parse("[view]\nsidebar = 1\n").unwrap_err();
-        assert!(e.starts_with("view.sidebar: invalid type"), "{e}");
+        assert!(e.starts_with("view.sidebar: expected"), "{e}");
         let e = Config::parse("[[launch]]\nname = \"x\"\n\"kye\" = 1\n").unwrap_err();
         assert!(e.starts_with("launch.kye: unknown field"), "{e}");
         let key = |src: &str, at| key_at(toml::de::DeTable::parse(src).unwrap().get_ref(), at);
@@ -628,7 +861,7 @@ kinds = [
                 "[[launch]]\nname = \"edit\"\ncommand = [\n  1\n]\n",
                 "launch.command: invalid type",
             ),
-            ("[ view ]\nsidebar = 1\n", "view.sidebar: invalid type"),
+            ("[ view ]\nstats = 1\n", "view.stats: invalid type"),
             (
                 "[[launch]]\nname = \"x\"\nk = { a = 1 }\n",
                 "launch.k: unknown field",

@@ -126,7 +126,8 @@ shows `filter: x (12/200)`. `m`, `Enter` and `]]` / `[[` act on the
 filtered list, and `r` keeps the filter.
 
 **Commit view**: the message, then every file's diff in one stream, with
-a file list on the left (hidden below 80 columns).
+a file list on the left (hidden below 80 columns; `[view] sidebar`,
+`sidebar_side` and friends change that, see [Config](#config)).
 
 | Key | Does |
 |---|---|
@@ -140,7 +141,8 @@ a file list on the left (hidden below 80 columns).
 | `r` | on the working copy: reload its diff in place |
 | `/` `?` `n` `N` | search |
 | `v` `V`, then `y` | select rows, copy them as diff text (OSC 52) |
-| `<leader>e`, `C-w h` / `C-w l` | toggle the file list, move between panes |
+| `<leader>e` | show / hide the file list (`sidebar = "auto"`: pin it) |
+| `C-h` / `C-l` (or `C-w h` / `C-w l`) | move between the file list and the diff (side by side: the file list, old, new) |
 | `Enter` | on a `.md` file header: open it in ramble |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
 | `<leader>ss` | save this commit's review session |
@@ -219,6 +221,51 @@ number comes from the commit, so it can drift if the file has changed
 since then. The TUI suspends while the editor runs and comes back on the
 same row.
 
+### Moving between panes
+
+`C-h` / `C-j` / `C-k` / `C-l` move to the pane left / below / above /
+right, the same keys as nvim and tmux. On the commit screen the panes are
+the file list and the diff, and side by side the diff's old and new
+halves too: file list | old | new (on the right: old | new | file list),
+so `C-l` from the list goes to the old side, then to the new side (`Tab`
+still switches sides). `C-w h` / `C-w l` do the same. debrief stacks no
+panes, and the log's stats pane never takes the keys.
+
+Where there is no pane that way (the screen edge, `C-j` / `C-k`, the log)
+and debrief runs inside tmux, the move goes on to the tmux pane there
+(`tmux select-pane`), as
+[vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator)
+does. Outside tmux nothing happens. In the comment box the keys stay
+text input: `C-j` is a new line, `C-h` `C-k` `C-l` do nothing.
+`[keys] pane_nav = false` unbinds them; the `C-w` keys stay.
+
+vim-tmux-navigator only forwards these keys to panes it thinks run vim. To
+let debrief receive them, add it to the pattern in `~/.tmux.conf`:
+
+```tmux
+set -g @vim_navigator_pattern '(\S+/)?g?\.?(view|l?n?vim?x?|fzf|debrief|ramble)(diff)?(-wrapped)?'
+```
+
+### The file list
+
+`[view] sidebar` is `"always"` (the default: shown, `<leader>e` hides
+it), `"never"` (hidden, `<leader>e` shows it) or `"auto"`, a peek: hidden
+while you read the diff, shown while you use it (`C-h` or `C-w h` toward
+it; on the right `C-l`), and hidden again when you jump to a file
+(`Enter`), press `Esc` in the list or move back to the diff. `<leader>e`
+pins an auto list (shown until you press it again). A peek goes beside
+the diff when the diff keeps at least 80 columns (`split_min_width` side
+by side); otherwise, and below `sidebar_auto_hide_below`, it draws over
+the diff without reflowing it.
+
+`sidebar_side = "right"` draws the list after the diff. Below
+`sidebar_auto_hide_below` (80) columns an always list hides, and comes
+back when the terminal grows unless `<leader>e` hid it (0 never hides
+it). `sidebar_width = "auto"` fits the paths (most of them: one very long
+path doesn't stretch it) within `sidebar_min_width` (16) and
+`sidebar_max_width` (48), and at most 35% of the terminal; a number is
+used as given.
+
 ## Review sessions
 
 A session is the saved state of one review of one commit: its comments
@@ -287,7 +334,13 @@ session. The rows without a key are set only in the file.
 
 | Toggle | Key | Config key | Default |
 |---|---|---|---|
-| file list on the commit screen | `<leader>e` | `view.sidebar` | `true` |
+| file list on the commit screen | `<leader>e` | `view.sidebar` | `"always"` (or `"never"`, `"auto"`) |
+| the file list's screen edge | — | `view.sidebar_side` | `"left"` (or `"right"`) |
+| hide the file list below this width (0: never) | — | `view.sidebar_auto_hide_below` | `80` |
+| the file list's width | — | `view.sidebar_width` | `"auto"` (or columns) |
+| narrowest auto file list | — | `view.sidebar_min_width` | `16` |
+| widest auto file list (also ≤ 35%) | — | `view.sidebar_max_width` | `48` |
+| `C-h/j/k/l` move between panes (and tmux panes) | — | `keys.pane_nav` | `true` |
 | stats pane on the log | `<leader>e` | `view.stats` | `true` |
 | hunks / the full file | `T` | `view.context` | `"hunks"` (or `"full"`) |
 | unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
@@ -326,7 +379,12 @@ kinds = [
 highlight = true
 
 [view]
-sidebar = true               # the commit view's file list at start (<leader>e toggles)
+sidebar = "always"           # the commit view's file list: "always", "never" or "auto" (peek); <leader>e toggles
+sidebar_side = "left"        # "left" or "right"
+sidebar_auto_hide_below = 80 # hide the file list below this many columns; 0 never
+sidebar_width = "auto"       # or a number of columns
+sidebar_min_width = 16
+sidebar_max_width = 48       # also at most 35% of the terminal
 stats = true                 # the log's stats pane at start (<leader>e toggles)
 context = "hunks"            # the commit view: "hunks" or "full" (whole files; T toggles)
 layout = "unified"           # the commit view: "unified" or "split" (side by side; t toggles)
@@ -335,6 +393,7 @@ split_min_width = 140        # narrowest diff pane (without the file list) shown
 [keys]
 leader = " "                 # one character
 clue = true                  # after a pause in a key sequence, show what can follow
+pane_nav = true              # C-h/j/k/l move between panes (and tmux panes)
 
 # Launchers run with the TUI suspended, as in ramble. Arguments are not
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}

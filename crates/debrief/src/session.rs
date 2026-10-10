@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use debrief_review::{Comment, Side};
 use serde::{Deserialize, Serialize};
 
+use crate::app::config::SidebarShow;
+
 /// The only session format.
 pub const VERSION: u32 = 1;
 /// The session key (and file stem) of the working copy.
@@ -66,7 +68,11 @@ pub enum ViewFocus {
 pub struct View {
     pub context: ViewContext,
     pub layout: ViewLayout,
-    pub sidebar: bool,
+    /// The file list: always / never / auto, as `[view] sidebar` (and
+    /// `<leader>e`) left it. Sessions saved before held `true` / `false`,
+    /// read as always / never.
+    #[serde(deserialize_with = "crate::app::config::sidebar_show_compat")]
+    pub sidebar: SidebarShow,
     pub focus: ViewFocus,
     /// The cursor row; `None` when the diff hadn't loaded.
     pub anchor: Option<Anchor>,

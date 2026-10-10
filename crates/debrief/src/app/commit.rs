@@ -529,7 +529,7 @@ impl App {
         self.cursor = i;
         self.screen = Screen::Commit(i);
         self.mode = Mode::Normal;
-        self.focus = Focus::Diff;
+        self.set_focus(Focus::Diff);
         self.next_request += 1;
         let request = self.next_request;
         // The session's layout follows once the diff (and the file list
@@ -818,7 +818,7 @@ impl App {
         }
         self.screen = Screen::Log;
         self.mode = Mode::Normal;
-        self.focus = Focus::Diff;
+        self.set_focus(Focus::Diff);
         self.keep_visible();
     }
 

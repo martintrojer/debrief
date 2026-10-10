@@ -1,16 +1,17 @@
 //! The commit view's file list: one row per file, `S path +n −m` (`S` a
-//! coloured A/M/D/R/C status letter), a border on its right edge, `▎` on
-//! the file holding the diff cursor.
+//! coloured A/M/D/R/C status letter), a border on its edge toward the
+//! diff, `▎` on the file holding the diff cursor.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::palette;
 use crate::app::commit::{file_counts, file_path};
+use crate::app::config::SidebarSide;
 use crate::app::sidebar::STATUS_COLS;
 use crate::app::sidebar::counts_label;
 use crate::app::{App, Focus};
@@ -51,8 +52,14 @@ fn clip_start(s: &str, max: usize) -> String {
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    // Over the diff (a peek), nothing of it shows through.
+    frame.render_widget(Clear, area);
+    let border = match app.config().view.sidebar_side {
+        SidebarSide::Left => Borders::RIGHT,
+        SidebarSide::Right => Borders::LEFT,
+    };
     let block = Block::new()
-        .borders(Borders::RIGHT)
+        .borders(border)
         .border_style(Style::new().fg(palette::OVERLAY));
     let inner = block.inner(area);
     frame.render_widget(block, area);

@@ -79,13 +79,13 @@ fn documented(key: &str) -> bool {
         .any(|l| l.starts_with(&format!("# {k} = ")))
 }
 
-/// The README's toggle table: rows of `| what | key | config key | default |`.
-fn readme_rows() -> Vec<Vec<String>> {
-    let readme = std::fs::read_to_string(manifest().join("../../README.md")).unwrap();
-    let at = readme
+/// The guide's toggle table (docs/guide.md): rows of `| what | key | config key | default |`.
+fn guide_rows() -> Vec<Vec<String>> {
+    let guide = std::fs::read_to_string(manifest().join("../../docs/guide.md")).unwrap();
+    let at = guide
         .find("| Toggle | Key | Config key | Default |")
-        .expect("README has the toggle table");
-    readme[at..]
+        .expect("docs/guide.md has the toggle table");
+    guide[at..]
         .lines()
         .skip(2)
         .take_while(|l| l.starts_with('|'))
@@ -118,7 +118,7 @@ fn toggle_actions() -> Vec<String> {
 }
 
 #[test]
-fn every_toggle_has_a_config_key_and_a_readme_row() {
+fn every_toggle_has_a_config_key_and_a_guide_row() {
     let actions = toggle_actions();
     assert!(actions.len() >= 3, "{actions:?}");
     for a in &actions {
@@ -127,7 +127,7 @@ fn every_toggle_has_a_config_key_and_a_readme_row() {
             "{a} is not in keys::TOGGLES"
         );
     }
-    let rows = readme_rows();
+    let rows = guide_rows();
     for (action, key, cfg) in TOGGLES {
         assert!(
             documented(cfg),
@@ -135,7 +135,7 @@ fn every_toggle_has_a_config_key_and_a_readme_row() {
         );
         assert!(
             rows.iter().any(|r| r[1] == *key && r[2] == *cfg),
-            "no README row for {key} / {cfg}"
+            "no docs/guide.md row for {key} / {cfg}"
         );
     }
     // The config-only rows are documented too.
@@ -148,7 +148,10 @@ fn every_toggle_has_a_config_key_and_a_readme_row() {
     let keys = default_keys(&["view", "keys"]);
     assert!(keys.contains(&"keys.pane_nav".to_string()), "{keys:?}");
     for k in &keys {
-        assert!(rows.iter().any(|r| r[2] == *k), "no README row for {k}");
+        assert!(
+            rows.iter().any(|r| r[2] == *k),
+            "no docs/guide.md row for {k}"
+        );
     }
 }
 

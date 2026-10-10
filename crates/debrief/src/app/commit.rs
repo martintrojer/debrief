@@ -277,6 +277,8 @@ pub struct CommitView {
     /// A `T` reload: the line to put the cursor back on once it loads,
     /// and the cursor's row on screen to keep.
     pub(super) keep_anchor: Option<(Anchor, usize)>,
+    /// A saved or captured view to put back once the diff loads.
+    pub(super) restore: Option<super::session::Restore>,
     /// Side by side wanted: the layout `set_diff` builds.
     pub(super) split_on: bool,
     /// Side by side as shown: the other side's rows (`rows` holds the
@@ -286,17 +288,7 @@ pub struct CommitView {
     pub(super) side: Side,
 }
 
-/// Where the cursor was, in terms that survive a change of context
-/// (`T`): message rows by index, everything else by file and line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Anchor {
-    /// A message row (the message is the same in both modes).
-    Row(usize),
-    /// A file's header, placeholder or hunk header: the file's header.
-    File(String),
-    /// A diff line: the new-side line when it has one, else the old.
-    Line { path: String, new: bool, line: u32 },
-}
+pub(super) use crate::session::Anchor;
 
 impl CommitView {
     fn new(commit: String, request: u64) -> Self {
@@ -324,6 +316,7 @@ impl CommitView {
             base: None,
             keep_row: None,
             keep_anchor: None,
+            restore: None,
             split_on: false,
             split: None,
             side: Side::New,
@@ -358,7 +351,7 @@ impl CommitView {
     }
 
     /// The cursor row as an [`Anchor`].
-    fn anchor(&self) -> Option<Anchor> {
+    pub(super) fn anchor(&self) -> Option<Anchor> {
         let diff = self.diff.as_ref()?;
         let r = self.rows.get(self.cur.row)?;
         let Some(fi) = r.file.or_else(|| self.file_at(self.cur.row)) else {
@@ -376,17 +369,17 @@ impl CommitView {
             Some(l) => match (l.new, l.old) {
                 (_, Some(o)) if old_first => Anchor::Line {
                     path,
-                    new: false,
+                    side: Side::Old,
                     line: o,
                 },
                 (Some(n), _) => Anchor::Line {
                     path,
-                    new: true,
+                    side: Side::New,
                     line: n,
                 },
                 (None, Some(o)) => Anchor::Line {
                     path,
-                    new: false,
+                    side: Side::Old,
                     line: o,
                 },
                 (None, None) => Anchor::File(path),
@@ -403,7 +396,7 @@ impl CommitView {
         let (path, new, line) = match a {
             Anchor::Row(r) => return Some(*r),
             Anchor::File(p) => (p, true, None),
-            Anchor::Line { path, new, line } => (path, *new, Some(*line)),
+            Anchor::Line { path, side, line } => (path, *side == Side::New, Some(*line)),
         };
         let fi = diff.files.iter().position(|f| file_path(f) == path)?;
         let header = self.header_row(fi);
@@ -529,6 +522,8 @@ impl App {
     /// Switch to the commit screen on log row `i` with a fresh view;
     /// returns its request number.
     fn enter_view(&mut self, i: usize) -> u64 {
+        // The view being left is remembered for its session.
+        self.session_capture();
         let id = self.rows[i].info.commit.clone();
         self.mark_row(i);
         self.cursor = i;
@@ -540,6 +535,8 @@ impl App {
         // The session's layout follows once the diff (and the file list
         // that narrows the pane) is in: `loaded` -> `commit_follow`.
         self.commit = Some(CommitView::new(id, request));
+        // Before the load: a session sets the context it loads in.
+        self.session_enter(i);
         request
     }
 
@@ -779,8 +776,8 @@ impl App {
                 let anchor = v.keep_anchor.take();
                 v.set_diff(diff);
                 // Side by side: the anchor's line is on its side.
-                if let Some((Anchor::Line { new, .. }, _)) = &anchor
-                    && v.split_side().is_some_and(|s| (s == Side::New) != *new)
+                if let Some((Anchor::Line { side, .. }, _)) = &anchor
+                    && v.split_side().is_some_and(|s| s != *side)
                 {
                     v.swap_side();
                 }
@@ -794,9 +791,13 @@ impl App {
                     v.scroll = v.cur.row.saturating_sub(on_screen).min(v.max_scroll());
                 }
                 let pick = v.goto_comment.take();
+                let restore = v.restore.take();
                 // A search typed while loading saw no rows.
                 self.refresh_search();
                 self.commit_follow();
+                if let Some(r) = restore {
+                    self.session_put_back(r);
+                }
                 if let Some(c) = pick {
                     self.goto_comment(&c);
                 }
@@ -811,6 +812,7 @@ impl App {
 
     /// Esc / q: back to the log, the cursor on the same commit.
     pub(super) fn close_commit(&mut self) {
+        self.session_capture();
         if let Some(i) = self.commit.take().and_then(|v| self.view_index(&v)) {
             self.cursor = i;
         }

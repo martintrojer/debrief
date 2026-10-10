@@ -1,0 +1,721 @@
+//! Saved review sessions in the app (spec §3 "Saved review sessions",
+//! Q31–Q35, Q42): `<leader>ss` saves the open commit's comments and view;
+//! opening a commit with a session restores its view (and, the first time
+//! this run, its unsent comments into the batch); the log marks such rows
+//! `▣N`; quitting with unsaved review work asks first; `<leader>rs` lists
+//! the sessions.
+//!
+//! Every commit visited this run has a [`Visit`]: its view as last seen
+//! and a dirty bit. The bit is set by user actions on the commit (motions,
+//! `T`, `t`, `<leader>e`, adding, editing or removing its comments) and
+//! cleared by saving it and by a successful send or copy of the batch.
+//! Quitting warns about a dirty commit that has a session or comments, and
+//! about a commit whose comments predate this run and that has no session.
+
+use std::collections::HashMap;
+
+use debrief_review::{Comment, Side};
+
+use super::commit::Focus;
+use super::keys::{Action, KeyResult, plain};
+use super::{App, Mode, Screen};
+use crate::session::{
+    self, SavedComment, Session, Store, View, ViewContext, ViewFocus, ViewLayout, WORKING,
+};
+use crate::vcs::{Context, Kind};
+
+/// The log marker of a commit with a session.
+pub const SESSION_MARKER: char = '▣';
+/// The quit prompt, in the status row.
+pub const QUIT_PROMPT: &str = "Unsaved review: s save · y copy · q quit · Esc cancel";
+/// Status of `<leader>ss` on the log.
+pub const OPEN_TO_SAVE: &str = "Open a commit to save its session";
+/// Status when `<leader>rs` picks a session whose commit isn't listed.
+pub const SESSION_NOT_IN_LOG: &str = "Commit not in the log";
+/// Status after `C-d` in the session list.
+pub const SESSION_DELETED: &str = "Session deleted";
+
+/// A commit visited this run.
+#[derive(Debug, Clone, Default)]
+pub(super) struct Visit {
+    /// The view as last captured (`None` until its diff loaded).
+    view: Option<View>,
+    summary: String,
+    change: Option<String>,
+    /// Changed by the user since it was last saved, sent or copied.
+    dirty: bool,
+}
+
+/// A view to put back once the diff loads (see [`App::session_put_back`]).
+#[derive(Debug, Clone)]
+pub(super) struct Restore {
+    col: usize,
+    /// Side by side: the side the cursor was on.
+    side: Option<Side>,
+    focus: ViewFocus,
+    /// The restore status message (a session read from disk).
+    status: Option<String>,
+}
+
+/// Session state owned by [`App`].
+#[derive(Debug)]
+pub(super) struct Sessions {
+    store: Store,
+    /// The sessions on disk, by key (commit ID or [`WORKING`]).
+    saved: HashMap<String, Session>,
+    visits: HashMap<String, Visit>,
+    /// Mode to go back to when the quit prompt is cancelled.
+    quit_from: Mode,
+    /// Unreadable session files already reported (once per run).
+    reported: std::collections::HashSet<String>,
+}
+
+impl Sessions {
+    pub(super) fn new(store: Store) -> Self {
+        Sessions {
+            store,
+            saved: HashMap::new(),
+            visits: HashMap::new(),
+            quit_from: Mode::Normal,
+            reported: Default::default(),
+        }
+    }
+}
+
+fn to_view_context(c: Context) -> ViewContext {
+    match c {
+        Context::Default => ViewContext::Hunks,
+        Context::Full => ViewContext::Full,
+    }
+}
+
+fn from_view_context(c: ViewContext) -> Context {
+    match c {
+        ViewContext::Hunks => Context::Default,
+        ViewContext::Full => Context::Full,
+    }
+}
+
+/// Comment `c` belongs to the session of `key` (S8): rev.commit == key;
+/// for the working copy every comment without a revision and removed-line
+/// comments on its base `base`.
+fn belongs(key: &str, c: &Comment, base: Option<&str>) -> bool {
+    match &c.rev {
+        None => key == WORKING,
+        Some(rev) if key == WORKING => {
+            c.side == Some(Side::Old) && base == Some(rev.commit.as_str())
+        }
+        Some(rev) => rev.commit == key,
+    }
+}
+
+/// `3 comments`, `1 comment`.
+fn comments_label(n: usize) -> String {
+    match n {
+        1 => "1 comment".to_string(),
+        n => format!("{n} comments"),
+    }
+}
+
+/// The age of unix time `then`, as the log shows it (`2h`).
+fn ago(then: u64) -> String {
+    super::age(session::now() as i64, then as i64)
+}
+
+/// Actions that change the open commit's view (and so its session).
+fn touches_view(a: Action) -> bool {
+    use Action as A;
+    matches!(
+        a,
+        A::Down(_)
+            | A::Up(_)
+            | A::GotoTop(_)
+            | A::GotoBottom(_)
+            | A::HalfPageDown
+            | A::HalfPageUp
+            | A::Left(_)
+            | A::Right(_)
+            | A::LineStart
+            | A::LineEnd(_)
+            | A::WordForward(_)
+            | A::WordBackward(_)
+            | A::WordEnd(_)
+            | A::ParagraphForward(_)
+            | A::ParagraphBackward(_)
+            | A::PageDown
+            | A::PageUp
+            | A::ScrollDown
+            | A::ScrollUp
+            | A::ScreenTop(_)
+            | A::ScreenMiddle
+            | A::ScreenBottom(_)
+            | A::Center
+            | A::CursorTop
+            | A::CursorBottom
+            | A::File(..)
+            | A::Hunk(..)
+            | A::ToggleContext
+            | A::ToggleLayout
+            | A::SwitchSide
+            | A::SearchNext(..)
+            | A::SearchCommit
+            | A::ToggleSidebar
+            | A::Focus(_)
+            | A::FileDown(_)
+            | A::FileUp(_)
+            | A::FileTop
+            | A::FileBottom
+            | A::FileOpen
+            | A::ReviewJump(..)
+    )
+}
+
+/// Keys of the quit prompt: `s` save, `y` copy, `q` quit, Esc cancel
+/// (`C-c` quits before the keymap).
+pub(super) fn quit_keymap(keys: &[KeyEvent]) -> KeyResult {
+    use crossterm::event::KeyCode;
+    let Some(k) = keys.last() else {
+        return KeyResult::None;
+    };
+    let a = match (k.code, plain(k)) {
+        (_, Some('s')) => QuitChoice::Save,
+        (_, Some('y')) => QuitChoice::Copy,
+        (_, Some('q')) => QuitChoice::Quit,
+        (KeyCode::Esc, _) => QuitChoice::Cancel,
+        _ => return KeyResult::None,
+    };
+    KeyResult::Action(Action::QuitPrompt(a))
+}
+
+use crossterm::event::KeyEvent;
+
+/// A key in the quit prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitChoice {
+    Save,
+    Copy,
+    Quit,
+    Cancel,
+}
+
+impl App {
+    /// Read the repo's sessions; each unreadable file is skipped and
+    /// reported once per run.
+    pub(super) fn sessions_load(&mut self) {
+        let (list, errors) = self.sessions.store.list();
+        self.sessions.saved = list.into_iter().map(|s| (s.commit.clone(), s)).collect();
+        let errors: Vec<String> = errors
+            .into_iter()
+            .filter(|e| self.sessions.reported.insert(e.clone()))
+            .collect();
+        if let Some(e) = errors.first() {
+            let more = match errors.len() {
+                1 => String::new(),
+                n => format!(" (and {} more)", n - 1),
+            };
+            self.set_status(format!("session skipped: {e}{more}"));
+        }
+    }
+
+    /// The session key of log row `i`: [`WORKING`] for the working copy.
+    fn row_key(&self, i: usize) -> Option<String> {
+        let r = self.rows.get(i)?;
+        Some(if r.working {
+            WORKING.to_string()
+        } else {
+            r.info.commit.clone()
+        })
+    }
+
+    /// The open view's session key.
+    fn open_key(&self) -> Option<String> {
+        let v = self.commit.as_ref()?;
+        Some(if v.working {
+            WORKING.to_string()
+        } else {
+            v.commit.clone()
+        })
+    }
+
+    /// The `▣` marker of a log row: `▣`, or `▣3` with unsent comments.
+    pub fn session_marker(&self, row: &super::Row) -> Option<String> {
+        let key = if row.working {
+            WORKING
+        } else {
+            row.info.commit.as_str()
+        };
+        let s = self.sessions.saved.get(key)?;
+        Some(match s.unsent_count() {
+            0 => SESSION_MARKER.to_string(),
+            n => format!("{SESSION_MARKER}{n}"),
+        })
+    }
+
+    /// The saved session of `key` (commit ID or `working-copy`), if any.
+    pub fn saved_session(&self, key: &str) -> Option<&Session> {
+        self.sessions.saved.get(key)
+    }
+
+    /// The working copy's base commit ID: git's `HEAD`, jj's single `@-`.
+    fn working_base_id(&self) -> Option<String> {
+        match self.vcs.kind() {
+            Kind::Git => Some(self.working.as_ref()?.base.as_ref()?.commit.clone()),
+            Kind::Jj => match &self.all_rows.iter().find(|r| r.working)?.info.parents[..] {
+                [one] => Some(one.clone()),
+                _ => None,
+            },
+        }
+    }
+
+    /// The batch's comments of commit `key` (S8): rev.commit == key; for
+    /// the working copy every comment without a revision and removed-line
+    /// comments on its base.
+    fn batch_comments(&self, key: &str) -> Vec<Comment> {
+        let Some(r) = &self.review else {
+            return Vec::new();
+        };
+        let base = (key == WORKING).then(|| self.working_base_id()).flatten();
+        r.comments()
+            .iter()
+            .filter(|c| belongs(key, c, base.as_deref()))
+            .cloned()
+            .collect()
+    }
+
+    /// The open view as a [`View`]; `None` before its diff loads.
+    fn current_view(&self) -> Option<View> {
+        let v = self.commit.as_ref()?;
+        v.diff.as_ref()?;
+        Some(View {
+            context: to_view_context(self.context),
+            layout: if self.split {
+                ViewLayout::Split
+            } else {
+                ViewLayout::Unified
+            },
+            sidebar: self.sidebar_on,
+            focus: match self.focus {
+                Focus::Diff => ViewFocus::Diff,
+                Focus::Files => ViewFocus::Files,
+            },
+            anchor: v.anchor(),
+            row: v.cur.row,
+            col: v.cur.col,
+        })
+    }
+
+    /// Remember the open view (when loaded) for its session, before it is
+    /// replaced or closed.
+    pub(super) fn session_capture(&mut self) {
+        let (Some(key), Some(view)) = (self.open_key(), self.current_view()) else {
+            return;
+        };
+        if let Some(visit) = self.sessions.visits.get_mut(&key) {
+            visit.view = Some(view);
+        }
+    }
+
+    /// Entering log row `i` (S2): for a commit with a session, before its
+    /// diff loads, put back the view captured this run, else the saved
+    /// one: context, layout and file list app-wide, as if `T` / `t` /
+    /// `<leader>e` were pressed; the cursor (and focus) once it loads. The first visit this run also restores
+    /// the session's unsent comments the batch lacks.
+    pub(super) fn session_enter(&mut self, i: usize) {
+        let Some(key) = self.row_key(i) else { return };
+        let info = self.rows[i].info.clone();
+        let first = !self.sessions.visits.contains_key(&key);
+        let visit = self.sessions.visits.entry(key.clone()).or_default();
+        visit.summary = info.summary.clone();
+        visit.change = info.change.clone();
+        let captured = visit.view.clone();
+        let mut status = None;
+        if first && self.sessions.saved.contains_key(&key) {
+            status = Some(self.session_restore_comments(&key));
+        }
+        // A commit without a session opens as before.
+        let Some(saved) = self.sessions.saved.get(&key) else {
+            return;
+        };
+        let view = captured.unwrap_or_else(|| saved.view.clone());
+        self.context = from_view_context(view.context);
+        self.split = view.layout == ViewLayout::Split;
+        self.sidebar_on = view.sidebar;
+        let Some(v) = &mut self.commit else { return };
+        let side = match &view.anchor {
+            Some(session::Anchor::Line { side, .. }) => Some(*side),
+            _ => None,
+        };
+        match view.anchor {
+            Some(a) => v.keep_anchor = Some((a, 0)),
+            None => v.keep_row = Some(view.row),
+        }
+        v.restore = Some(Restore {
+            col: view.col,
+            side,
+            focus: view.focus,
+            status,
+        });
+    }
+
+    /// Add the session's unsent comments the batch lacks (S6); a remapped
+    /// id is written back to the session. Returns the restore status.
+    fn session_restore_comments(&mut self, key: &str) -> String {
+        let Some(s) = self.sessions.saved.get(key).cloned() else {
+            return String::new();
+        };
+        let unsent: Vec<Comment> = s.unsent().cloned().collect();
+        let mut note = String::new();
+        if let Some(r) = &mut self.review
+            && !unsent.is_empty()
+        {
+            match r.restore(&unsent) {
+                Ok(map) => {
+                    let remapped: Vec<_> = map.iter().filter(|(a, b)| a != b).collect();
+                    if !remapped.is_empty() {
+                        let mut s = s.clone();
+                        for c in s.comments.iter_mut().filter(|c| c.sent.is_none()) {
+                            if let Some((_, new)) =
+                                remapped.iter().find(|(old, _)| *old == c.comment.id)
+                            {
+                                c.comment.id = *new;
+                            }
+                        }
+                        if let Err(e) = self.sessions.store.save(&s) {
+                            note = format!("; session not updated: {e}");
+                        }
+                        self.sessions.saved.insert(key.to_string(), s);
+                    }
+                }
+                Err(e) => note = format!("; comments not restored: {e}"),
+            }
+        }
+        format!(
+            "Restored session (saved {} ago, {}){note}",
+            ago(s.saved),
+            comments_label(s.unsent_count())
+        )
+    }
+
+    /// After a restored view's diff loads: the cursor column, the focus
+    /// and the restore message.
+    pub(super) fn session_put_back(&mut self, r: Restore) {
+        if let Some(v) = &mut self.commit {
+            // The layout follows the load (`commit_follow`): side by side
+            // puts the cursor back on its side.
+            if let (Some(want), Some(have)) = (r.side, v.split_side())
+                && want != have
+            {
+                v.swap_side();
+            }
+            v.set_col(r.col);
+            v.center_cursor();
+        }
+        self.refresh_search();
+        if r.focus == ViewFocus::Files && self.sidebar_visible() {
+            self.focus_pane(Focus::Files);
+        }
+        if let Some(msg) = r.status {
+            let s = if self.status.is_empty() {
+                msg
+            } else {
+                format!("{msg}; {}", self.status)
+            };
+            self.set_status(s);
+        }
+        self.commit_follow();
+    }
+
+    /// An action ran: one that changes the open commit's view marks it.
+    pub(super) fn session_after(&mut self, a: Action) {
+        if matches!(self.screen, Screen::Commit(_)) && touches_view(a) {
+            self.session_touch_open();
+        }
+    }
+
+    /// The open commit changed (its view or comments).
+    pub(super) fn session_touch_open(&mut self) {
+        if let Some(key) = self.open_key() {
+            self.session_touch(&key);
+        }
+    }
+
+    fn session_touch(&mut self, key: &str) {
+        if let Some(v) = self.sessions.visits.get_mut(key) {
+            v.dirty = true;
+        }
+    }
+
+    /// A comment was edited or removed outside the open view (the
+    /// `<leader>rl` list): mark the visited commits it belongs to.
+    pub(super) fn session_touch_comment(&mut self, c: &Comment) {
+        let base = self.working_base_id();
+        let keys: Vec<String> = self
+            .sessions
+            .visits
+            .keys()
+            .filter(|k| belongs(k, c, base.as_deref()))
+            .cloned()
+            .collect();
+        for k in keys {
+            self.session_touch(&k);
+        }
+    }
+
+    /// Commits with unsaved review work, in no particular order.
+    fn unsaved(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .sessions
+            .visits
+            .iter()
+            .filter(|(k, v)| {
+                let has_session = self.sessions.saved.contains_key(*k);
+                let has_comments = !self.batch_comments(k).is_empty();
+                (v.dirty && (has_session || has_comments)) || (has_comments && !has_session)
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// `q` on the log, `C-c` anywhere: quit, or ask first when there is
+    /// unsaved review work.
+    pub(super) fn quit_requested(&mut self) {
+        self.session_capture();
+        self.review_reload();
+        if self.unsaved().is_empty() {
+            self.quit = true;
+            return;
+        }
+        self.sessions.quit_from = self.mode;
+        self.pending.clear();
+        self.count = None;
+        self.mode = Mode::QuitPrompt;
+        self.set_status(QUIT_PROMPT);
+    }
+
+    /// A key in the quit prompt.
+    pub(super) fn quit_choice(&mut self, c: QuitChoice) {
+        match c {
+            QuitChoice::Quit => self.quit = true,
+            QuitChoice::Cancel => {
+                self.mode = self.sessions.quit_from;
+                self.status.clear();
+            }
+            QuitChoice::Save => {
+                self.mode = self.sessions.quit_from;
+                self.review_reload();
+                let keys = self.unsaved();
+                let mut saved = 0;
+                for k in &keys {
+                    match self.session_save_key(k) {
+                        Ok(_) => saved += 1,
+                        Err(e) => {
+                            return self.set_status(format!(
+                                "session not saved: {e} ({saved} of {} saved; not quitting)",
+                                keys.len()
+                            ));
+                        }
+                    }
+                }
+                self.quit = true;
+            }
+            QuitChoice::Copy => {
+                self.mode = self.sessions.quit_from;
+                match self.copy_batch() {
+                    Ok(()) => self.quit = true,
+                    Err(e) => self.set_status(format!("Review not copied: {e}")),
+                }
+            }
+        }
+    }
+
+    /// `y` in the quit prompt (S4): the batch to the clipboard (OSC 52,
+    /// written now), then the copied comments leave the batch and are
+    /// marked sent, as a send with the clipboard does.
+    fn copy_batch(&mut self) -> std::io::Result<()> {
+        let Some(r) = &mut self.review else {
+            return Ok(());
+        };
+        r.reload()?;
+        let ids: Vec<u64> = r.comments().iter().map(|c| c.id).collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let md = r.to_markdown(
+            self.config.send.preamble.as_deref(),
+            &self.config.review.kinds,
+        );
+        (self.terminal)(super::osc52(&md).as_bytes())?;
+        if let Some(r) = &mut self.review {
+            r.remove_all(&ids)?;
+        }
+        self.session_sent(&ids);
+        Ok(())
+    }
+
+    /// Comments `ids` were sent or copied by debrief (S12): their sessions
+    /// keep them marked sent, and every dirty bit clears.
+    pub(super) fn session_sent(&mut self, ids: &[u64]) {
+        for v in self.sessions.visits.values_mut() {
+            v.dirty = false;
+        }
+        let now = session::now();
+        let keys: Vec<String> = self.sessions.saved.keys().cloned().collect();
+        for k in keys {
+            let Some(s) = self.sessions.saved.get_mut(&k) else {
+                continue;
+            };
+            let mut changed = false;
+            for c in s.comments.iter_mut() {
+                if c.sent.is_none() && ids.contains(&c.comment.id) {
+                    c.sent = Some(now);
+                    changed = true;
+                }
+            }
+            if changed && let Err(e) = self.sessions.store.save(s) {
+                let msg = format!("{}; session not updated: {e}", self.status);
+                self.set_status(msg);
+            }
+        }
+    }
+
+    /// Write the session of `key` from the batch and its view (captured,
+    /// or the open one); returns how many comments it holds unsent.
+    fn session_save_key(&mut self, key: &str) -> std::io::Result<usize> {
+        if self.open_key().as_deref() == Some(key) {
+            self.session_capture();
+        }
+        let old = self.sessions.saved.get(key);
+        let visit = self.sessions.visits.get(key).cloned().unwrap_or_default();
+        let view = visit
+            .view
+            .clone()
+            .or_else(|| old.map(|s| s.view.clone()))
+            .unwrap_or_default();
+        let batch = self.batch_comments(key);
+        let mut comments: Vec<SavedComment> = old
+            .map(|s| {
+                s.comments
+                    .iter()
+                    .filter(|c| c.sent.is_some())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        comments.retain(|c| !batch.iter().any(|b| b.id == c.comment.id));
+        let n = batch.len();
+        comments.extend(batch.into_iter().map(|comment| SavedComment {
+            comment,
+            sent: None,
+        }));
+        let s = Session {
+            version: session::VERSION,
+            root: self.sessions.store.root().to_path_buf(),
+            commit: key.to_string(),
+            change: visit
+                .change
+                .clone()
+                .or_else(|| old.and_then(|s| s.change.clone())),
+            summary: if visit.summary.is_empty() {
+                old.map(|s| s.summary.clone()).unwrap_or_default()
+            } else {
+                visit.summary.clone()
+            },
+            saved: session::now(),
+            comments,
+            view,
+        };
+        self.sessions.store.save(&s)?;
+        self.sessions.saved.insert(key.to_string(), s);
+        if let Some(v) = self.sessions.visits.get_mut(key) {
+            v.dirty = false;
+        }
+        Ok(n)
+    }
+
+    /// `<leader>ss`: save the open commit's session.
+    pub(super) fn session_save(&mut self) {
+        let Some(key) = self
+            .open_key()
+            .filter(|_| matches!(self.screen, Screen::Commit(_)))
+        else {
+            return self.set_status(OPEN_TO_SAVE);
+        };
+        self.review_reload();
+        let msg = match self.session_save_key(&key) {
+            Ok(n) => format!("Session saved ({})", comments_label(n)),
+            Err(e) => format!("session not saved: {e}"),
+        };
+        self.set_status(msg);
+    }
+
+    /// The repo's sessions for the `<leader>rs` list, newest save first.
+    pub(super) fn session_items(&self) -> Vec<super::PickerItem> {
+        let mut list: Vec<&Session> = self.sessions.saved.values().collect();
+        list.sort_by(|a, b| b.saved.cmp(&a.saved).then_with(|| a.commit.cmp(&b.commit)));
+        list.into_iter()
+            .map(|s| {
+                let short = if s.commit == WORKING {
+                    "working copy".to_string()
+                } else {
+                    let id = s.change.as_deref().unwrap_or(&s.commit);
+                    id.chars().take(8).collect()
+                };
+                let sent = match s.sent_count() {
+                    0 => String::new(),
+                    n => format!(" ({n} sent)"),
+                };
+                super::PickerItem {
+                    id: 0,
+                    key: s.commit.clone(),
+                    label: format!("{short} {}", s.summary),
+                    detail: format!(
+                        "{} ago, {}{sent}",
+                        ago(s.saved),
+                        comments_label(s.comments.len())
+                    ),
+                }
+            })
+            .collect()
+    }
+
+    /// `<leader>rs`: re-read the sessions and list them.
+    pub(super) fn session_list(&mut self) {
+        self.sessions_load();
+        self.picker_open_kind(super::picker::PickerKind::Sessions);
+    }
+
+    /// Enter in the session list: open its commit, if listed.
+    pub(super) fn session_goto(&mut self, key: &str) {
+        let i = if key == WORKING {
+            self.working_index()
+        } else {
+            if self.unfilter_for(key) {
+                self.commit_reindex();
+            }
+            self.rows.iter().position(|r| r.info.commit == key)
+        };
+        match i {
+            Some(i) => self.open_index(i),
+            None => self.set_status(SESSION_NOT_IN_LOG),
+        }
+    }
+
+    /// `C-d` in the session list.
+    pub(super) fn session_delete(&mut self, key: &str) {
+        let msg = match self.sessions.store.delete(key) {
+            Ok(()) => {
+                self.sessions.saved.remove(key);
+                SESSION_DELETED.to_string()
+            }
+            Err(e) => format!("session not deleted: {e}"),
+        };
+        self.set_status(msg);
+    }
+
+    /// Where this repo's sessions are stored.
+    pub fn sessions_dir(&self) -> &std::path::Path {
+        self.sessions.store.dir()
+    }
+}

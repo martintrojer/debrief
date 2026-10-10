@@ -1,6 +1,8 @@
 //! The log: one row per commit, newest first:
 //! `<marker> <short id> <age> <author> <summary>`. git's working copy
-//! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker.
+//! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker. A
+//! commit with a saved review session ends its row with `▣` (`▣3`: three
+//! unsent comments).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -91,6 +93,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             if r.working {
                 (m, mc) = (WORKING_MARKER, palette::YELLOW);
             }
+            let session = app.session_marker(r);
             let mut base = Style::new().fg(palette::TEXT);
             if i == app.cursor() {
                 base = base.bg(palette::SURFACE);
@@ -104,6 +107,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 spans.extend(hl(r.info.summary.clone(), base.fg(palette::YELLOW), &pats));
                 spans.push(Span::styled("  ", base));
                 spans.push(Span::styled(files, base.fg(palette::OVERLAY)));
+                if let Some(s) = &session {
+                    spans.push(Span::styled(format!("  {s}"), base.fg(palette::TEAL)));
+                }
                 return Line::from(spans).style(base);
             }
             let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
@@ -122,6 +128,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 &pats,
             ));
             spans.push(Span::styled(" ", base));
+            if let Some(s) = session {
+                spans.push(Span::styled(format!("{s} "), base.fg(palette::TEAL)));
+            }
             spans.extend(hl(r.info.summary.clone(), base, &pats));
             Line::from(spans).style(base)
         })

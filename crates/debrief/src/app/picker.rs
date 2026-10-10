@@ -1,9 +1,11 @@
 //! `<leader>rl`: a picker over the whole batch (ramble's comments too),
+//! `<leader>rs`: the same picker over the repo's saved review sessions,
 //! and `<leader>rr`: the hand-back (spec §3 "Comments", AMEND H).
 //!
 //! Typed text filters (case-insensitive substring over label and body);
-//! `C-n`/`C-p` or Down/Up move; Enter goes to the comment; `C-d` removes
-//! it; `C-e` edits its body in `$EDITOR`; Esc closes.
+//! `C-n`/`C-p` or Down/Up move; Enter goes to the comment (opens the
+//! session's commit); `C-d` removes it (deletes the session); `C-e` edits
+//! a comment's body in `$EDITOR`; Esc closes.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief_review::Comment;
@@ -17,6 +19,20 @@ use super::{App, Mode, Screen};
 pub const PICKER_TITLE: &str = "Review comments";
 /// The keys shown under the list.
 pub const PICKER_FOOTER: &str = "Enter go  C-d remove  C-e edit  Esc close";
+/// The session list's title.
+pub const SESSIONS_TITLE: &str = "Review sessions";
+/// The keys shown under the session list.
+pub const SESSIONS_FOOTER: &str = "Enter open  C-d delete  Esc close";
+
+/// What the picker lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PickerKind {
+    /// `<leader>rl`: the batch's comments.
+    #[default]
+    Comments,
+    /// `<leader>rs`: the saved review sessions.
+    Sessions,
+}
 /// Status when `<leader>rr` finds an empty batch.
 pub const NOTHING_TO_SEND: &str = "No comments to send";
 /// Status when Enter picks a diff comment whose commit isn't listed.
@@ -38,7 +54,11 @@ pub enum PickerAction {
 /// One row of the picker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerItem {
+    /// The comment's id (0 for a session).
     pub id: u64,
+    /// The session's key: its commit ID or `working-copy` (empty for a
+    /// comment).
+    pub key: String,
     /// `path:lines` and, for diff comments, ` @<short commit>` and the side.
     pub label: String,
     /// The kind (`[ISSUE] `) and the body's first line.
@@ -48,6 +68,7 @@ pub struct PickerItem {
 /// Picker state owned by [`App`].
 #[derive(Debug, Clone, Default)]
 pub(super) struct Picker {
+    kind: PickerKind,
     items: Vec<PickerItem>,
     /// Indices into `items` matching `input`.
     filtered: Vec<usize>,
@@ -58,6 +79,7 @@ pub(super) struct Picker {
 /// What the UI draws for the open picker.
 #[derive(Debug, Clone)]
 pub struct PickerView<'a> {
+    pub kind: PickerKind,
     pub title: &'static str,
     pub input: &'a str,
     pub items: Vec<&'a PickerItem>,
@@ -82,6 +104,12 @@ impl Picker {
     fn selected_id(&self) -> Option<u64> {
         self.filtered.get(self.selected).map(|&i| self.items[i].id)
     }
+
+    fn selected_key(&self) -> Option<String> {
+        self.filtered
+            .get(self.selected)
+            .map(|&i| self.items[i].key.clone())
+    }
 }
 
 fn item(c: &Comment) -> PickerItem {
@@ -101,6 +129,7 @@ fn item(c: &Comment) -> PickerItem {
     });
     PickerItem {
         id: c.id,
+        key: String::new(),
         label: format!("{}:{lines}{rev}", c.path),
         detail: format!(
             "{}{}",
@@ -137,12 +166,17 @@ impl App {
     /// The open picker, for drawing and tests.
     pub fn picker(&self) -> Option<PickerView<'_>> {
         let p = self.picker.as_ref()?;
+        let (title, footer) = match p.kind {
+            PickerKind::Comments => (PICKER_TITLE, PICKER_FOOTER),
+            PickerKind::Sessions => (SESSIONS_TITLE, SESSIONS_FOOTER),
+        };
         Some(PickerView {
-            title: PICKER_TITLE,
+            kind: p.kind,
+            title,
             input: &p.input,
             items: p.filtered.iter().map(|&i| &p.items[i]).collect(),
             selected: p.selected,
-            footer: PICKER_FOOTER,
+            footer,
         })
     }
 
@@ -152,19 +186,44 @@ impl App {
             return self.set_status(super::review::NO_BATCH);
         }
         self.review_reload();
-        self.picker = Some(Picker::default());
-        self.picker_refresh();
+        self.picker_open_kind(PickerKind::Comments);
+    }
+
+    pub(super) fn picker_open_kind(&mut self, kind: PickerKind) {
+        self.picker = Some(Picker {
+            kind,
+            ..Picker::default()
+        });
+        self.picker_rebuild();
         self.mode = Mode::Picker;
     }
 
-    /// Rebuild the items from the batch, keeping the filter and, as near
-    /// as it can, the selection.
+    /// The batch changed: rebuild an open comment list (the session list
+    /// doesn't follow the batch).
     pub(super) fn picker_refresh(&mut self) {
-        let items: Vec<PickerItem> = self
-            .review
+        if self
+            .picker
             .as_ref()
-            .map(|r| r.comments().iter().map(item).collect())
-            .unwrap_or_default();
+            .is_some_and(|p| p.kind == PickerKind::Comments)
+        {
+            self.picker_rebuild();
+        }
+    }
+
+    /// Rebuild the items, keeping the filter and, as near as it can, the
+    /// selection.
+    fn picker_rebuild(&mut self) {
+        let Some(kind) = self.picker.as_ref().map(|p| p.kind) else {
+            return;
+        };
+        let items: Vec<PickerItem> = match kind {
+            PickerKind::Comments => self
+                .review
+                .as_ref()
+                .map(|r| r.comments().iter().map(item).collect())
+                .unwrap_or_default(),
+            PickerKind::Sessions => self.session_items(),
+        };
         if let Some(p) = &mut self.picker {
             p.items = items;
             p.refilter();
@@ -210,6 +269,19 @@ impl App {
             }
             PickerAction::Next | PickerAction::Prev => {}
             PickerAction::Close => self.picker_close(),
+            PickerAction::Accept if p.kind == PickerKind::Sessions => {
+                let key = p.selected_key();
+                self.picker_close();
+                if let Some(key) = key {
+                    self.session_goto(&key);
+                }
+            }
+            PickerAction::Remove if p.kind == PickerKind::Sessions => {
+                let Some(key) = p.selected_key() else { return };
+                self.session_delete(&key);
+                self.picker_rebuild();
+            }
+            PickerAction::Edit if p.kind == PickerKind::Sessions => {}
             PickerAction::Accept => {
                 let id = p.selected_id();
                 self.picker_close();
@@ -219,6 +291,13 @@ impl App {
             }
             PickerAction::Remove => {
                 let Some(id) = p.selected_id() else { return };
+                let gone = self
+                    .review
+                    .as_ref()
+                    .and_then(|r| r.comments().iter().find(|c| c.id == id).cloned());
+                if let Some(c) = &gone {
+                    self.session_touch_comment(c);
+                }
                 let Some(r) = &mut self.review else { return };
                 let msg = match r.remove(id) {
                     Ok(_) => format!("Comment removed ({} in batch)", r.comments().len()),
@@ -316,6 +395,13 @@ impl App {
         if body.is_empty() {
             return self.set_status("Empty comment not saved (C-d removes it)");
         }
+        let edited = self
+            .review
+            .as_ref()
+            .and_then(|r| r.comments().iter().find(|c| c.id == id).cloned());
+        if let Some(c) = &edited {
+            self.session_touch_comment(c);
+        }
         let Some(r) = &mut self.review else { return };
         let msg = match r.edit(id, body) {
             Ok(true) => "Comment edited".to_string(),
@@ -372,6 +458,7 @@ impl App {
             ),
         };
         self.set_status(msg);
+        self.session_sent(&ids);
         self.picker_refresh();
     }
 

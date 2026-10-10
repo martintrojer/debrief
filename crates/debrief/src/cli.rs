@@ -1,5 +1,5 @@
 //! Command line: `debrief [PATH] [--revset R] [--limit N] [--cache-dir DIR]
-//! [--config PATH] [--no-snapshot]`, or `debrief --init-config [--config PATH]`.
+//! [--state-dir DIR] [--config PATH] [--no-snapshot]`, or `debrief --init-config [--config PATH]`.
 
 use std::path::PathBuf;
 
@@ -28,6 +28,10 @@ pub struct Cli {
     /// `debrief`, or `$DEBRIEF_CACHE_DIR`).
     #[arg(long, value_name = "DIR")]
     pub cache_dir: Option<PathBuf>,
+    /// Where saved review sessions live (default: `$DEBRIEF_STATE_DIR`,
+    /// else `$XDG_STATE_HOME/debrief` or `~/.local/state/debrief`).
+    #[arg(long, value_name = "DIR")]
+    pub state_dir: Option<PathBuf>,
     /// Config file (default: `$XDG_CONFIG_HOME/debrief/config.toml`, else
     /// `~/.config/debrief/config.toml`).
     #[arg(long, value_name = "PATH")]
@@ -59,15 +63,19 @@ impl Cli {
     }
 
     /// The start options; `default_cache` is `debrief_review::cache_dir()`,
-    /// `default_config` is `Config::default_path()` (a missing file is the
-    /// defaults).
+    /// `default_state` is `session::state_dir()`, `default_config` is
+    /// `Config::default_path()` (a missing file is the defaults).
     pub fn start_options(
         &self,
         default_cache: Option<PathBuf>,
+        default_state: Option<PathBuf>,
         default_config: Option<PathBuf>,
     ) -> Result<StartOptions, StartError> {
         let cache_dir = self.cache_dir.clone().or(default_cache).ok_or_else(|| {
             StartError("debrief: cannot determine cache directory; use --cache-dir".into())
+        })?;
+        let state_dir = self.state_dir.clone().or(default_state).ok_or_else(|| {
+            StartError("debrief: cannot determine state directory; use --state-dir".into())
         })?;
         let config = match self.config.clone().or(default_config) {
             Some(p) => Config::load(&p).map_err(|e| StartError(format!("debrief: {e:#}")))?,
@@ -75,6 +83,7 @@ impl Cli {
         };
         Ok(StartOptions {
             cache_dir,
+            state_dir,
             revset: self.revset.clone(),
             limit: self.limit,
             config,
@@ -114,11 +123,14 @@ mod tests {
             "5",
             "--cache-dir",
             "/c",
+            "--state-dir",
+            "/s",
         ])
         .unwrap();
         assert_eq!(c.path(), PathBuf::from("repo"));
-        let o = c.start_options(None, None).unwrap();
+        let o = c.start_options(None, None, None).unwrap();
         assert_eq!(o.cache_dir, PathBuf::from("/c"));
+        assert_eq!(o.state_dir, PathBuf::from("/s"));
         assert_eq!(o.revset.as_deref(), Some("main.."));
         assert_eq!(o.limit, 5);
         assert!(c.open_options().snapshot);
@@ -130,12 +142,15 @@ mod tests {
     fn defaults() {
         let c = Cli::try_parse_from(["debrief"]).unwrap();
         assert_eq!(c.path(), PathBuf::from("."));
-        let o = c.start_options(Some("/d/debrief".into()), None).unwrap();
+        let o = c
+            .start_options(Some("/d/debrief".into()), Some("/s/debrief".into()), None)
+            .unwrap();
         assert_eq!(
             o.cache_dir,
             PathBuf::from("/d/debrief"),
             "no extra /debrief"
         );
+        assert_eq!(o.state_dir, PathBuf::from("/s/debrief"));
         assert_eq!(o.limit, 200);
         assert_eq!(o.revset, None);
     }
@@ -144,8 +159,16 @@ mod tests {
     fn no_cache_dir_is_an_error() {
         let c = Cli::try_parse_from(["debrief"]).unwrap();
         assert_eq!(
-            c.start_options(None, None).unwrap_err().0,
+            c.start_options(None, Some("/s".into()), None)
+                .unwrap_err()
+                .0,
             "debrief: cannot determine cache directory; use --cache-dir"
+        );
+        assert_eq!(
+            c.start_options(Some("/c".into()), None, None)
+                .unwrap_err()
+                .0,
+            "debrief: cannot determine state directory; use --state-dir"
         );
     }
 
@@ -156,7 +179,7 @@ mod tests {
         std::fs::write(&p, "[send]\ncommand = [\"x\"]\n").unwrap();
         let c = Cli::try_parse_from(["debrief", "--config", p.to_str().unwrap()]).unwrap();
         assert_eq!(
-            c.start_options(Some("/d".into()), None)
+            c.start_options(Some("/d".into()), Some("/s".into()), None)
                 .unwrap()
                 .config
                 .send
@@ -164,7 +187,10 @@ mod tests {
             ["x"]
         );
         std::fs::write(&p, "[bad]\n").unwrap();
-        let e = c.start_options(Some("/d".into()), None).unwrap_err().0;
+        let e = c
+            .start_options(Some("/d".into()), Some("/s".into()), None)
+            .unwrap_err()
+            .0;
         assert!(
             e.starts_with(&format!(
                 "debrief: config error at {} line 1: ",

@@ -18,6 +18,7 @@ pub mod picker;
 pub mod review;
 pub mod run;
 pub mod search;
+pub mod session;
 pub mod sidebar;
 pub mod split;
 pub mod stat;
@@ -44,7 +45,8 @@ pub use keys::{LEADER, TOGGLES};
 pub use launch::{Effect, Exit, LaunchCommand};
 pub use log::{WORKING_ID, age, is_zero_id, short_id};
 pub use motion::Cursor;
-pub use picker::{PickerAction, PickerItem, PickerView};
+pub use picker::{PickerAction, PickerItem, PickerKind, PickerView};
+pub use session::QuitChoice;
 pub use stat::{LogLayout, StatPane};
 pub use visual::osc52;
 
@@ -56,6 +58,8 @@ pub const DEFAULT_LIMIT: usize = 200;
 pub struct StartOptions {
     /// The debrief cache dir (seen state and, later, reviews live under it).
     pub cache_dir: PathBuf,
+    /// The debrief state dir (saved review sessions live under it).
+    pub state_dir: PathBuf,
     pub revset: Option<String>,
     pub limit: usize,
     /// `~/.config/debrief/config.toml` over the defaults.
@@ -63,8 +67,11 @@ pub struct StartOptions {
 }
 
 impl StartOptions {
+    /// Options with `cache_dir`, and the state dir inside it (so tests
+    /// never touch the user's).
     pub fn new(cache_dir: PathBuf) -> Self {
         StartOptions {
+            state_dir: cache_dir.join("state"),
             cache_dir,
             revset: None,
             limit: DEFAULT_LIMIT,
@@ -158,8 +165,10 @@ pub enum Mode {
     Comment,
     /// The `K` popup.
     Popup,
-    /// The `<leader>rl` picker.
+    /// The `<leader>rl` / `<leader>rs` picker.
     Picker,
+    /// "Unsaved review: s save · y copy · q quit · Esc cancel".
+    QuitPrompt,
 }
 
 /// One log row: the commit and how it shows.
@@ -248,6 +257,8 @@ pub struct App {
     /// Writes and flushes bytes to the terminal (stdout; a send's OSC 52
     /// clipboard copy goes through it so its IO error is seen).
     terminal: Box<TerminalWriter>,
+    /// Saved review sessions and the commits visited this run.
+    sessions: session::Sessions,
 }
 
 /// Writes bytes straight to the terminal and flushes them.
@@ -267,6 +278,8 @@ impl App {
         use anyhow::Context;
         let seen = Seen::open(&opts.cache_dir, vcs.root())
             .with_context(|| format!("cannot read seen state in {}", opts.cache_dir.display()))?;
+        let opts_state = opts.state_dir.clone();
+        let root = vcs.root().to_path_buf();
         let mut app = App {
             vcs,
             opts,
@@ -313,6 +326,7 @@ impl App {
             picker: None,
             after_export: None,
             terminal: Box::new(stdout_write),
+            sessions: session::Sessions::new(crate::session::Store::new(&opts_state, &root)),
         };
         app.review_open();
         app.config = app.opts.config.clone();
@@ -334,6 +348,7 @@ impl App {
         }
         app.set_rows(commits);
         app.cursor = app.first_unseen().unwrap_or(0);
+        app.sessions_load();
         Ok(app)
     }
 

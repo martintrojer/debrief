@@ -35,6 +35,11 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(Paragraph::new(p).style(base), area);
         return;
     }
+    if app.mode() == Mode::QuitPrompt {
+        let p = format!(" {}", crate::app::session::QUIT_PROMPT);
+        frame.render_widget(Paragraph::new(p).style(base.fg(palette::YELLOW)), area);
+        return;
+    }
     if let Screen::Commit(_) = app.screen() {
         return draw_commit(frame, app, area, base);
     }

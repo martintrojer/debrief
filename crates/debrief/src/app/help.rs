@@ -32,8 +32,10 @@ pub(crate) enum Ctx {
     Comment,
     /// The `K` popup is open.
     Popup,
-    /// The `<leader>rl` picker is open.
+    /// The `<leader>rl` / `<leader>rs` picker is open.
     Picker,
+    /// The quit prompt (unsaved review work).
+    Quit,
     /// The help overlay is open.
     Help,
 }
@@ -108,12 +110,22 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 pub(crate) const BINDINGS: &[Binding] = {
     use Ctx::{
         Comment as P, Commit as C, Files as F, Filter as Fl, Help as H, Log as L, Picker as R,
-        Popup as K, Search as S, Visual as V,
+        Popup as K, Quit as Q, Search as S, Visual as V,
     };
     use Group as G;
     &[
-        b("q", L, G::General, "quit"),
-        b("C-c", L, G::General, "quit"),
+        b(
+            "q",
+            L,
+            G::General,
+            "quit (asks first with unsaved review work)",
+        ),
+        b(
+            "C-c",
+            L,
+            G::General,
+            "quit (asks first with unsaved review work)",
+        ),
         b("g?", L, G::General, "help"),
         b("j, Down", L, G::Motions, "down"),
         b("k, Up", L, G::Motions, "up"),
@@ -138,7 +150,12 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Esc", Fl, G::Log, "in the filter: clear it"),
         b("Backspace", Fl, G::Log, "in the filter: delete a character"),
         b("q, Esc", C, G::General, "back to the log"),
-        b("C-c", C, G::General, "quit"),
+        b(
+            "C-c",
+            C,
+            G::General,
+            "quit (asks first with unsaved review work)",
+        ),
         b("g?", C, G::General, "help"),
         b("j, Down", C, G::Motions, "down"),
         b("k, Up", C, G::Motions, "up"),
@@ -252,8 +269,39 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("<leader>rr", C, G::Review, "send the review"),
         b("<leader>rl", F, G::Review, "list the review comments"),
         b("<leader>rr", F, G::Review, "send the review"),
-        b("Enter", R, G::Review, "in the list: go to the comment"),
-        b("C-d", R, G::Review, "in the list: remove the comment"),
+        b(
+            "<leader>ss",
+            L,
+            G::Review,
+            "save the review session (of an open commit)",
+        ),
+        b("<leader>rs", L, G::Review, "list the saved review sessions"),
+        b(
+            "<leader>ss",
+            C,
+            G::Review,
+            "save this commit's review session",
+        ),
+        b("<leader>rs", C, G::Review, "list the saved review sessions"),
+        b(
+            "<leader>ss",
+            F,
+            G::Review,
+            "save this commit's review session",
+        ),
+        b("<leader>rs", F, G::Review, "list the saved review sessions"),
+        b(
+            "Enter",
+            R,
+            G::Review,
+            "in the list: go to the comment (open the session's commit)",
+        ),
+        b(
+            "C-d",
+            R,
+            G::Review,
+            "in the list: remove the comment (delete the session)",
+        ),
         b(
             "C-e",
             R,
@@ -273,6 +321,21 @@ pub(crate) const BINDINGS: &[Binding] = {
             G::Review,
             "in the list: delete a filter character",
         ),
+        b(
+            "s",
+            Q,
+            G::General,
+            "unsaved review: save the sessions and quit",
+        ),
+        b(
+            "y",
+            Q,
+            G::General,
+            "unsaved review: copy the batch and quit",
+        ),
+        b("q", Q, G::General, "unsaved review: quit"),
+        b("C-c", Q, G::General, "unsaved review: quit"),
+        b("Esc", Q, G::General, "unsaved review: stay"),
         b("j, Down", H, G::Help, "in help: scroll down"),
         b("k, Up", H, G::Help, "in help: scroll up"),
         b("C-d, C-u", H, G::Help, "in help: half page"),
@@ -507,7 +570,7 @@ impl App {
             Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }
-            Ctx::Search | Ctx::Picker | Ctx::Help => true,
+            Ctx::Search | Ctx::Picker | Ctx::Quit | Ctx::Help => true,
         }
     }
 
@@ -526,6 +589,7 @@ impl App {
             Ctx::Comment => commit && self.mode == Mode::Comment,
             Ctx::Popup => commit && self.mode == Mode::Popup,
             Ctx::Picker => self.mode == Mode::Picker,
+            Ctx::Quit => self.mode == Mode::QuitPrompt,
             Ctx::Help => false,
         }
     }
@@ -665,7 +729,10 @@ pub(super) mod tests {
 
     pub(crate) fn in_ctx(ctx: Ctx) -> (tempfile::TempDir, App) {
         let (t, mut a) = app();
-        if !matches!(ctx, Ctx::Log | Ctx::Help | Ctx::Picker | Ctx::Filter) {
+        if !matches!(
+            ctx,
+            Ctx::Log | Ctx::Help | Ctx::Picker | Ctx::Filter | Ctx::Quit
+        ) {
             a.open_index(0);
             assert!(!a.commit_rows().is_empty());
         }
@@ -678,6 +745,7 @@ pub(super) mod tests {
             Ctx::Comment => a.mode = Mode::Comment,
             Ctx::Popup => a.mode = Mode::Popup,
             Ctx::Picker => a.picker_open(),
+            Ctx::Quit => a.mode = Mode::QuitPrompt,
             Ctx::Filter => a.filter_start(),
             Ctx::Log | Ctx::Commit => {}
         }
@@ -696,6 +764,7 @@ pub(super) mod tests {
             Ctx::Comment,
             Ctx::Popup,
             Ctx::Picker,
+            Ctx::Quit,
             Ctx::Help,
         ];
         let apps: Vec<_> = ctxs.iter().map(|&c| (c, in_ctx(c))).collect();
@@ -717,7 +786,14 @@ pub(super) mod tests {
     /// binds in each context has a help row there.
     #[test]
     fn every_key_has_a_row() {
-        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Visual, Ctx::Popup] {
+        for ctx in [
+            Ctx::Log,
+            Ctx::Commit,
+            Ctx::Files,
+            Ctx::Visual,
+            Ctx::Popup,
+            Ctx::Quit,
+        ] {
             let (_t, a) = in_ctx(ctx);
             every_key_has_a_row_in(&a, ctx);
         }

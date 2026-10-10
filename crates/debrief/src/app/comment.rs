@@ -734,6 +734,7 @@ impl App {
             Err(e) => format!("comment not saved: {e}"),
         };
         self.set_status(msg);
+        self.session_touch_open();
     }
 
     /// `C-e` (TUI suspended): edit the text in the editor, save what it

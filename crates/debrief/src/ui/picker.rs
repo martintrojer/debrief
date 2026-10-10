@@ -1,5 +1,6 @@
-//! The `<leader>rl` picker: a centered box with the filter line, the
-//! matching comments (`path:lines @commit  body`) and the keys.
+//! The `<leader>rl` / `<leader>rs` picker: a centered box with the filter
+//! line, the matching comments (`path:lines @commit  body`) or sessions
+//! (`id summary  age, comments`) and the keys.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -38,10 +39,11 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let h = list.height as usize;
     let skip = (view.selected + 1).saturating_sub(h);
     let lines: Vec<Line> = if view.items.is_empty() {
-        vec![Line::from(Span::styled(
-            "No comments",
-            base.fg(palette::OVERLAY),
-        ))]
+        let empty = match view.kind {
+            crate::app::PickerKind::Comments => "No comments",
+            crate::app::PickerKind::Sessions => "No sessions",
+        };
+        vec![Line::from(Span::styled(empty, base.fg(palette::OVERLAY)))]
     } else {
         view.items
             .iter()

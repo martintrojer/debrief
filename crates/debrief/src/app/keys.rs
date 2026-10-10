@@ -136,6 +136,12 @@ pub enum Action {
     ReviewList,
     /// `<leader>rr`.
     ReviewSend,
+    /// `<leader>ss`: save the open commit's review session.
+    SessionSave,
+    /// `<leader>rs`: list the saved review sessions.
+    SessionList,
+    /// Keys in the quit prompt.
+    QuitPrompt(super::session::QuitChoice),
     /// Keys in the `<leader>rl` picker.
     Picker(super::picker::PickerAction),
     /// Log: `f` opens the filter prompt.
@@ -182,7 +188,12 @@ impl App {
             return;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            self.quit = true;
+            // A second C-c (in the quit prompt) quits.
+            if self.mode == Mode::QuitPrompt {
+                self.quit = true;
+            } else {
+                self.quit_requested();
+            }
             return;
         }
         if key.code == KeyCode::Esc && (!self.pending.is_empty() || self.count.is_some()) {
@@ -208,6 +219,7 @@ impl App {
                 self.count = None;
                 self.status.clear();
                 self.apply(a);
+                self.session_after(a);
             }
             KeyResult::None => self.count = None,
         }
@@ -238,6 +250,7 @@ impl App {
     /// Meaning of `keys` in the current mode and screen.
     pub fn keymap(&self, keys: &[KeyEvent]) -> KeyResult {
         match (self.mode, self.screen) {
+            (Mode::QuitPrompt, _) => super::session::quit_keymap(keys),
             (Mode::Help, _) => super::help::help_keymap(self, keys),
             (Mode::Picker, _) => super::picker::picker_keymap(keys),
             (Mode::Filter, _) => filter_keymap(keys),
@@ -283,7 +296,7 @@ impl App {
 
     /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
     /// prefix waits for more keys), then the built-ins (`e` on the commit
-    /// screen, `rl`, `rr`), as in ramble. `e` toggles the file list on
+    /// screen, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
     /// the commit screen and the stats pane on the log.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
         let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
@@ -294,10 +307,12 @@ impl App {
             LeaderMatch::Launch(i) => KeyResult::Action(Action::Launch(i)),
             LeaderMatch::Pending => KeyResult::Pending,
             LeaderMatch::NoMapping => match typed.as_slice() {
-                [] | ['r'] => KeyResult::Pending,
+                [] | ['r'] | ['s'] => KeyResult::Pending,
                 ['e'] => KeyResult::Action(Action::ToggleSidebar),
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
+                ['r', 's'] => KeyResult::Action(Action::SessionList),
+                ['s', 's'] => KeyResult::Action(Action::SessionSave),
                 _ => KeyResult::None,
             },
         }
@@ -494,13 +509,24 @@ impl App {
         let n = |c: Option<usize>| c.unwrap_or(1).max(1) as isize;
         let shared = matches!(
             action,
-            A::Quit | A::Help(_) | A::Launch(_) | A::ReviewList | A::ReviewSend | A::Picker(_)
+            A::Quit
+                | A::Help(_)
+                | A::Launch(_)
+                | A::ReviewList
+                | A::ReviewSend
+                | A::Picker(_)
+                | A::SessionSave
+                | A::SessionList
+                | A::QuitPrompt(_)
         );
         if matches!(self.screen, Screen::Commit(_)) && !shared {
             return self.apply_commit(action);
         }
         match action {
-            A::Quit => self.quit = true,
+            A::Quit => self.quit_requested(),
+            A::QuitPrompt(c) => self.quit_choice(c),
+            A::SessionSave => self.session_save(),
+            A::SessionList => self.session_list(),
             A::Down(c) => self.vertical(n(c)),
             A::Up(c) => self.vertical(-n(c)),
             A::GotoTop(c) => self.goto_row(c.map_or(0, |c| c.saturating_sub(1))),
@@ -659,6 +685,8 @@ fn visual_ok(a: Action) -> bool {
             | A::PopupMove(_)
             | A::ReviewList
             | A::ReviewSend
+            | A::SessionSave
+            | A::SessionList
     )
 }
 

@@ -198,9 +198,9 @@ fn tail(s: &str, width: usize) -> &str {
 }
 
 /// `s` in at most `width` columns, cut in the middle with `…` when it
-/// does not fit (ramble's rule): the end keeps at least its last 6
-/// columns, or the whole extension if that is longer, and up to half the
-/// room: `long_mod…_name.rs`.
+/// does not fit (ramble's rule): the end keeps the longest of its last
+/// 6 columns, its whole extension and half the room, capped at the room:
+/// `long_mod…_name.rs`.
 pub fn clip_middle(s: &str, width: usize) -> String {
     if s.width() <= width {
         return s.to_string();

@@ -171,9 +171,8 @@ optional kind.
 
 - Side by side, a diff comment takes the cursor's side. In unified view
   it uses the new side unless every selected line was removed. On the
-  working copy, added and context lines make revision-less comments with
-  on-disk line numbers, so ramble shows them; removed lines anchor to the
-  base's old side. A renamed file's old-side
+  working copy, a new-side comment has no revision (on-disk line numbers,
+  so ramble shows it); an old-side comment anchors to the base's old side. A renamed file's old-side
   comments use its old path.
 - A comment marks gutter rows when its revision is the displayed commit.
   On the working copy, revision-less comments and old-side comments on
@@ -203,7 +202,8 @@ optional kind.
 The batch stays the live working set, shared with ramble and sent by
 `<leader>rr`. A session is written when the user saves (`<leader>ss`, or
 `s` at the quit warning), and updated afterwards when a restore remaps a
-comment id or a send marks its comments sent, so a review keeps its
+comment id or a send or copy (`<leader>rr`, `y` at the quit warning)
+marks its comments sent, so a review keeps its
 history and is never resent. Restoring adds back unsent comments the
 batch lacks, under their old ids when free. Each commit visited this run
 has a dirty bit, set by user actions on it and cleared by a save or a

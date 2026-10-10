@@ -75,11 +75,11 @@ Uncommitted changes show in the log and take comments like any commit.
   runs `jj util snapshot`, so `@` shows your uncommitted edits. If the
   snapshot fails (another jj holds the lock, say), the status line says so
   and debrief shows the last snapshot.
-- **Comments:** on an added or context line a comment carries no
-  revision, only the path and the line numbers on disk, as ramble's
-  comments do, so ramble shows it too. On a removed line it anchors to the
-  old side of `HEAD` (git) or `@-` (jj); if jj's `@` is a merge, that is
-  refused. Paths that resolve outside the repo through a symlinked
+- **Comments:** a new-side comment carries no revision, only the path
+  and the line numbers on disk, as ramble's comments do, so ramble shows
+  it too. An old-side comment (a removed line, or side by side any line on
+  the left) anchors to the old side of `HEAD` (git) or `@-` (jj); if jj's
+  `@` is a merge, that is refused. Paths that resolve outside the repo through a symlinked
   directory are refused for comments and for `<leader>o`.
 - **Refresh:** `r` and a return from the editor reload the working copy's
   view in place, keeping the cursor row. Any other commit's view stays as
@@ -324,7 +324,7 @@ session. The rows without a key are set only in the file.
 |---|---|---|---|
 | file list on the commit screen | `<leader>e` | `view.sidebar` | `"always"` (or `"never"`, `"auto"`) |
 | the file list's screen edge | — | `view.sidebar_side` | `"left"` (or `"right"`) |
-| hide the file list below this width (0: never) | — | `view.sidebar_auto_hide_below` | `80` |
+| hide an always file list below this width (0: never) | — | `view.sidebar_auto_hide_below` | `80` |
 | the file list's width | — | `view.sidebar_width` | `"auto"` (or columns) |
 | narrowest auto file list | — | `view.sidebar_min_width` | `16` |
 | widest auto file list (also ≤ 35%) | — | `view.sidebar_max_width` | `48` |

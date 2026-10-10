@@ -434,3 +434,56 @@ fn tab_from_a_filler_stays_in_its_change_block() {
         assert_eq!(cur_text(&app), "a", "{ctx:?}");
     }
 }
+
+#[test]
+fn a_resize_below_the_minimum_falls_back_in_visual_mode_on_the_same_lines() {
+    let f = fixture();
+    let mut app = f.open_split();
+    let row = row_of(app.commit_rows(), "a1");
+    goto(&mut app, row);
+    press(&mut app, KeyCode::Tab);
+    keys(&mut app, "vj");
+    app.event(AppEvent::Resize(120, 30));
+    assert!(!app.commit_split(), "unified below the minimum");
+    assert!(
+        app.status().contains("side by side needs 140"),
+        "{}",
+        app.status()
+    );
+    assert_eq!(app.mode(), Mode::Visual);
+    let (lo, hi) = app.selection_rows().unwrap();
+    let rows = app.commit_rows();
+    assert_eq!(
+        (rows[lo].text.as_str(), rows[hi].text.as_str()),
+        ("r1", "r2")
+    );
+    app.event(AppEvent::Resize(200, 30));
+    assert!(app.commit_split());
+    assert_eq!(app.split_side(), Some(Side::Old));
+    let (lo, hi) = app.selection_rows().unwrap();
+    let rows = app.commit_rows();
+    assert_eq!(
+        (rows[lo].text.as_str(), rows[hi].text.as_str()),
+        ("r1", "r2")
+    );
+}
+
+#[test]
+fn a_resize_below_the_minimum_falls_back_while_commenting_and_the_box_follows() {
+    let f = fixture();
+    let mut app = f.open_split();
+    let row = row_of(app.commit_rows(), "a3");
+    goto(&mut app, row);
+    keys(&mut app, "cc");
+    app.event(AppEvent::Resize(120, 30));
+    assert!(!app.commit_split(), "unified below the minimum");
+    assert_eq!(app.mode(), Mode::Comment);
+    let (lo, hi) = app.comment_rows().unwrap();
+    assert_eq!(lo, hi);
+    assert_eq!(app.commit_rows()[lo].text, "a3", "the box re-anchors");
+    keys(&mut app, "hi");
+    press(&mut app, KeyCode::Enter);
+    let cs = f.comments();
+    assert_eq!((cs[0].side, cs[0].lines), (Some(Side::New), (4, 4)));
+    assert_eq!(cs[0].body, "hi");
+}

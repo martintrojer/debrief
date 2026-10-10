@@ -279,12 +279,18 @@ impl CommitView {
 
     /// Switch layouts, the cursor kept on its line (and its row on
     /// screen): unified -> side by side puts it on the side the line
-    /// belongs to (new, unless the line has no new side).
-    pub(super) fn relayout(&mut self, split: bool) {
+    /// belongs to (new, unless the line has no new side). The rows in
+    /// `keep` (a selection's anchor, a draft's rows) are mapped to the
+    /// same lines.
+    pub(super) fn relayout(&mut self, split: bool, keep: &mut [usize]) {
         if split == self.split_on {
             return;
         }
         let from = row_ref(&self.rows, self.cur.row, self.split_side());
+        let kept: Vec<RowRef> = keep
+            .iter()
+            .map(|&r| row_ref(&self.rows, r, self.split_side()))
+            .collect();
         let on_screen = self.cur.row.saturating_sub(self.scroll);
         self.split_on = split;
         self.side = Side::New;
@@ -297,6 +303,11 @@ impl CommitView {
         let (row, side) = self.find_ref(from);
         if split && side != self.side {
             self.swap_side();
+        }
+        // Both sides have the same rows, so a row found on either is one
+        // on the cursor's side.
+        for (k, r) in keep.iter_mut().zip(kept) {
+            *k = self.find_ref(r).0.min(self.last_row());
         }
         self.goto_row(row);
         self.scroll = self
@@ -420,19 +431,28 @@ impl App {
 
     /// Show the session's layout in a diff pane `width` wide: unified
     /// below the minimum (with a status note when that undoes side by
-    /// side), side by side again once it is wide enough. Not while a
-    /// selection or a comment holds row numbers.
+    /// side), side by side again once it is wide enough. A selection
+    /// stays on its lines, and a comment being typed on its rows.
     pub(super) fn layout_sync(&mut self, width: u16) {
-        if matches!(self.mode, Mode::Visual | Mode::Comment) {
-            return;
-        }
         let min = self.config.view.split_min_width;
         let want = self.split && width >= min;
         let Some(v) = &mut self.commit else { return };
         if v.is_split() == want {
             return;
         }
-        v.relayout(want);
+        match (self.mode, &mut self.draft) {
+            (Mode::Visual, _) => {
+                let mut keep = [v.anchor];
+                v.relayout(want, &mut keep);
+                v.anchor = keep[0];
+            }
+            (Mode::Comment, Some(d)) => {
+                let mut keep = [d.rows.0, d.rows.1];
+                v.relayout(want, &mut keep);
+                d.rows = (keep[0].min(keep[1]), keep[0].max(keep[1]));
+            }
+            _ => v.relayout(want, &mut []),
+        }
         if self.split && !want {
             self.set_status(format!("{}; unified for now", too_narrow(min, width)));
         }

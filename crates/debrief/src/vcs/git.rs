@@ -33,6 +33,11 @@ const CONFIG: &[&str] = &[
     "log.showRoot=true",
     "i18n.logOutputEncoding=UTF-8",
     "color.ui=never",
+    // No read may start `git maintenance run --auto` (it writes
+    // objects/maintenance.lock and repacks); reads shouldn't trigger it,
+    // but this makes sure.
+    "maintenance.auto=false",
+    "gc.auto=0",
 ];
 
 /// Flags for every command that prints a diff.

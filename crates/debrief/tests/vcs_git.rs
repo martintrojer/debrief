@@ -308,6 +308,7 @@ fn partial_clone_missing_objects_error() {
     git(&root, &["config", "uploadpack.allowFilter", "true"]);
     let url = format!("file://{}", root.display());
     let ok = std::process::Command::new("git")
+        .args(common::TEST_GIT)
         .args(["clone", "-q", "--no-checkout"])
         .args(["--filter=blob:none", &url])
         .arg(&clone)

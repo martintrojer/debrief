@@ -85,9 +85,29 @@ pub fn assert_same(before: &Snapshot, after: &Snapshot) {
     }
 }
 
-/// git with a fixed identity.
+/// Config every test git gets: a fixed identity, and no automatic
+/// maintenance. From git 2.55 a commit starts `git maintenance run --auto
+/// --detach`, whose child keeps `objects/maintenance.lock` after the
+/// commit returns, so a fixture would still be changing while a test
+/// snapshots it.
+pub const TEST_GIT: [&str; 12] = [
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "maintenance.auto=false",
+    "-c",
+    "maintenance.autoDetach=false",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "gc.autoDetach=false",
+];
+
+/// git with [`TEST_GIT`].
 pub fn git(dir: &Path, args: &[&str]) -> String {
-    let mut a = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
+    let mut a = TEST_GIT.to_vec();
     a.extend_from_slice(args);
     sh(dir, "git", &a)
 }

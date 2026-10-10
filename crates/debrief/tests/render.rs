@@ -421,7 +421,16 @@ fn a_real_mode_change_is_labelled() {
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
             .current_dir(&root)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+            ])
             .args(args)
             .output()
             .unwrap();

@@ -32,7 +32,7 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 
 use crate::seen::{Seen, Status};
-use crate::vcs::{CommitDiff, CommitInfo, CommitStat, Kind, Vcs, WorkingCopy};
+use crate::vcs::{CommitDiff, CommitInfo, CommitStat, Kind, Vcs, WorkingCopy, WorkingStatus};
 
 pub use clue::{CLUE_DELAY, ClueRow};
 pub use comment::{CommentAction, CommentBox, Draft};
@@ -93,6 +93,12 @@ pub enum AppEvent {
     WorkingLoaded {
         request: u64,
         result: Result<Option<WorkingCopy>, String>,
+    },
+    /// git's working-copy row from the loader thread (`None`: clean),
+    /// tagged with its request.
+    WorkingRow {
+        request: u64,
+        result: Result<Option<WorkingStatus>, String>,
     },
     /// The syntax colours of a loaded diff, tagged with the same request;
     /// they follow its [`AppEvent::Loaded`] or [`AppEvent::WorkingLoaded`].
@@ -197,8 +203,10 @@ pub struct App {
     watcher: Option<watch::RepoWatcher>,
     /// git: the working-tree watcher.
     tree_watcher: Option<watch::RepoWatcher>,
-    /// git: the uncommitted changes, `None` when clean (or jj).
-    working: Option<WorkingCopy>,
+    /// git: the working-copy row, `None` when clean (or jj).
+    working: Option<WorkingStatus>,
+    /// The last working-copy row request number.
+    working_request: u64,
     /// jj: the commit ID of `@` at the pinned operation.
     working_commit: Option<String>,
     /// The open commit (on `Screen::Commit`).
@@ -279,6 +287,7 @@ impl App {
             watcher: None,
             tree_watcher: None,
             working: None,
+            working_request: 0,
             working_commit: None,
             commit: None,
             next_request: 0,
@@ -334,6 +343,7 @@ impl App {
             AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
             AppEvent::WorkingLoaded { request, result } => self.working_loaded(request, result),
+            AppEvent::WorkingRow { request, result } => self.working_row_loaded(request, result),
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
             AppEvent::Wheel { col, row, down } if self.screen == Screen::Log => {
@@ -428,7 +438,7 @@ impl App {
     }
 
     /// git: the uncommitted changes the log's top row stands for.
-    pub fn working_copy(&self) -> Option<&WorkingCopy> {
+    pub fn working_copy(&self) -> Option<&WorkingStatus> {
         self.working.as_ref()
     }
 

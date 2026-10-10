@@ -808,3 +808,184 @@ fn search_and_filter_highlight_the_working_copy_row() {
     press(&mut app, KeyCode::Enter);
     assert!(yellow_at(&mut app, "copy"), "search hit highlighted");
 }
+
+/// A git [`vcs::Vcs`] counting its `working_copy` reads (the full diff,
+/// every untracked file read).
+struct Counting {
+    inner: Box<dyn vcs::Vcs>,
+    reads: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl vcs::Vcs for Counting {
+    fn kind(&self) -> vcs::Kind {
+        self.inner.kind()
+    }
+    fn root(&self) -> &Path {
+        self.inner.root()
+    }
+    fn open_options(&self) -> OpenOptions {
+        self.inner.open_options()
+    }
+    fn refresh(&self, snapshot: bool) -> anyhow::Result<()> {
+        self.inner.refresh(snapshot)
+    }
+    fn working_copy(&self, context: vcs::Context) -> anyhow::Result<Option<vcs::WorkingCopy>> {
+        self.reads.set(self.reads.get() + 1);
+        self.inner.working_copy(context)
+    }
+    fn working_status(&self) -> anyhow::Result<Option<vcs::WorkingStatus>> {
+        self.inner.working_status()
+    }
+    fn pinned_op(&self) -> Option<String> {
+        self.inner.pinned_op()
+    }
+    fn working_copy_commit(&self) -> anyhow::Result<Option<String>> {
+        self.inner.working_copy_commit()
+    }
+    fn log(&self, revset: Option<&str>, limit: usize) -> anyhow::Result<Vec<vcs::CommitInfo>> {
+        self.inner.log(revset, limit)
+    }
+    fn show(&self, commit: &str, context: vcs::Context) -> anyhow::Result<vcs::CommitDiff> {
+        self.inner.show(commit, context)
+    }
+    fn stat(&self, commit: &str) -> anyhow::Result<vcs::CommitStat> {
+        self.inner.stat(commit)
+    }
+}
+
+impl Fixture {
+    /// The app on a [`Counting`] repo, with an event sender; its read
+    /// count starts at zero after the start.
+    fn counting(
+        &self,
+    ) -> (
+        App,
+        std::rc::Rc<std::cell::Cell<usize>>,
+        mpsc::Receiver<AppEvent>,
+    ) {
+        let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let v = Counting {
+            inner: vcs::open(&self.root, OpenOptions::default()).unwrap(),
+            reads: reads.clone(),
+        };
+        let mut app = App::new(Box::new(v), StartOptions::new(self.cache.clone())).unwrap();
+        let (tx, rx) = mpsc::channel();
+        app.set_sender(tx);
+        reads.set(0);
+        (app, reads, rx)
+    }
+}
+
+/// Feed every event the workers send until they go quiet.
+fn settle_events(app: &mut App, rx: &mpsc::Receiver<AppEvent>) {
+    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
+        app.event(ev);
+    }
+}
+
+#[test]
+fn r_reads_the_working_row_off_the_ui_thread() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    let before = common::git_dir_snapshot(&f.root.join(".git"));
+    let (mut app, reads, rx) = f.counting();
+    assert_eq!(summaries(&app), ["second", "base"]);
+    std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
+    keys(&mut app, "r");
+    assert_eq!(reads.get(), 0, "r read the working copy on the UI thread");
+    settle_events(&mut app, &rx);
+    assert_eq!(summaries(&app), ["Working copy", "second", "base"]);
+    common::assert_same(&before, &common::git_dir_snapshot(&f.root.join(".git")));
+}
+
+#[test]
+fn the_tree_watcher_reads_the_working_row_off_the_ui_thread() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    let before = common::git_dir_snapshot(&f.root.join(".git"));
+    let (mut app, reads, rx) = f.counting();
+    std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
+    std::fs::write(f.root.join("y.txt"), "y\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(
+        reads.get(),
+        0,
+        "the watcher read the working copy on the UI thread"
+    );
+    settle_events(&mut app, &rx);
+    let s = screen(&mut app, 80, 6);
+    assert!(s[0].starts_with("✎ Working copy  2 files"), "{}", s[0]);
+    std::fs::remove_file(f.root.join("x.txt")).unwrap();
+    std::fs::remove_file(f.root.join("y.txt")).unwrap();
+    app.event(AppEvent::WorkingChanged);
+    settle_events(&mut app, &rx);
+    assert_eq!(summaries(&app), ["second", "base"]);
+    assert_eq!(reads.get(), 0);
+    common::assert_same(&before, &common::git_dir_snapshot(&f.root.join(".git")));
+}
+
+#[test]
+fn a_touched_but_unchanged_file_leaves_the_tree_clean() {
+    let f = fixture();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    // Stat data changes, contents don't: still clean.
+    let t = std::time::SystemTime::now() + Duration::from_secs(5);
+    std::fs::File::options()
+        .write(true)
+        .open(f.root.join("a.txt"))
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+    let (mut app, _, rx) = f.counting();
+    keys(&mut app, "r");
+    settle_events(&mut app, &rx);
+    assert_eq!(summaries(&app), ["second", "base"]);
+}
+
+#[test]
+fn the_working_rows_stats_load_off_the_ui_thread() {
+    let f = fixture();
+    let (mut app, reads, rx) = f.counting();
+    keys(&mut app, "gg");
+    let t = std::time::Instant::now();
+    app.tick(t);
+    app.tick(t + debrief::app::stat::STAT_DELAY);
+    assert_eq!(
+        reads.get(),
+        0,
+        "the stat read the working copy on the UI thread"
+    );
+    settle_events(&mut app, &rx);
+    let Some(debrief::app::StatPane::Ready(s)) = app.stat_pane() else {
+        panic!("no stat: {:?}", app.stat_pane());
+    };
+    let files: Vec<_> = s
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.added, f.removed))
+        .collect();
+    assert_eq!(
+        files,
+        [("a.txt", Some(1), Some(2)), ("new.txt", Some(2), Some(0))]
+    );
+}
+
+#[test]
+fn threaded_r_on_a_clean_tree_leaves_the_working_copy_view() {
+    let f = fixture();
+    let (mut app, _, rx) = f.counting();
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    settle_events(&mut app, &rx);
+    assert!(app.viewing_working_copy());
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    keys(&mut app, "r");
+    settle_events(&mut app, &rx);
+    assert_eq!(app.screen(), Screen::Log, "the obsolete diff is closed");
+    assert_eq!(app.status(), "The working copy is clean");
+    assert_eq!(summaries(&app), ["second", "base"]);
+}

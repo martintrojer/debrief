@@ -395,13 +395,21 @@ fn the_git_working_copy_loads_off_thread_on_open_t_and_r() {
     let row = app.commit_cursor().row;
     keys(&mut app, "r");
     assert!(app.commit_loading(), "r returns before the diff");
-    app.event(recv());
+    // The diff and the log's row, in either order.
+    let settle = |app: &mut App| {
+        while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
+            app.event(ev);
+        }
+    };
+    settle(&mut app);
     assert!(!app.commit_loading());
     assert_eq!(app.commit_cursor().row, row);
 
-    // A tree cleaned meanwhile closes the view.
+    // A tree cleaned meanwhile closes the view once the answer is in.
     git(&f.root, &["checkout", "-q", "--", "a.txt"]);
     keys(&mut app, "r");
+    assert!(app.viewing_working_copy(), "r returns before the answer");
+    settle(&mut app);
     assert_eq!(app.screen(), Screen::Log);
     assert_eq!(app.status(), "The working copy is clean");
 }

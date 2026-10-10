@@ -5,9 +5,11 @@
 //! commit loader) once the cursor has rested on a commit for
 //! [`STAT_DELAY`], tagged with a request number; an answer for an older
 //! request is dropped. Results are kept per commit ID, the
-//! [`CACHE_SIZE`] most recently used. git's working-copy row takes its
-//! stat from the working copy already read. With no event sender (unit
-//! tests) a stat loads in [`App::tick`].
+//! [`CACHE_SIZE`] most recently used. git's working-copy row loads the
+//! same way, from the working copy's diff in hunks; each new answer for
+//! the row drops its stat, and a working copy opened in the commit view
+//! leaves its stat behind. With no event sender (unit tests) a stat loads
+//! in [`App::tick`].
 //!
 //! `J` / `K` (and the wheel over the pane, when the mouse is captured)
 //! scroll the pane; the scroll belongs to the commit under the cursor, so
@@ -19,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::{Constraint, Layout, Rect};
 
-use crate::vcs::{CommitStat, file_stats};
+use crate::vcs::{CommitStat, Context, Vcs, WorkingCopy, file_stats};
 
 use super::{App, AppEvent, Screen, WORKING_ID};
 
@@ -191,27 +193,15 @@ impl App {
         }
     }
 
-    /// The commit under the log cursor (`None` on git's working-copy row).
+    /// The commit under the log cursor ([`WORKING_ID`] on git's
+    /// working-copy row).
     fn cursor_commit(&self) -> Option<&str> {
-        self.rows
-            .get(self.cursor)
-            .map(|r| r.info.commit.as_str())
-            .filter(|c| *c != WORKING_ID)
+        self.rows.get(self.cursor).map(|r| r.info.commit.as_str())
     }
 
     /// What the pane shows for the cursor row; `None` with no rows.
     pub fn stat_pane(&self) -> Option<StatPane> {
         let row = self.rows.get(self.cursor)?;
-        if row.info.commit == WORKING_ID {
-            let w = self.working.as_ref()?;
-            return Some(StatPane::Ready(Rc::new(CommitStat {
-                message: String::new(),
-                author: String::new(),
-                email: String::new(),
-                time: row.info.time,
-                files: file_stats(&w.diff.files),
-            })));
-        }
         let id = row.info.commit.as_str();
         if let Some(s) = self.stat.peek(id) {
             return Some(StatPane::Ready(s));
@@ -262,13 +252,13 @@ impl App {
                 );
                 std::thread::spawn(move || {
                     let result = crate::vcs::reopen(&root, opts, pin)
-                        .and_then(|v| v.stat(&id))
+                        .and_then(|v| stat_of(v.as_ref(), &id))
                         .map_err(|e| format!("{e:#}"));
                     let _ = tx.send(AppEvent::Stat { request, result });
                 });
             }
             None => {
-                let result = self.vcs.stat(&id).map_err(|e| format!("{e:#}"));
+                let result = stat_of(self.vcs.as_ref(), &id).map_err(|e| format!("{e:#}"));
                 self.stat_loaded(request, result);
             }
         }
@@ -285,6 +275,19 @@ impl App {
         }
     }
 
+    /// Drop `id`'s stat, cached, loading or failed: it is read again.
+    pub(super) fn stat_forget(&mut self, id: &str) {
+        self.stat.cache.retain(|(c, _)| c != id);
+        self.stat.inflight.take_if(|(_, c)| c == id);
+        self.stat.error.take_if(|(c, _)| c == id);
+    }
+
+    /// The working copy the commit view read: the row's stat.
+    pub(super) fn stat_put_working(&mut self, w: &WorkingCopy) {
+        self.stat_forget(WORKING_ID);
+        self.stat.put(WORKING_ID.to_string(), working_stat(w));
+    }
+
     /// A reload: failed stats are tried again.
     pub(super) fn stat_reload(&mut self) {
         self.stat.error = None;
@@ -293,6 +296,28 @@ impl App {
     /// Stats cached now (tests).
     pub fn stat_cached(&self) -> usize {
         self.stat.cache.len()
+    }
+}
+
+/// `id`'s stat; git's working copy's from its diff in hunks.
+fn stat_of(vcs: &dyn Vcs, id: &str) -> anyhow::Result<CommitStat> {
+    if id != WORKING_ID {
+        return vcs.stat(id);
+    }
+    match vcs.working_copy(Context::Default)? {
+        Some(w) => Ok(working_stat(&w)),
+        None => anyhow::bail!("The working copy is clean"),
+    }
+}
+
+/// The working copy as a stat (the pane shows its own header for it).
+fn working_stat(w: &WorkingCopy) -> CommitStat {
+    CommitStat {
+        message: String::new(),
+        author: String::new(),
+        email: String::new(),
+        time: 0,
+        files: file_stats(&w.diff.files),
     }
 }
 

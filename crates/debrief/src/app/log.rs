@@ -5,11 +5,17 @@
 //! top while the tree is dirty, never seen or new; jj marks the row of
 //! this workspace's `@`. Loading snapshots jj first (Q21); a snapshot
 //! error goes to the status line and the log loads from the last pin.
+//!
+//! git's row (dirty or not, and its file count) comes from
+//! [`Vcs::working_status`](crate::vcs::Vcs::working_status), never the
+//! full diff; with an event sender it is read on a worker thread and
+//! comes back as a request-tagged [`AppEvent::WorkingRow`]; an answer to
+//! an older request is dropped.
 
 use crate::seen::Status;
-use crate::vcs::{CommitInfo, Context, Kind};
+use crate::vcs::{CommitInfo, Kind, OpenOptions, WorkingStatus};
 
-use super::{App, Row, Screen};
+use super::{App, AppEvent, Row, Screen};
 
 /// The commit ID of git's synthetic working-copy row (not a hex ID, so it
 /// never names a commit).
@@ -40,6 +46,21 @@ pub fn age(now: i64, then: i64) -> String {
         86_400..31_536_000 => format!("{}d", s / 86_400),
         _ => format!("{}y", s / 31_536_000),
     }
+}
+
+/// Read git's working-copy row on a worker thread, as
+/// [`App::load_working`] does without a sender.
+fn spawn_working_status(
+    (root, opts): (std::path::PathBuf, OpenOptions),
+    request: u64,
+    tx: std::sync::mpsc::Sender<AppEvent>,
+) {
+    std::thread::spawn(move || {
+        let result = crate::vcs::reopen(&root, opts, None)
+            .and_then(|v| v.working_status())
+            .map_err(|e| format!("{e:#}"));
+        let _ = tx.send(AppEvent::WorkingRow { request, result });
+    });
 }
 
 fn infos(rows: &[Row]) -> Vec<CommitInfo> {
@@ -76,17 +97,47 @@ impl App {
         Ok(commits)
     }
 
-    /// git: re-read the uncommitted changes, in hunks whatever `T` says
-    /// (the row, its stats and the log's editor target need no more; the
-    /// commit view reads its own off the UI thread).
+    /// git: re-read the working-copy row (on the worker when there is a
+    /// sender: the row then changes when its [`AppEvent::WorkingRow`]
+    /// arrives).
     fn load_working(&mut self) {
-        match self.vcs.working_copy(Context::Default) {
+        self.working_request += 1;
+        let request = self.working_request;
+        match self.sender.clone() {
+            Some(tx) => {
+                let at = (self.vcs.root().to_path_buf(), self.vcs.open_options());
+                spawn_working_status(at, request, tx);
+            }
+            None => {
+                let result = self.vcs.working_status().map_err(|e| format!("{e:#}"));
+                self.set_working(result);
+            }
+        }
+    }
+
+    /// The worker's working-copy row: kept if it answers the last request.
+    pub(super) fn working_row_loaded(
+        &mut self,
+        request: u64,
+        result: Result<Option<WorkingStatus>, String>,
+    ) {
+        if request != self.working_request {
+            return;
+        }
+        self.set_working(result);
+        self.working_rows();
+    }
+
+    fn set_working(&mut self, result: Result<Option<WorkingStatus>, String>) {
+        match result {
             Ok(w) => self.working = w,
             Err(e) => {
                 self.working = None;
-                self.set_status(format!("cannot read the working copy: {e:#}"));
+                self.set_status(format!("cannot read the working copy: {e}"));
             }
         }
+        // Same count, other contents: the row's stat is read again.
+        self.stat_forget(WORKING_ID);
     }
 
     /// git's synthetic row for `self.working`.
@@ -183,13 +234,15 @@ impl App {
         }
     }
 
-    /// git's tree watcher: re-read only the working copy and its row.
+    /// git's tree watcher: re-read only the working-copy row.
     pub(super) fn working_changed(&mut self) {
         if self.vcs.kind() != Kind::Git {
             return;
         }
         self.load_working();
-        self.working_rows();
+        if self.sender.is_none() {
+            self.working_rows();
+        }
     }
 
     /// git: rebuild the rows around `self.working`, the cursor kept.

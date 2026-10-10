@@ -602,17 +602,20 @@ impl App {
                     v.base = w.base.clone();
                 }
                 let diff = working_diff(&w);
-                if self.context == Context::Default {
-                    // As fresh as the log's copy, and in its context.
-                    self.working = Some(w);
-                    self.working_rows();
-                }
+                // Fresher than the row: it and its stat follow (line
+                // counts are the same in either context).
+                self.working_request += 1;
+                self.working = Some((&w).into());
+                self.stat_put_working(&w);
+                self.working_rows();
                 self.loaded(request, Ok(diff));
             }
             Ok(None) => {
                 // Never leave the obsolete diff open to comments.
                 self.close_commit();
+                self.working_request += 1;
                 self.working = None;
+                self.stat_forget(super::WORKING_ID);
                 self.working_rows();
                 self.set_status("The working copy is clean");
             }
@@ -625,8 +628,8 @@ impl App {
         }
     }
 
-    /// Colour a diff shown without the loader thread (no event sender): on a thread of its own when there is a sender,
-    /// else here.
+    /// Colour a diff loaded on the UI thread: on a thread of its own when
+    /// there is a sender, else here.
     fn highlight_later(&mut self, request: u64, diff: CommitDiff) {
         if !self.config.render.highlight {
             return;
@@ -661,7 +664,7 @@ impl App {
     /// `r` in the commit view, and a return from the editor or a launcher:
     /// reload the log (jj: snapshot first) and, on the working copy, its
     /// diff in place, keeping the cursor row; a clean git tree closes the
-    /// view. Other commits stay as shown.
+    /// view when the diff comes back empty. Other commits stay as shown.
     pub(super) fn reload_view(&mut self) {
         self.reload(true);
         let Some(v) = self.commit.as_ref().filter(|v| v.working) else {
@@ -670,11 +673,6 @@ impl App {
         let row = v.cur.row;
         match self.vcs.kind() {
             Kind::Git => {
-                if self.working.is_none() {
-                    // Never leave the obsolete diff open to comments.
-                    self.close_commit();
-                    return self.set_status("The working copy is clean");
-                }
                 self.next_request += 1;
                 let request = self.next_request;
                 if let Some(v) = &mut self.commit {

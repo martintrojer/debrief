@@ -16,6 +16,10 @@ Design: [docs/specs/2026-10-09-debrief.md](docs/specs/2026-10-09-debrief.md).
 
 ## Install
 
+Prebuilt binaries for macOS (Apple silicon) and Linux (x86_64) are on the
+[releases page](https://github.com/martintrojer/debrief/releases), each
+with a `.sha256`. Or build it:
+
 ```sh
 cargo install --path crates/debrief
 ```
@@ -341,6 +345,23 @@ files to ramble ("File belongs to a different review root").
 
 ```sh
 bash scripts/check.sh   # fmt, clippy -D warnings, tests
+```
+
+CI (`.github/workflows/ci.yml`) runs the same script on Ubuntu 24.04 for
+every push to `main` and every pull request, with jj and tmux installed so
+the jj and end-to-end tests run.
+
+## Releases
+
+Pushing a tag that starts with `v` (`v0.1.0`, `v001`, …) runs
+`.github/workflows/release.yml`: it builds `debrief` for
+`aarch64-apple-darwin` (macOS 14) and `x86_64-unknown-linux-gnu`
+(Ubuntu 24.04 LTS), and attaches `debrief-<tag>-<target>.tar.gz` (binary,
+README, LICENSE, THIRD-PARTY.md) and its `.sha256` to a GitHub Release
+named after the tag.
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 ## License

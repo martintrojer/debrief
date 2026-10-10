@@ -222,6 +222,25 @@ pub struct WorkingCopy {
     pub files: usize,
 }
 
+/// git's working-copy row: whether the tree is dirty, and how many files,
+/// from cheap commands (no patch text, no untracked file read).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkingStatus {
+    /// `HEAD`; `None` before the first commit.
+    pub base: Option<CommitInfo>,
+    /// Number of changed files, untracked ones included.
+    pub files: usize,
+}
+
+impl From<&WorkingCopy> for WorkingStatus {
+    fn from(w: &WorkingCopy) -> Self {
+        WorkingStatus {
+            base: w.base.clone(),
+            files: w.files,
+        }
+    }
+}
+
 pub trait Vcs {
     fn kind(&self) -> Kind;
     fn root(&self) -> &Path;
@@ -238,6 +257,11 @@ pub trait Vcs {
     /// git: the uncommitted changes, `None` when the tree is clean.
     /// jj: always `None` (`@` is the working copy).
     fn working_copy(&self, _context: Context) -> Result<Option<WorkingCopy>> {
+        Ok(None)
+    }
+    /// git: [`Vcs::working_copy`]'s row, `None` when the tree is clean,
+    /// without reading the diff or any untracked file. jj: `None`.
+    fn working_status(&self) -> Result<Option<WorkingStatus>> {
         Ok(None)
     }
     /// jj: the operation reads are pinned to (to reopen on another

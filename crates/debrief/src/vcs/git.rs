@@ -7,7 +7,8 @@ use anyhow::{Context, Result, bail};
 
 use super::{
     CommitDiff, CommitInfo, CommitStat, Context as DiffContext, DiffLine, FULL_CONTEXT, FileDiff,
-    FileStat, Hunk, Kind, LineKind, OpenOptions, Vcs, WorkingCopy, parse_unified, run,
+    FileStat, Hunk, Kind, LineKind, OpenOptions, Vcs, WorkingCopy, WorkingStatus, parse_unified,
+    run,
 };
 
 /// Bytes of an untracked file sniffed for a NUL (binary).
@@ -87,6 +88,23 @@ impl Git {
     /// `HEAD`'s commit ID, `None` before the first commit.
     fn head(&self) -> Option<String> {
         self.resolve("HEAD").ok()
+    }
+
+    /// What the working copy is diffed against: `HEAD`, else the empty
+    /// tree.
+    fn against(&self, head: Option<&str>) -> Result<String> {
+        match head {
+            Some(id) => Ok(id.to_string()),
+            None => self.empty_tree(),
+        }
+    }
+
+    /// The working copy's base commit.
+    fn base(&self, head: Option<&str>) -> Result<Option<CommitInfo>> {
+        match head {
+            Some(id) => Ok(self.log(Some(id), 1)?.into_iter().next()),
+            None => Ok(None),
+        }
     }
 
     /// The empty tree's ID for this repo's hash (no object is written).
@@ -288,12 +306,27 @@ impl Vcs for Git {
         parse_numstat(&self.git(&args)?)
     }
 
+    fn working_status(&self) -> Result<Option<WorkingStatus>> {
+        let head = self.head();
+        let against = self.against(head.as_deref())?;
+        // `--numstat`, not `--name-only`: it compares contents, so a file
+        // whose stat data alone changed is not listed.
+        let mut args = vec!["diff-index", "--numstat", "-z", "-M"];
+        args.extend_from_slice(DIFF_FLAGS);
+        args.extend_from_slice(&[&against, "--"]);
+        let files = numstat_files(&self.git(&args)?) + self.untracked()?.len();
+        if files == 0 {
+            return Ok(None);
+        }
+        Ok(Some(WorkingStatus {
+            base: self.base(head.as_deref())?,
+            files,
+        }))
+    }
+
     fn working_copy(&self, context: DiffContext) -> Result<Option<WorkingCopy>> {
         let head = self.head();
-        let against = match &head {
-            Some(id) => id.clone(),
-            None => self.empty_tree()?,
-        };
+        let against = self.against(head.as_deref())?;
         // `diff-index` (plumbing), not `diff`: porcelain `git diff`
         // refreshes the index's stat data even with --no-optional-locks.
         let mut args = vec!["diff-index", "--patch", "-M"];
@@ -309,12 +342,8 @@ impl Vcs for Git {
         if files.is_empty() {
             return Ok(None);
         }
-        let base = match head {
-            Some(id) => self.log(Some(&id), 1)?.into_iter().next(),
-            None => None,
-        };
         Ok(Some(WorkingCopy {
-            base,
+            base: self.base(head.as_deref())?,
             files: files.len(),
             diff: CommitDiff {
                 message: String::new(),
@@ -322,6 +351,25 @@ impl Vcs for Git {
             },
         }))
     }
+}
+
+/// The number of files in `--numstat -z` output with no header: records
+/// `added TAB removed TAB path NUL`, or for a rename `added TAB removed
+/// TAB NUL old NUL new NUL`.
+fn numstat_files(out: &str) -> usize {
+    let mut fields = out.split('\0');
+    let mut n = 0;
+    while let Some(rec) = fields.next() {
+        if rec.is_empty() {
+            continue;
+        }
+        n += 1;
+        if rec.ends_with('\t') {
+            fields.next();
+            fields.next();
+        }
+    }
+    n
 }
 
 /// `git show --numstat -z` with the format `%an NUL %ae NUL %at NUL %B

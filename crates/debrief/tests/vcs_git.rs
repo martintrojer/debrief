@@ -352,6 +352,38 @@ fn clean_tree_has_no_working_copy() {
 }
 
 #[test]
+fn working_status_counts_what_working_copy_lists_and_writes_nothing() {
+    let (_t, root) = repo();
+    let v = open(&root);
+    assert_eq!(v.working_status().unwrap(), None);
+    // Stat data changed, contents not: still clean.
+    let keep = root.join("sub/keep.txt");
+    let t = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+    std::fs::File::options()
+        .write(true)
+        .open(&keep)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+    std::fs::write(root.join(".git/info/exclude"), "*.log\n").unwrap();
+    std::fs::write(root.join("x.log"), "x\n").unwrap();
+    assert_eq!(v.working_status().unwrap(), None);
+    // A staged rename (one record, two paths), an edit, an untracked file.
+    git(&root, &["mv", "c d.txt", "e.txt"]);
+    std::fs::write(root.join("a.txt"), "changed\n").unwrap();
+    std::fs::write(root.join("new.txt"), "n\n").unwrap();
+    let before = git_snapshot(&root);
+    let s = v.working_status().unwrap().unwrap();
+    let w = v.working_copy(Context::Default).unwrap().unwrap();
+    assert_eq!(s.files, 3);
+    assert_eq!(s, (&w).into());
+    assert_eq!(s.base.unwrap().summary, "third: rename");
+    let after = git_snapshot(&root);
+    assert_same(&before.0, &after.0);
+    assert_eq!(before.1, after.1);
+}
+
+#[test]
 fn dirty_tracked_file_is_the_working_copy_on_head() {
     let (_t, root) = repo();
     std::fs::write(root.join("a.txt"), "one\nTWO\nthree\nfour\n").unwrap();

@@ -356,7 +356,7 @@ the jj and end-to-end tests run.
 Pushing a tag that starts with `v` (`v0.1.0`, `v001`, …) runs
 `.github/workflows/release.yml`: it builds `debrief` for
 `aarch64-apple-darwin` (macOS 15) and `x86_64-unknown-linux-gnu`
-(Ubuntu 26.04 LTS), and attaches `debrief-<tag>-<target>.tar.gz` (binary,
+(built on Ubuntu 24.04 LTS), and attaches `debrief-<tag>-<target>.tar.gz` (binary,
 README, LICENSE, THIRD-PARTY.md) and its `.sha256` to a GitHub Release
 named after the tag.
 
@@ -364,9 +364,9 @@ named after the tag.
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-The Linux binary links against Ubuntu 26.04's glibc, so it runs on
-26.04 and other distributions with glibc 2.43 or newer; on older systems,
-build from source.
+The Linux binary is built on Ubuntu 24.04 so it runs on 24.04, 26.04 and
+other distributions with glibc 2.39 or newer; on older systems, build
+from source. CI itself runs on Ubuntu 26.04, the latest LTS.
 
 ## License
 

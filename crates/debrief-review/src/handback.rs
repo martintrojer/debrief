@@ -66,23 +66,35 @@ fn run(command: &[String], markdown: &str, root: &Path, timeout: Duration) -> bo
     // Dropping stdin at the end of the thread closes it.
     let writer = thread::spawn(move || stdin.write_all(input.as_bytes()));
 
-    // Poll the writer alongside the child: a failed write (EPIPE included) is final,
-    // so kill and fall back at once rather than waiting for the child to exit.
+    // Poll the writer alongside the child. A write error is final, so kill
+    // and fall back at once rather than waiting for the child, except a
+    // broken pipe from a child that already exited: a command may ignore
+    // its input, and then its exit status decides.
     let deadline = Instant::now() + timeout;
     let mut writer = Some(writer);
+    let mut broken_pipe = false;
     loop {
         if writer.as_ref().is_some_and(|w| w.is_finished()) {
-            let wrote = writer
-                .take()
-                .is_some_and(|w| w.join().is_ok_and(|r| r.is_ok()));
-            if !wrote {
-                kill(&mut child);
-                return false;
+            match writer.take().map(|w| w.join()) {
+                Some(Ok(Ok(()))) => {}
+                Some(Ok(Err(e))) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                    broken_pipe = true;
+                }
+                _ => {
+                    kill(&mut child);
+                    return false;
+                }
             }
         }
         match child.try_wait() {
-            // Success needs all of stdin taken; if the writer is still going, keep polling.
+            // Success needs stdin settled; if the writer is still going, keep polling.
             Ok(Some(status)) if writer.is_none() => return status.success(),
+            // The pipe broke while the child still runs: it closed its input
+            // without exiting, so it won't get the review. Fall back.
+            Ok(None) if broken_pipe => {
+                kill(&mut child);
+                return false;
+            }
             Ok(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             _ => {
                 // Killing the child breaks the pipe, so the writer thread ends too (unless a
@@ -156,6 +168,37 @@ mod tests {
             .unwrap()
             .success();
         assert!(!alive, "child {} not reaped", pid.trim());
+    }
+
+    /// A command that ignores its input and exits 0 (`true`) has handled
+    /// the review; the broken pipe it leaves is not a failure.
+    #[test]
+    fn a_command_that_exits_0_without_reading_counts_as_sent() {
+        let input = "x".repeat(1024 * 1024);
+        for _ in 0..20 {
+            let mut copied = false;
+            let sent = send(
+                &["true".to_owned()],
+                &input,
+                Path::new("/"),
+                &mut |_: &str| {
+                    copied = true;
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(sent, Sent::Command);
+            assert!(!copied);
+        }
+        // Exiting non-zero without reading still falls back.
+        let sent = send(
+            &["false".to_owned()],
+            &input,
+            Path::new("/"),
+            &mut |_: &str| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(sent, Sent::Clipboard);
     }
 
     #[test]

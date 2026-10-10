@@ -301,10 +301,10 @@ impl CommitView {
         }
         self.tree = tree;
         let sel = self.first_file(self.side_sel);
+        let anchor = self.anchor();
         let Some(diff) = self.diff.take() else {
             return;
         };
-        let anchor = self.anchor();
         let on_screen = self.cur.row.saturating_sub(self.scroll);
         self.build_entries(&diff);
         self.build_rows(&diff);
@@ -460,5 +460,103 @@ impl App {
     /// Rows `C-d` / `C-u` move in the file list: half its height.
     pub(super) fn files_half(&self) -> usize {
         self.commit.as_ref().map_or(1, |v| (v.view_h / 2).max(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn show(entries: &[Entry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|e| {
+                let kind = if e.is_dir() { "d" } else { "f" };
+                format!(
+                    "{}{kind} {} +{} -{}",
+                    "  ".repeat(e.depth),
+                    e.name,
+                    e.add,
+                    e.del
+                )
+            })
+            .collect()
+    }
+
+    const FILES: &[FileItem] = &[
+        ("z.txt", 1, 0),
+        ("pkg/gui/controllers/helpers/a.go", 2, 1),
+        ("pkg/gui/controllers/helpers/b.go", 3, 0),
+        ("src/main.rs", 1, 1),
+        ("src/app/x.rs", 4, 0),
+        ("a.txt", 0, 2),
+    ];
+
+    #[test]
+    fn dirs_first_alphabetical_and_single_child_chains_compressed() {
+        assert_eq!(
+            show(&build_tree(FILES)),
+            [
+                "d pkg/gui/controllers/helpers +5 -1",
+                "  f a.go +2 -1",
+                "  f b.go +3 -0",
+                "d src +5 -1",
+                "  d app +4 -0",
+                "    f x.rs +4 -0",
+                "  f main.rs +1 -1",
+                "f a.txt +0 -2",
+                "f z.txt +1 -0",
+            ]
+        );
+        let t = build_tree(FILES);
+        assert_eq!(t[4].path, "src/app");
+        assert_eq!(t[1].file, Some(1));
+        // A file alone in a directory is never folded into it.
+        let one = build_tree(&[("a/b/c.rs", 1, 0)]);
+        assert_eq!(show(&one), ["d a/b +1 -0", "  f c.rs +1 -0"]);
+    }
+
+    #[test]
+    fn flat_keeps_git_order_and_whole_paths() {
+        let f = build_flat(FILES);
+        let names: Vec<_> = f.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, FILES.iter().map(|f| f.0).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn collapsed_dirs_hide_their_rows_and_represent_them() {
+        let t = build_tree(FILES);
+        let all = visible(&t, &BTreeSet::new());
+        assert_eq!(all.rows, (0..t.len()).collect::<Vec<_>>());
+        let closed: BTreeSet<String> = ["src".to_string()].into();
+        let v = visible(&t, &closed);
+        assert_eq!(v.rows, [0, 1, 2, 3, 7, 8]);
+        // x.rs (entry 5) shows as the src row (row 3).
+        assert_eq!(v.rep[5], 3);
+        assert_eq!(v.rep[7], 4);
+        let inner: BTreeSet<String> = ["src/app".to_string()].into();
+        assert_eq!(visible(&t, &inner).rows, [0, 1, 2, 3, 4, 6, 7, 8]);
+        assert_eq!(parent(&t, 5), Some(4));
+        assert_eq!(parent(&t, 4), Some(3));
+        assert_eq!(parent(&t, 3), None);
+    }
+
+    #[test]
+    fn indent_stops_where_the_name_would_get_too_narrow() {
+        assert_eq!(indent(2, 40, 3), 4);
+        assert_eq!(indent(10, 20, 3), 8);
+        assert_eq!(indent(3, 5, 3), 0);
+    }
+
+    #[test]
+    fn middle_clipping_keeps_the_extension() {
+        assert_eq!(clip_middle("short.rs", 20), "short.rs");
+        let c = clip_middle("a_very_long_module_name.rs", 14);
+        assert!(c.contains('…') && c.ends_with("ame.rs"), "{c}");
+        assert_eq!(c.width(), 14);
+        let c = clip_middle("report-final.markdown", 12);
+        assert!(c.ends_with(".markdown"), "{c}");
+        assert_eq!(clip_middle("abc.md", 1), "…");
+        assert_eq!(clip_middle("abc.md", 0), "");
     }
 }

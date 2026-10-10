@@ -12,7 +12,7 @@ use common::{commit, git};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::config::{Config, SidebarShow};
 use debrief::app::sidebar::Pane;
-use debrief::app::{App, AppEvent, Focus, Screen, StartOptions};
+use debrief::app::{App, AppEvent, Focus, HelpLine, Screen, StartOptions};
 use debrief::session::View;
 use debrief::vcs;
 use debrief_review::Side;
@@ -591,4 +591,40 @@ fn a_saved_auto_wins_over_an_always_config() {
         app.saved_session(&id).unwrap().view.sidebar,
         SidebarShow::Auto
     );
+}
+
+/// The `<leader>e` rows of `g?`, and the leader clue's `e` row.
+fn leader_e_texts(app: &mut App) -> (Vec<String>, Vec<String>) {
+    keys(app, "g?");
+    let help = app
+        .help_view()
+        .unwrap()
+        .lines
+        .iter()
+        .filter_map(|l| match l {
+            HelpLine::Item { keys, desc } if keys == "<leader>e" => Some(desc.clone()),
+            _ => None,
+        })
+        .collect();
+    press(app, KeyCode::Esc);
+    keys(app, " ");
+    let clue = app
+        .clue_rows()
+        .into_iter()
+        .filter(|r| r.key == "e")
+        .map(|r| r.desc)
+        .collect();
+    press(app, KeyCode::Esc);
+    (help, clue)
+}
+
+#[test]
+fn in_auto_the_leader_e_help_says_it_pins() {
+    let f = fixture();
+    let pin = "show or hide the file list (pin in auto)".to_string();
+    let plain = "show or hide the file list".to_string();
+    let mut app = f.open("[view]\nsidebar = \"auto\"\n", 170);
+    assert_eq!(leader_e_texts(&mut app), (vec![pin.clone()], vec![pin]));
+    let mut app = f.open("", 170);
+    assert_eq!(leader_e_texts(&mut app), (vec![plain.clone()], vec![plain]));
 }

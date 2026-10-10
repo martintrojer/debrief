@@ -209,12 +209,12 @@ pub(crate) const BINDINGS: &[Binding] = {
             G::Launch,
             "on a .md file header: open it in ramble",
         ),
-        b("<leader>e", C, G::Files, "show or hide the file list"),
+        b("<leader>e", C, G::Files, FILE_LIST_TOGGLE),
         b("C-w h", C, G::Files, "to the pane on the left"),
         b("C-w l", C, G::Files, "to the pane on the right"),
         b("C-w h", F, G::Files, "to the pane on the left"),
         b("C-w l", F, G::Files, "to the pane on the right"),
-        b("<leader>e", F, G::Files, "show or hide the file list"),
+        b("<leader>e", F, G::Files, FILE_LIST_TOGGLE),
         b("g?", F, G::General, "help"),
         b("j, Down", F, G::Files, "next file"),
         b("k, Up", F, G::Files, "previous file"),
@@ -345,6 +345,9 @@ pub(crate) const BINDINGS: &[Binding] = {
     ]
 };
 
+/// `<leader>e` on the commit screen; in auto it says it pins the list.
+const FILE_LIST_TOGGLE: &str = "show or hide the file list";
+
 /// `C-h/j/k/l` (`[keys] pane_nav`): the panes, then tmux's past the edge.
 const PANE_NAV: &[Binding] = {
     use Ctx::{Commit as C, Files as F, Log as L};
@@ -366,11 +369,18 @@ const PANE_NAV: &[Binding] = {
 };
 
 impl App {
-    /// [`BINDINGS`], the `C-h/j/k/l` rows while `[keys] pane_nav` is on,
+    /// [`BINDINGS`] (`<leader>e` saying it pins while auto), the `C-h/j/k/l` rows while `[keys] pane_nav` is on,
     /// the comment box's Tab row when `[review] kinds` lists some, and a
     /// row per `[[launch]]` key on the log, the diff and the file list.
     pub(crate) fn bindings(&self) -> Vec<Binding> {
         let mut out: Vec<Binding> = BINDINGS.to_vec();
+        if self.sidebar.show == super::config::SidebarShow::Auto {
+            for b in &mut out {
+                if b.desc == FILE_LIST_TOGGLE {
+                    b.desc = Cow::Borrowed("show or hide the file list (pin in auto)");
+                }
+            }
+        }
         if self.config.keys.pane_nav {
             out.extend_from_slice(PANE_NAV);
         }

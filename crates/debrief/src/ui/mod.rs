@@ -96,7 +96,7 @@ mod tests {
     use ratatui::style::Color;
 
     #[test]
-    fn blends_match_the_research_table() {
+    fn blends_match_the_mocha_values() {
         assert_eq!(ADD_BG, Color::Rgb(0x39, 0x45, 0x45));
         assert_eq!(DEL_BG, Color::Rgb(0x48, 0x33, 0x46));
         assert_eq!(blend(GREEN, 16), Color::Rgb(0x33, 0x3d, 0x40));

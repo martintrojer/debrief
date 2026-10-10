@@ -1,13 +1,13 @@
-//! The review batch in the app (spec §3 "Comments"): the debrief-review
+//! The review batch in the app: the debrief-review
 //! batch for `Vcs::root()`, shared with ramble, re-read at most once a
 //! second from the tick. Comments made on the displayed commit mark their
 //! rows in the gutter; `]r` / `[r` jump between them, `K` shows them.
 //!
-//! No re-anchoring (spec Q11): a comment marks rows only when its revision
+//! No re-anchoring: a comment marks rows only when its revision
 //! is the displayed commit. A comment on an earlier version of a jj change
 //! stays in the batch with its own revision and excerpt.
 //!
-//! On the working copy (spec Q23) the markers are working-copy comments
+//! On the working copy the markers are working-copy comments
 //! (no revision, ramble's too) on the new side, and comments on the base
 //! commit's old side.
 
@@ -124,7 +124,7 @@ impl App {
             return false;
         };
         let fd = &diff.files[f];
-        // The side's own path (K11). Old-side comments match only the old
+        // The side's own path. Old-side comments match only the old
         // path; new-side ones also the display path older comments use.
         let path_ok = match c.side {
             Some(Side::Old) => fd.old_path.as_deref() == Some(c.path.as_str()),

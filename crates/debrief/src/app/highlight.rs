@@ -1,4 +1,4 @@
-//! Syntax highlighting of diff lines (spec Q25; tuicr's per-hunk scheme).
+//! Syntax highlighting of diff lines, per hunk as tuicr does it.
 //!
 //! Each hunk is highlighted on its own, from a fresh parser state, as two
 //! runs: the old side (context and removed lines) and the new side

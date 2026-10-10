@@ -1,4 +1,4 @@
-//! Side by side (spec §3 "Side by side", Q30): `t`, the minimum width and
+//! Side by side: `t`, the minimum width and
 //! the resize fallback, the paired rows, `Tab`, comments, `<leader>o`,
 //! search, markers and the cursor across a toggle, on a real git repo.
 

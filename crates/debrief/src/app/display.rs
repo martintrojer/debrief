@@ -1,4 +1,4 @@
-//! How a row's text maps to screen cells (spec Q25). `Row.text` stays raw
+//! How a row's text maps to screen cells. `Row.text` stays raw
 //! (yank, search, comments and excerpts use it as is); rendering, cursor
 //! columns and search highlights all go through [`cells`]:
 //! - a tab runs to the next multiple of [`TAB_WIDTH`] columns;

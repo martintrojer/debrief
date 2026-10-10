@@ -1,4 +1,4 @@
-//! Launchers (spec §3 "ramble hand-off", "Editor"): `[[launch]]` commands
+//! Launchers: `[[launch]]` commands
 //! run with the TUI suspended, ramble's grammar and variables. `edit`
 //! (`<leader>o`) opens `$EDITOR` at the working-copy file and line under
 //! the cursor; `md` (Enter on a `.md` file header) hands the file to ramble.
@@ -167,8 +167,8 @@ pub const NO_FILE_HERE: &str = "No file here";
 /// Status for `<leader>o` in the log on a commit with no files.
 pub const NO_FILES: &str = "No files in this commit";
 
-/// The new-side line a diff row stands for in the working copy (spec §3
-/// "Editor"): its own new line; a removed line the next new line in the
+/// The new-side line a diff row stands for in the working copy:
+/// its own new line; a removed line the next new line in the
 /// hunk, else the previous one's + 1, else the hunk's start; a hunk
 /// header its start; anything else in a file line 1. `None`: no file.
 fn row_line(diff: &CommitDiff, v: &CommitView, row: usize) -> Option<(usize, u32)> {
@@ -237,7 +237,7 @@ impl App {
         match self.effect.take() {
             Some(Effect::Launch(cmd)) => {
                 self.run_launch(&cmd);
-                // The command may have changed files (spec K6, Q24).
+                // The command may have changed files.
                 self.after_launch();
             }
             Some(Effect::EditComment(d)) => self.run_comment_editor(d),

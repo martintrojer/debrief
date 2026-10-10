@@ -1,5 +1,5 @@
-//! Saved review sessions in the app (spec §3 "Saved review sessions",
-//! Q31–Q35, Q42): `<leader>ss` saves the open commit's comments and view;
+//! Saved review sessions in the app:
+//! `<leader>ss` saves the open commit's comments and view;
 //! opening a commit with a session restores its view (and, the first time
 //! this run, its unsent comments into the batch); the log marks such rows
 //! `▣N`; quitting with unsaved review work asks first; `<leader>rs` lists
@@ -96,7 +96,7 @@ fn from_view_context(c: ViewContext) -> Context {
     }
 }
 
-/// Comment `c` belongs to the session of `key` (S8): rev.commit == key;
+/// Comment `c` belongs to the session of `key`: rev.commit == key;
 /// for the working copy every comment without a revision and removed-line
 /// comments on its base `base`.
 fn belongs(key: &str, c: &Comment, base: Option<&str>) -> bool {
@@ -269,7 +269,7 @@ impl App {
         }
     }
 
-    /// The batch's comments of commit `key` (S8): rev.commit == key; for
+    /// The batch's comments of commit `key`: rev.commit == key; for
     /// the working copy every comment without a revision and removed-line
     /// comments on its base.
     fn batch_comments(&self, key: &str) -> Vec<Comment> {
@@ -333,7 +333,7 @@ impl App {
         }
     }
 
-    /// Entering log row `i` (S2): for a commit with a session, before its
+    /// Entering log row `i`: for a commit with a session, before its
     /// diff loads, put back the view captured this run, else the saved
     /// one: context, layout and file list app-wide, as if `T` / `t` /
     /// `<leader>e` were pressed; the cursor (and focus) once it loads. The first visit this run also restores
@@ -375,7 +375,7 @@ impl App {
         });
     }
 
-    /// Add the session's unsent comments the batch lacks (S6); a remapped
+    /// Add the session's unsent comments the batch lacks; a remapped
     /// id is written back to the session. Returns the restore status.
     fn session_restore_comments(&mut self, key: &str) -> String {
         let Some(s) = self.sessions.saved.get(key).cloned() else {
@@ -523,7 +523,7 @@ impl App {
             }
             QuitChoice::Save => {
                 self.mode = self.sessions.quit_from;
-                // A batch that can't be read can't be saved (S14).
+                // A batch that can't be read can't be saved.
                 if let Err(e) = self.batch_reload() {
                     return self.set_status(format!("session not saved: {e} (not quitting)"));
                 }
@@ -552,7 +552,7 @@ impl App {
         }
     }
 
-    /// `y` in the quit prompt (S4): the batch to the clipboard (OSC 52,
+    /// `y` in the quit prompt: the batch to the clipboard (OSC 52,
     /// written now), then the copied comments leave the batch and are
     /// marked sent, as a send with the clipboard does.
     fn copy_batch(&mut self) -> std::io::Result<()> {
@@ -569,7 +569,7 @@ impl App {
             &self.config.review.kinds,
         );
         (self.terminal)(super::osc52(&md).as_bytes())?;
-        // Mark sent first: a comment left unmarked would come back (Q42).
+        // Mark sent first: a comment left unmarked would come back.
         self.session_sent(&ids)
             .map_err(|e| std::io::Error::new(e.kind(), format!("session not updated: {e}")))?;
         if let Some(r) = &mut self.review {
@@ -578,7 +578,7 @@ impl App {
         Ok(())
     }
 
-    /// Comments `ids` were sent or copied by debrief (S12): their sessions
+    /// Comments `ids` were sent or copied by debrief: their sessions
     /// mark them sent, and every dirty bit clears. Called before the
     /// comments leave the batch; on a write error it stops, the dirty
     /// bits stay and the caller keeps the batch.

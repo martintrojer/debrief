@@ -3,7 +3,7 @@ mod common;
 use common::{JjEnv as Env, assert_same, have_jj, snapshot};
 use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
 
-/// The strict read-only tests open without snapshots (K7).
+/// The strict read-only tests open without snapshots.
 const NO_SNAPSHOT: OpenOptions = OpenOptions { snapshot: false };
 
 fn sample() -> Env {
@@ -203,7 +203,7 @@ fn failed_command_carries_stderr() {
     assert!(err.contains("nosuchbookmark"), "{err}");
 }
 
-// Snapshots (spec Q21, K4).
+// Snapshots.
 
 /// The text of `a.txt`'s added lines in `@`'s diff.
 fn at_added(v: &dyn vcs::Vcs) -> Vec<String> {

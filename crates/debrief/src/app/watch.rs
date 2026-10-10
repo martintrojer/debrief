@@ -1,4 +1,4 @@
-//! Live reload (spec §3 "Log view"): a `notify` watcher on the files that
+//! Live reload: a `notify` watcher on the files that
 //! change when the repository does, debounced into one callback.
 //!
 //! git: `HEAD`, `packed-refs` and `refs/` as `git rev-parse --git-path`
@@ -7,7 +7,7 @@
 //! file (a secondary workspace). Parent dirs are watched, since tools
 //! replace files by rename.
 //!
-//! git's working tree (spec Q24, K9): [`tree_watcher`] watches the root
+//! git's working tree: [`tree_watcher`] watches the root
 //! recursively, plus the dirs of `info/exclude` and `core.excludesFile`
 //! when they lie outside it. Events in the git dir never count. An
 //! untracked path counts unless git ignores it (nested `.gitignore`s,
@@ -214,7 +214,7 @@ pub fn tree_watcher(root: &Path, emit: impl Fn() + Send + 'static) -> Result<Rep
     RepoWatcher::with_filter(&dirs, move |p| filter.is_relevant(p), emit)
 }
 
-/// Which working-tree paths refresh git's working copy (spec K9).
+/// Which working-tree paths refresh git's working copy.
 pub struct TreeFilter {
     root: PathBuf,
     git_dir: PathBuf,

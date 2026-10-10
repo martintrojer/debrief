@@ -1,4 +1,4 @@
-//! `C-h/j/k/l` (Q36–Q39): file list <-> diff, file list -> old -> new
+//! `C-h/j/k/l`: file list <-> diff, file list -> old -> new
 //! side by side, the tmux hand-off at an edge only inside tmux, the
 //! comment box keeping its keys, and `[keys] pane_nav = false`.
 

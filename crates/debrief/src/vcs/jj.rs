@@ -7,7 +7,7 @@
 //! `op_heads/heads` when the heads diverge. So we read the heads
 //! ourselves, refuse when they diverge, and pass the single head's ID.
 //!
-//! With snapshots on (spec Q21, the default), [`Vcs::refresh`] runs
+//! With snapshots on (the default), [`Vcs::refresh`] runs
 //! `jj util snapshot` through its own command builder, with neither
 //! `--ignore-working-copy` nor `--at-op`, then pins reads to the one op
 //! head it leaves. That pin is kept: when a later snapshot fails (another
@@ -101,7 +101,7 @@ impl Jj {
         }
     }
 
-    /// `jj util snapshot`, without the read-only flags (Q21).
+    /// `jj util snapshot`, without the read-only flags.
     fn snapshot(&self) -> Result<()> {
         let argv: Vec<&OsStr> = vec![
             "--no-pager".as_ref(),

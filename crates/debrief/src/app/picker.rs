@@ -1,6 +1,6 @@
 //! `<leader>rl`: a picker over the whole batch (ramble's comments too),
 //! `<leader>rs`: the same picker over the repo's saved review sessions,
-//! and `<leader>rr`: the hand-back (spec §3 "Comments", AMEND H).
+//! and `<leader>rr`: the hand-back.
 //!
 //! Typed text filters (case-insensitive substring over label and body);
 //! `C-n`/`C-p` or Down/Up move; Enter goes to the comment (opens the
@@ -320,7 +320,7 @@ impl App {
         }
     }
 
-    /// Enter in the picker (D8). A working-copy comment on an existing
+    /// Enter in the picker. A working-copy comment on an existing
     /// `.md` file goes to ramble; other working-copy comments only say
     /// where they are. A diff comment opens its exact commit at its first
     /// line, if that commit is in the log; another version of the change
@@ -451,7 +451,7 @@ impl App {
         };
         self.after_export();
         // Mark sent before leaving the batch: a comment left unmarked in
-        // its session would come back on the next run (Q42).
+        // its session would come back on the next run.
         if let Err(e) = self.session_sent(&ids) {
             self.set_status(format!(
                 "Review {how}, but the batch wasn't cleared: session not updated: {e} (sending again repeats it)"

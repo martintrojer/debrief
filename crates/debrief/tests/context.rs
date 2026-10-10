@@ -1,4 +1,4 @@
-//! `T`, hunks / the full file (spec §3 "View modes", Q29): the reload
+//! `T`, hunks / the full file: the reload
 //! keeps the cursor line, `]c` walks change blocks in the full file, the
 //! mode persists and comes from `[view] context`, comments cross modes.
 

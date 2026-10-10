@@ -1,4 +1,4 @@
-//! Side by side (spec §3 "Side by side", Q30): a second row model built
+//! Side by side: a second row model built
 //! from the same [`CommitDiff`], old lines on the left, new on the right.
 //!
 //! Both sides have one row per screen row. Message, file header, hunk

@@ -1,4 +1,4 @@
-//! The working copy in the app (spec §3 "Working copy", Q21–Q24): git's
+//! The working copy in the app: git's
 //! synthetic row, its commit view, comments on it, refresh; jj's `@`
 //! after a snapshot. Temp repos and cache dirs; nothing sleeps except the
 //! tree-watcher test, which waits on its debounced channel.
@@ -594,7 +594,7 @@ fn a_tracked_symlink_into_an_ignored_file_is_relevant() {
     assert!(filter.is_relevant(&f.root.join("ext")));
 }
 
-// jj: @ is the working copy, after a snapshot (Q21, K5–K8).
+// jj: @ is the working copy, after a snapshot.
 
 fn jj_app(e: &JjEnv, opts: OpenOptions, revset: Option<&str>) -> App {
     let cache = e.root.parent().unwrap().join("cache");

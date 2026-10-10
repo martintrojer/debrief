@@ -3,7 +3,7 @@
 //! Every read runs with flags that stop the tool from writing to the
 //! repository (no optional locks, no working-copy snapshot, no op-head
 //! merge, no textconv cache). The one exception is jj's snapshot
-//! ([`Vcs::refresh`], spec Q21): it leaves files alone but records the
+//! ([`Vcs::refresh`]): it leaves files alone but records the
 //! working copy as a new operation, as any jj command does;
 //! [`OpenOptions::snapshot`] turns it off.
 
@@ -63,7 +63,7 @@ pub struct FileDiff {
     pub copied: bool,
 }
 
-/// A commit as `git log --stat` shows it (spec Q27).
+/// A commit as `git log --stat` shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitStat {
     pub message: String,
@@ -182,8 +182,7 @@ pub enum LineKind {
     Removed,
 }
 
-/// How much unchanged text a diff shows around its changes (spec §3
-/// "View modes").
+/// How much unchanged text a diff shows around its changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Context {
     /// The tool's default context (hunks).
@@ -210,7 +209,7 @@ impl Default for OpenOptions {
     }
 }
 
-/// git's uncommitted changes (spec §3 "Working copy").
+/// git's uncommitted changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkingCopy {
     /// `HEAD`; `None` before the first commit.

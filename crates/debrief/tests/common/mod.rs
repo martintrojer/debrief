@@ -59,7 +59,7 @@ fn walk(base: &Path, dir: &Path, out: &mut Snapshot) {
 }
 
 /// [`snapshot`] of a `.git` dir, without the mtimes of split-index
-/// `sharedindex.*` files: git itself refreshes those on any read (K2).
+/// `sharedindex.*` files: git itself refreshes those on any read.
 /// Their contents still count.
 pub fn git_dir_snapshot(dir: &Path) -> Snapshot {
     let mut s = snapshot(dir);

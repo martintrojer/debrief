@@ -129,7 +129,7 @@ impl Git {
     }
 }
 
-/// An untracked file as an added [`FileDiff`] (spec K10): regular files
+/// An untracked file as an added [`FileDiff`]: regular files
 /// read up to [`MAX_UNTRACKED`] (binary when a NUL is in the first 8 KiB),
 /// a symlink as one line holding its target (never followed), anything
 /// else a placeholder.

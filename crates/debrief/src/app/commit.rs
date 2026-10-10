@@ -1,4 +1,4 @@
-//! The commit screen (spec §3 "Commit view"): the message, then every
+//! The commit screen: the message, then every
 //! file's unified diff in one scrolling stream of [`Row`]s.
 //!
 //! `show()` runs on a worker thread: the [`Vcs`](crate::vcs::Vcs) handle is
@@ -197,7 +197,7 @@ pub fn flatten(diff: &CommitDiff) -> Vec<Row> {
     rows
 }
 
-/// The commit-view message of git's working copy (spec §3).
+/// The commit-view message of git's working copy.
 pub fn working_header(base: Option<&CommitInfo>) -> String {
     match base {
         Some(b) => format!(
@@ -484,7 +484,7 @@ impl App {
     /// Open the log's commit `i`: mark it seen, switch screens and start
     /// loading its diff. With no event sender (unit tests) it loads here.
     /// The working copy is brought up to date first: git re-reads it, jj
-    /// snapshots and opens the current `@` (spec K6).
+    /// snapshots and opens the current `@`.
     pub(super) fn open_index(&mut self, i: usize) {
         let Some(row) = self.rows.get(i) else {
             return;

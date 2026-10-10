@@ -1,4 +1,4 @@
-//! Search and filter on the log (spec §3 "Log search and filter", Q28):
+//! Search and filter on the log:
 //! `/` `?` `n` `N` move between matching rows, `f` narrows the list as you
 //! type. Both match the summary, the author, the commit ID and the change
 //! ID (substring, smart case, see [`find_all`]), over the loaded commits.

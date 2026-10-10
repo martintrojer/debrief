@@ -1,4 +1,4 @@
-//! Commit-view rendering (spec Q25): tabs, CR and control characters,
+//! Commit-view rendering: tabs, CR and control characters,
 //! full-width row backgrounds, sidebar status letters, syntax colours. A fake `Vcs`
 //! serves one commit with a hand-built diff.
 

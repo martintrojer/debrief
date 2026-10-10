@@ -1,4 +1,4 @@
-//! Seen state (spec §3 "Seen state"): which commits, and for jj which
+//! Seen state: which commits, and for jj which
 //! changes, the user has looked at. One JSON file per repo root under
 //! `<cache>/seen/`, written by rename. A single writer is assumed.
 

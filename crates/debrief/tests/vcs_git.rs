@@ -336,7 +336,7 @@ fn partial_clone_missing_objects_error() {
     assert_same(&before, &snapshot(&clone.join(".git")));
 }
 
-// The working copy (spec §3 "Working copy").
+// The working copy.
 
 fn open(root: &Path) -> Box<dyn vcs::Vcs> {
     vcs::open(root, vcs::OpenOptions::default()).unwrap()

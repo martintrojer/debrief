@@ -1,9 +1,9 @@
 //! The log screen: loading and reloading the commit list, its cursor
 //! motions, and marking commits seen.
 //!
-//! The working copy (spec §3 "Working copy"): git gets a synthetic row on
+//! The working copy: git gets a synthetic row on
 //! top while the tree is dirty, never seen or new; jj marks the row of
-//! this workspace's `@`. Loading snapshots jj first (Q21); a snapshot
+//! this workspace's `@`. Loading snapshots jj first; a snapshot
 //! error goes to the status line and the log loads from the last pin.
 //!
 //! git's row (dirty or not, and its file count) comes from

@@ -1,4 +1,4 @@
-//! The diff pane side by side (spec §3 "Side by side"): old lines on the
+//! The diff pane side by side: old lines on the
 //! left, new on the right, each half with its own `●` marker column,
 //! line-number column, sign, row backgrounds, syntax colours (a context
 //! line's on the left from the old side) and

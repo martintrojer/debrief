@@ -1,4 +1,4 @@
-//! The `g?` help overlay (spec §3 "Help"): every binding that works now,
+//! The `g?` help overlay: every binding that works now,
 //! grouped, scrollable and filterable.
 //!
 //! Dispatch stays in the `match`-based keymaps; [`BINDINGS`] describes

@@ -1,4 +1,4 @@
-//! Saved review sessions (spec §3, Q31–Q35, Q42): `<leader>ss`, restore on
+//! Saved review sessions: `<leader>ss`, restore on
 //! open (view and comments), `▣N` on the log, the quit prompt, the
 //! `<leader>rs` list, and a jj rewrite. A temp repo, cache and state dir
 //! per test.

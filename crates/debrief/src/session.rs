@@ -1,4 +1,4 @@
-//! Saved review sessions (spec §3 "Saved review sessions"): one JSON file
+//! Saved review sessions: one JSON file
 //! per (repo root, commit) under
 //! `<state>/sessions/<16 hex of blake3(root)>/<commit id>.json`; the
 //! working copy's is `working-copy.json`. Written by tmp + rename; nothing

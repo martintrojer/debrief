@@ -1,4 +1,4 @@
-//! Comments on diff lines (spec §3 "Comments"): normal `cc` on the cursor
+//! Comments on diff lines: normal `cc` on the cursor
 //! row, visual `c` on the selection. Side, lines and excerpt are frozen
 //! when `c` is pressed; a bordered box anchored below the selected rows
 //! (above when it doesn't fit) takes the body, as in ramble: Enter saves,
@@ -8,7 +8,7 @@
 //! diff behind it (the box then places itself for that view, see
 //! [`App::comment_fit`]). The rows stay highlighted while typing.
 //!
-//! On the working copy (spec Q23, K11) new and context lines make
+//! On the working copy new and context lines make
 //! ramble-style comments: no revision, the new path, the line numbers of
 //! the file on disk. Removed lines anchor to the base (git `HEAD`, jj
 //! `@-`) on its old side and old path; a jj merge `@` has no single base,
@@ -560,7 +560,7 @@ impl App {
         }
     }
 
-    /// The draft for diff rows `lo..=hi` (spec §3, D9): one file's Line
+    /// The draft for diff rows `lo..=hi`: one file's Line
     /// rows; the new side when any is added or context, else the old side;
     /// the excerpt is the first [`EXCERPT_LINES`] of them as diff text.
     fn draft_for(&self, lo: usize, hi: usize) -> Result<Draft, String> {
@@ -618,7 +618,7 @@ impl App {
             .find(|r| r.info.commit == v.commit)
             .map(|r| &r.info)
             .ok_or("The commit is no longer in the log")?;
-        // The side's own path (K11): a renamed file's old lines are on its
+        // The side's own path: a renamed file's old lines are on its
         // old path.
         let path = match side {
             Side::Old => f.old_path.as_deref().unwrap_or(file_path(f)),
@@ -639,7 +639,7 @@ impl App {
         })
     }
 
-    /// A draft on the working copy (Q23, K11).
+    /// A draft on the working copy.
     fn working_draft(
         &self,
         f: &FileDiff,

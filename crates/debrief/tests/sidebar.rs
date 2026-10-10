@@ -1,4 +1,4 @@
-//! The commit view's file list (Q40–Q41): `[view] sidebar` always /
+//! The commit view's file list: `[view] sidebar` always /
 //! never / auto (peek), `sidebar_side`, `sidebar_auto_hide_below`,
 //! `sidebar_width` and its bounds, the peek's triggers, the overlay when
 //! there is no room beside the diff, and saved sessions' old `true` /

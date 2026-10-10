@@ -1,4 +1,4 @@
-//! The log's stats pane (spec §3 "Log split", Q27): the commit under the
+//! The log's stats pane: the commit under the
 //! cursor as `git log --stat` shows it.
 //!
 //! A stat loads on a worker thread (`vcs::reopen(...).stat(id)`, like the

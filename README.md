@@ -81,7 +81,7 @@ commit.
 
 ## Keys
 
-`<leader>` is Space. `g?` lists every key that works where you are, and
+`<leader>` is Space (`[keys] leader`). `g?` lists every key that works where you are, and
 after a pause in a key sequence a box shows what can follow.
 
 **Log**
@@ -211,7 +211,37 @@ same row.
 ## Config
 
 `~/.config/debrief/config.toml` (`$XDG_CONFIG_HOME` is respected,
-`--config PATH` overrides it). Every key is optional:
+`--config PATH` overrides it). Every key is optional.
+`debrief --init-config` writes
+[`crates/debrief/config.default.toml`](crates/debrief/config.default.toml)
+there: every option commented out with its default and a line on what it
+does. It refuses to overwrite a file that exists (exit 1). An unknown key
+or a bad value stops debrief at start (exit 2) with one line on stderr
+naming the file, the line, the key and what it allows, e.g.
+`debrief: config error at ~/.config/debrief/config.toml line 3:
+view.layout: unknown variant `side`, expected `unified` or `split``.
+
+### Toggles
+
+Each toggle's config key sets its state at start; the key flips it for the
+session. The rows without a key are set only in the file.
+
+| Toggle | Key | Config key | Default |
+|---|---|---|---|
+| file list on the commit screen | `<leader>e` | `view.sidebar` | `true` |
+| stats pane on the log | `<leader>e` | `view.stats` | `true` |
+| hunks / the full file | `T` | `view.context` | `"hunks"` (or `"full"`) |
+| unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
+| narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
+| syntax highlighting | — | `render.highlight` | `true` |
+| key clue after a pause in a sequence | — | `keys.clue` | `true` |
+| the `<leader>` key | — | `keys.leader` | `" "` |
+| comment kinds Tab cycles through | — | `review.kinds` | issue, suggestion, question, nit |
+
+debrief never turns on mouse capture, so there is no mouse toggle: the
+terminal keeps its own selection and scrolling.
+
+An example:
 
 ```toml
 [send]
@@ -237,10 +267,15 @@ kinds = [
 highlight = true
 
 [view]
+sidebar = true               # the commit view's file list at start (<leader>e toggles)
 stats = true                 # the log's stats pane at start (<leader>e toggles)
 context = "hunks"            # the commit view: "hunks" or "full" (whole files; T toggles)
 layout = "unified"           # the commit view: "unified" or "split" (side by side; t toggles)
 split_min_width = 140        # narrowest diff pane (without the file list) shown side by side
+
+[keys]
+leader = " "                 # one character
+clue = true                  # after a pause in a key sequence, show what can follow
 
 # Launchers run with the TUI suspended, as in ramble. Arguments are not
 # passed through a shell. Variables: ${file} ${line} ${root} ${editor}

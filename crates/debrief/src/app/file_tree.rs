@@ -293,15 +293,29 @@ impl CommitView {
     }
 
     /// Switch the list between tree and flat; the diff's files follow
-    /// the new order, the cursor kept on its line (and its row on
-    /// screen) and the selection on its file.
+    /// the new order, the cursor kept on its row and column (and its
+    /// row on screen) and the selection on its file. A file's rows are
+    /// the same in either order, so the cursor keeps its offset from
+    /// its file's header: a hunk header stays that hunk header.
     pub(super) fn set_tree(&mut self, tree: bool) {
         if self.tree == tree {
             return;
         }
         self.tree = tree;
         let sel = self.first_file(self.side_sel);
-        let anchor = self.anchor();
+        // The cursor's file and offset from its header (a blank row is
+        // the one above the next header); rows above every file (the
+        // message) don't move.
+        let blank = self
+            .rows
+            .get(self.cur.row)
+            .is_some_and(|r| r.kind == super::RowKind::Blank);
+        let at = self
+            .file_at(self.cur.row + usize::from(blank))
+            .and_then(|f| {
+                let h = self.header_row(f)?;
+                Some((f, (self.cur.row + usize::from(blank)) - h))
+            });
         let Some(diff) = self.diff.take() else {
             return;
         };
@@ -309,8 +323,14 @@ impl CommitView {
         self.build_entries(&diff);
         self.build_rows(&diff);
         self.diff = Some(diff);
-        if let Some(r) = anchor.and_then(|a| self.anchor_row(&a)) {
-            self.goto_row(r.min(self.last_row()));
+        if let Some((f, off)) = at
+            && let Some(h) = self.header_row(f)
+        {
+            // The column too: `want_col` is the cursor's.
+            self.cur.row = (h + off)
+                .saturating_sub(usize::from(blank))
+                .min(self.last_row());
+            self.clamp_cursor();
             self.scroll = self
                 .cur
                 .row

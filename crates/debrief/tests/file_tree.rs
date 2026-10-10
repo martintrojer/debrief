@@ -222,6 +222,51 @@ fn backtick_keeps_the_cursor_on_its_file() {
     assert_eq!(app.sidebar_selected(), 3, "the selection stays on main.rs");
 }
 
+/// The cursor on row `row` (`{n}G` counts from 1).
+fn goto(app: &mut App, row: usize) {
+    keys(app, &format!("{}G", row + 1));
+    assert_eq!(app.commit_cursor().row, row);
+}
+
+#[test]
+fn backtick_keeps_the_cursor_row_and_column() {
+    let f = fixture();
+    let mut app = f.open("");
+    let d = app.commit_diff().unwrap().clone();
+    let in_file = |a: &App, r: usize, p: &str| {
+        a.commit_rows()[r]
+            .file
+            .is_some_and(|i| debrief::app::commit::file_path(&d.files[i]) == p)
+    };
+    // A hunk header stays that hunk header, not its file's header.
+    let hunk = (0..app.commit_rows().len())
+        .find(|&r| {
+            app.commit_rows()[r].kind == RowKind::HunkHeader && in_file(&app, r, "src/main.rs")
+        })
+        .unwrap();
+    goto(&mut app, hunk);
+    to_list(&mut app);
+    keys(&mut app, "`");
+    let r = app.commit_cursor().row;
+    assert_eq!(app.commit_rows()[r].kind, RowKind::HunkHeader);
+    assert!(in_file(&app, r, "src/main.rs"));
+    // A column on a line is kept.
+    press(&mut app, KeyCode::Esc);
+    let line = (0..app.commit_rows().len())
+        .find(|&r| in_file(&app, r, "src/main.rs") && app.commit_rows()[r].line.is_some())
+        .unwrap();
+    goto(&mut app, line);
+    keys(&mut app, "5l");
+    let before = app.commit_cursor();
+    assert_eq!(before.col, 5);
+    to_list(&mut app);
+    keys(&mut app, "`");
+    let after = app.commit_cursor();
+    assert_eq!(app.commit_rows()[after.row].text, "fn main() {}");
+    assert!(in_file(&app, after.row, "src/main.rs"));
+    assert_eq!(after.col, before.col);
+}
+
 #[test]
 fn enter_h_l_collapse_and_expand() {
     let f = fixture();

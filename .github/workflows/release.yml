@@ -1,7 +1,7 @@
 name: Release
 
 # A pushed tag starting with `v` (v0.1.0, v001, ...) builds the debrief
-# binary for macOS arm64 and Linux x86_64 (Ubuntu 24.04 LTS) and attaches
+# binary for macOS arm64 (macos-15) and Linux x86_64 (Ubuntu 26.04 LTS) and attaches
 # both to a GitHub Release named after the tag.
 on:
   push:
@@ -21,9 +21,9 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
+            os: ubuntu-26.04
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@v4
         with:

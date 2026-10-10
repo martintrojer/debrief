@@ -1094,3 +1094,51 @@ fn a_save_replaces_a_corrupt_session_file() {
     assert_eq!(app.status(), "Session saved (1 comment)");
     assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
 }
+
+#[test]
+fn a_send_that_cannot_read_a_session_keeps_the_batch() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config.send.command = vec!["true".into()];
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    // The session can't be read: a directory where its file was.
+    let path = f.store().path(&top).unwrap();
+    let saved = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert!(
+        app.status().contains("session not updated"),
+        "{}",
+        app.status()
+    );
+    assert_eq!(f.comments().len(), 1, "still in the batch");
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::write(&path, saved).unwrap();
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
+}
+
+#[test]
+fn a_send_skips_a_file_that_is_not_a_session() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config.send.command = vec!["true".into()];
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    std::fs::write(f.store().path("deadbeef").unwrap(), "{oops").unwrap();
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert!(app.status().starts_with("Review sent"), "{}", app.status());
+    assert!(f.comments().is_empty());
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 0);
+}

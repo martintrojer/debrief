@@ -230,6 +230,7 @@ impl App {
         self.sessions.saved = list.into_iter().map(|s| (s.commit.clone(), s)).collect();
         let errors: Vec<String> = errors
             .into_iter()
+            .map(|e| e.to_string())
             .filter(|e| self.sessions.reported.insert(e.clone()))
             .collect();
         if let Some(e) = errors.first() {
@@ -669,11 +670,18 @@ impl App {
 
     /// Comments `ids` were sent or copied by debrief: the sessions, re-read
     /// from the store, mark them sent, and every dirty bit clears. Called
-    /// before the comments leave the batch; on a write error it stops, the
-    /// dirty bits stay and the caller keeps the batch.
+    /// before the comments leave the batch; when the sessions can't be
+    /// read (a file that isn't a session is skipped) or written it stops,
+    /// the dirty bits stay and the caller keeps the batch.
     pub(super) fn session_sent(&mut self, ids: &[u64]) -> std::io::Result<()> {
         let now = session::now();
-        let (list, _) = self.sessions.store.list();
+        let (list, errors) = self.sessions.store.list();
+        if let Some(e) = errors
+            .into_iter()
+            .find(|e| e.kind() != io::ErrorKind::InvalidData)
+        {
+            return Err(e);
+        }
         self.sessions.saved = list.iter().map(|s| (s.commit.clone(), s.clone())).collect();
         for mut s in list {
             let k = s.commit.clone();

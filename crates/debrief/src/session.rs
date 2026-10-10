@@ -187,6 +187,11 @@ fn invalid(msg: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
 }
 
+/// `e` prefixed with `path`, its kind kept.
+fn in_file(path: &Path, e: io::Error) -> io::Error {
+    io::Error::new(e.kind(), format!("{}: {e}", path.display()))
+}
+
 impl Store {
     /// The store for `root` (canonicalised when possible, as the review
     /// batch does) under `state_dir`. Creates nothing.
@@ -264,27 +269,31 @@ impl Store {
     }
 
     /// Every readable session, newest save first, and an error per file
-    /// that can't be read.
-    pub fn list(&self) -> (Vec<Session>, Vec<String>) {
+    /// that can't be read (`InvalidData`: not a session of this root),
+    /// or for the directory.
+    pub fn list(&self) -> (Vec<Session>, Vec<io::Error>) {
         let mut out = Vec::new();
         let mut errors = Vec::new();
         let entries = match fs::read_dir(&self.dir) {
             Ok(e) => e,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return (out, errors),
-            Err(e) => return (out, vec![format!("{}: {e}", self.dir.display())]),
+            Err(e) => return (out, vec![in_file(&self.dir, e)]),
         };
         for e in entries.flatten() {
             let path = e.path();
             if path.extension().is_none_or(|x| x != "json") {
                 continue;
             }
-            match fs::read(&path).and_then(|b| self.parse(&path, &b)) {
-                Ok(s) => out.push(s),
-                Err(e) => errors.push(e.to_string()),
+            match fs::read(&path) {
+                Ok(b) => match self.parse(&path, &b) {
+                    Ok(s) => out.push(s),
+                    Err(e) => errors.push(e),
+                },
+                Err(e) => errors.push(in_file(&path, e)),
             }
         }
         out.sort_by(|a, b| b.saved.cmp(&a.saved).then_with(|| a.commit.cmp(&b.commit)));
-        errors.sort();
+        errors.sort_by_key(|e| e.to_string());
         (out, errors)
     }
 
@@ -399,5 +408,51 @@ mod tests {
         let got = resolve_state_dir(None, None, home);
         assert_eq!(got, Some(PathBuf::from("/home/me/.local/state/debrief")));
         assert_eq!(resolve_state_dir(None, None, None), None);
+    }
+
+    /// Set: the run prints `state_dir()` and checks nothing.
+    const PRINT_STATE_DIR: &str = "DEBRIEF_TEST_PRINT_STATE_DIR";
+
+    /// `state_dir()` in a fresh run of this test binary with
+    /// `DEBRIEF_STATE_DIR` as `env` (`None`: unset), `HOME=/home/me` and
+    /// `XDG_STATE_HOME=/xdg`: no environment is changed in this process.
+    fn state_dir_with(env: Option<&str>) -> String {
+        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "session::tests::state_dir_reads_the_environment",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(PRINT_STATE_DIR, "1")
+        .env("HOME", "/home/me")
+        .env("XDG_STATE_HOME", "/xdg");
+        match env {
+            Some(v) => cmd.env("DEBRIEF_STATE_DIR", v),
+            None => cmd.env_remove("DEBRIEF_STATE_DIR"),
+        };
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        stdout
+            .lines()
+            .find_map(|l| Some(&l[l.find("state_dir=")? + "state_dir=".len()..]))
+            .unwrap_or_else(|| panic!("no state_dir= in {stdout}"))
+            .to_string()
+    }
+
+    #[test]
+    fn state_dir_reads_the_environment() {
+        if std::env::var_os(PRINT_STATE_DIR).is_some() {
+            return println!("state_dir={}", state_dir().unwrap().display());
+        }
+        assert_eq!(state_dir_with(Some("/env")), "/env", "set: as is");
+        let fallback = if cfg!(target_os = "linux") {
+            "/xdg/debrief"
+        } else {
+            "/home/me/.local/state/debrief"
+        };
+        assert_eq!(state_dir_with(Some("")), fallback, "empty: unset");
+        assert_eq!(state_dir_with(None), fallback, "unset");
     }
 }

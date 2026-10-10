@@ -450,6 +450,14 @@ impl App {
             Err(e) => return self.set_status(format!("Review not sent: {e}")),
         };
         self.after_export();
+        // Mark sent before leaving the batch: a comment left unmarked in
+        // its session would come back on the next run (Q42).
+        if let Err(e) = self.session_sent(&ids) {
+            self.set_status(format!(
+                "Review {how}, but the batch wasn't cleared: session not updated: {e} (sending again repeats it)"
+            ));
+            return self.picker_refresh();
+        }
         let Some(r) = &mut self.review else { return };
         let msg = match r.remove_all(&ids) {
             Ok(_) => format!("Review {how} ({n} comments)"),
@@ -458,7 +466,6 @@ impl App {
             ),
         };
         self.set_status(msg);
-        self.session_sent(&ids);
         self.picker_refresh();
     }
 

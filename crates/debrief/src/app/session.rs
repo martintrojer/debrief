@@ -550,23 +550,25 @@ impl App {
             &self.config.review.kinds,
         );
         (self.terminal)(super::osc52(&md).as_bytes())?;
+        // Mark sent first: a comment left unmarked would come back (Q42).
+        self.session_sent(&ids)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("session not updated: {e}")))?;
         if let Some(r) = &mut self.review {
             r.remove_all(&ids)?;
         }
-        self.session_sent(&ids);
         Ok(())
     }
 
     /// Comments `ids` were sent or copied by debrief (S12): their sessions
-    /// keep them marked sent, and every dirty bit clears.
-    pub(super) fn session_sent(&mut self, ids: &[u64]) {
-        for v in self.sessions.visits.values_mut() {
-            v.dirty = false;
-        }
+    /// mark them sent, and every dirty bit clears. Called before the
+    /// comments leave the batch; on a write error it stops, the dirty
+    /// bits stay and the caller keeps the batch.
+    pub(super) fn session_sent(&mut self, ids: &[u64]) -> std::io::Result<()> {
         let now = session::now();
-        let keys: Vec<String> = self.sessions.saved.keys().cloned().collect();
+        let mut keys: Vec<String> = self.sessions.saved.keys().cloned().collect();
+        keys.sort();
         for k in keys {
-            let Some(s) = self.sessions.saved.get_mut(&k) else {
+            let Some(mut s) = self.sessions.saved.get(&k).cloned() else {
                 continue;
             };
             let mut changed = false;
@@ -576,11 +578,15 @@ impl App {
                     changed = true;
                 }
             }
-            if changed && let Err(e) = self.sessions.store.save(s) {
-                let msg = format!("{}; session not updated: {e}", self.status);
-                self.set_status(msg);
+            if changed {
+                self.sessions.store.save(&s)?;
+                self.sessions.saved.insert(k, s);
             }
         }
+        for v in self.sessions.visits.values_mut() {
+            v.dirty = false;
+        }
+        Ok(())
     }
 
     /// Re-read the batch before saving from it.

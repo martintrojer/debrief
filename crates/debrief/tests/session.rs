@@ -604,6 +604,62 @@ fn a_send_clears_the_warning_and_marks_the_session_sent() {
     assert!(app.should_quit(), "sent since the last change: no prompt");
 }
 
+/// Make writes to the session of `key` fail: a directory where its temp
+/// file goes.
+fn break_session_write(f: &Fixture, key: &str) {
+    let mut tmp = f.store().path(key).unwrap().into_os_string();
+    tmp.push(".tmp");
+    std::fs::create_dir(tmp).unwrap();
+}
+
+#[test]
+fn quit_prompt_y_that_cannot_mark_sent_keeps_the_batch_and_does_not_quit() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut app = f.app().with_terminal(|_| Ok(()));
+    open(&mut app, 0);
+    keys(&mut app, "k");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "q");
+    assert_eq!(app.mode(), Mode::QuitPrompt);
+    break_session_write(&f, &top);
+    keys(&mut app, "y");
+    assert!(!app.should_quit());
+    assert!(
+        app.status().contains("session not updated"),
+        "{}",
+        app.status()
+    );
+    assert_eq!(f.comments().len(), 1, "still in the batch");
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
+    // Still unsaved work: q asks again.
+    keys(&mut app, "q");
+    assert_eq!(app.mode(), Mode::QuitPrompt);
+}
+
+#[test]
+fn a_send_that_cannot_mark_sent_keeps_the_batch() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config.send.command = vec!["true".into()];
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    break_session_write(&f, &top);
+    keys(&mut app, " rr");
+    app.run_pending_effect();
+    assert!(
+        app.status().contains("session not updated"),
+        "{}",
+        app.status()
+    );
+    assert_eq!(f.comments().len(), 1, "still in the batch");
+    assert_eq!(f.store().load(&top).unwrap().unwrap().unsent_count(), 1);
+}
+
 #[test]
 fn session_list_opens_and_deletes() {
     let f = fixture();

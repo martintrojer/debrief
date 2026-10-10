@@ -30,7 +30,7 @@ agent as one markdown review.
   unsaved work asks first.
 - **It never writes to your repo.** No checkout, amend or index refresh,
   and reviews live in your cache dir. The one exception is jj's working-copy
-  snapshot, which any jj command takes too; `--no-snapshot` turns it off.
+  snapshot, which ordinary jj commands take too; `--no-snapshot` turns it off.
 - **Your fingers already know it.** Vim motions, search and visual mode;
   `g?` lists every key, and `C-h/j/k/l` move between panes and on into
   tmux.

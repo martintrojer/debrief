@@ -6,13 +6,12 @@ How debrief works and why. For what it does from the user's side, see the
 
 ## Why it exists
 
-Catching up with coding agents used to take four tools: something to
-notice a new commit, lazygit to read it, tuicr to comment on its lines, and
-a paste into the agent's pane. What ties the loop together is review: a
-comment on some lines of a file at a revision, collected into a batch and
-handed back to whoever made the change. So the comment model and the
-hand-back are shared, and the viewers stay separate: ramble reads prose,
-debrief reads commits.
+Catching up with coding agents means noticing new commits, reading them,
+commenting on their lines and handing the comments back. What ties that
+together is review: a comment on some lines of a file at a revision,
+collected into a batch and handed back to whoever made the change. So the
+comment model and the hand-back are shared, and the viewers stay
+separate: ramble reads prose, debrief reads commits.
 
 ## Principles
 
@@ -28,11 +27,10 @@ debrief reads commits.
   send tagged events to the event loop.
 - **Comments are never re-anchored.** Reviews are short-lived hand-backs,
   and the excerpt carries the meaning after lines move.
-- **No shared UI crate with ramble yet.** debrief copies ramble's patterns
-  (keymap, key clue, `g?`, motions, visual mode, sidebar, launchers). A
-  shared crate waits until both tools show what they really share.
-  The one shared file, `app/textbox.rs`, is kept byte-identical in both
-  repos.
+- **No shared UI crate with ramble.** debrief follows ramble's patterns
+  (keymap, key clue, `g?`, motions, visual mode, sidebar, launchers) in
+  its own code. The one shared file, `app/textbox.rs`, is kept
+  byte-identical in both repos.
 
 ## Architecture
 
@@ -82,8 +80,8 @@ ramble depends on `debrief-review` for its comment mode.
 | sessions | `<state>/sessions/<16 hex of blake3(root)>/<commit id>.json`, `working-copy.json` |
 
 `<cache>` is `$DEBRIEF_CACHE_DIR`, else the user cache dir's `debrief`;
-`<state>` is `$DEBRIEF_STATE_DIR`, else `$XDG_STATE_HOME/debrief`, else
-`~/.local/state/debrief`.
+`<state>` is `$DEBRIEF_STATE_DIR`, else `$XDG_STATE_HOME/debrief` on
+Linux, else `~/.local/state/debrief`.
 
 - **The batch** is shared with ramble. Every mutation takes an exclusive
   `flock` on the `.lock`, re-reads the file, applies the change and writes
@@ -97,31 +95,34 @@ ramble depends on `debrief-review` for its comment mode.
 - **Seen state** holds seen commit IDs and, for jj, change IDs, written by
   rename; one writer is assumed. A commit is new if neither is seen, and
   updated (jj) if its change is seen but this commit isn't.
-- **Sessions** are written by tmp + rename, only on `<leader>ss`. Each
-  holds a version, the root, commit, change and summary, the save time,
-  its comments (each with a sent time once sent), and the view. The cursor is anchored by (file, side, line),
-  because hunk indices change under `T`, with the row and column as a
-  fallback. A file of another version, root or shape is an error for that
-  file only.
+- **Sessions** are written by tmp + rename. Each holds a version, the
+  root, commit, change and summary, the save time, its comments (each
+  with a sent time once sent), and the view. The cursor is anchored by
+  (file, side, line), because hunk indices change under `T`, with the row
+  and column as a fallback. A file of another version, root or shape is
+  an error for that file only.
 
 ## Read-only VCS access
 
-- **git** runs every command with `--no-optional-locks`, `--no-textconv`
-  and config overrides that fix the diff format and turn off fsmonitor,
-  signatures, colour and automatic maintenance. The working copy is read
-  without refreshing the index; untracked files are read directly (binary
+- **git** runs every command with `--no-optional-locks` and config
+  overrides that fix the diff format and turn off fsmonitor, signatures,
+  colour and automatic maintenance. Commands that print a diff add
+  `--no-textconv`, `--no-ext-diff` and `--no-color`. The working copy is
+  read without refreshing the index; untracked files are read directly (binary
   when a NUL is in the first 8 KiB, over 1 MiB a placeholder, symlinks
   never followed). git itself may touch split-index `sharedindex.*` mtimes
   on a read, with contents unchanged; that is accepted.
 - **jj** reads with `--ignore-working-copy`, pinned to one operation with
-  `--at-op`. jj would otherwise merge divergent operation heads, and even
-  `--at-op=@` takes a lock when they diverge, so debrief reads the heads
-  itself and refuses when they diverge.
+  `--at-op`. To pick the pin, debrief reads the operation heads itself:
+  jj would merge divergent heads, and even `--at-op=@` takes a lock when
+  they diverge, so the reads refuse divergent heads. When the heads store
+  is not jj's default plain directory, the pin is `@`.
 - **The snapshot exception.** jj sees uncommitted edits only after a
   snapshot, and the agents snapshot constantly anyway. So by default
   `Vcs::refresh` runs `jj util snapshot` before the log loads, `@` opens,
   a reload, and a return from a launcher, then pins reads to the head it
-  leaves. The snapshot leaves files alone but, as any jj command does,
+  leaves. The snapshot command runs without the read-only flags. It
+  leaves files alone but, as jj commands that see the working copy do,
   records an operation, rewrites `@` (same change, new commit) and moves
   bookmarks on it and descendants. When a later snapshot fails, reads stay
   on the old pin and the status line says so. `--no-snapshot` turns all
@@ -136,8 +137,8 @@ commit diffs, highlighting, git's working copy and its log row, and log
 stats (after the cursor rests; the most recent are cached per commit).
 Every request carries a number, and an answer for a request that is no
 longer current is dropped. The watchers debounce into one event. Unit
-tests run without an event sender, so the same work happens inline in
-`App::tick`.
+tests run without an event sender, so the same work runs inline in the
+action that starts it.
 
 ## The commit view
 
@@ -168,19 +169,22 @@ working copy, as ramble uses), an optional side (diff comments), a 1-based
 inclusive line range, an excerpt of at most 40 lines, the body and an
 optional kind.
 
-- A diff comment uses the new side unless every selected line was
-  removed. On the working copy, added and context lines make
-  revision-less comments with on-disk line numbers, so ramble shows them;
-  removed lines anchor to the base's old side. A renamed file's old-side
+- Side by side, a diff comment takes the cursor's side. In unified view
+  it uses the new side unless every selected line was removed. On the
+  working copy, added and context lines make revision-less comments with
+  on-disk line numbers, so ramble shows them; removed lines anchor to the
+  base's old side. A renamed file's old-side
   comments use its old path.
-- A comment marks gutter rows only when its revision is the displayed
-  commit.
-- **The comment box** is anchored beside the selected rows and never
-  covers them. tuicr moved from a centred popup to an inline box because
-  the popup hid the code being commented on; debrief anchors an overlay
-  next to the rows instead, which keeps the renderer simple. The editor
-  is a small readline-style box adapted from tuicr's `text_edit.rs` (MIT,
-  see THIRD-PARTY.md); `C-e` hands longer text to `$EDITOR`. Bracketed
+- A comment marks gutter rows when its revision is the displayed commit.
+  On the working copy, revision-less comments and old-side comments on
+  its base mark rows too.
+- **The comment box** is an overlay anchored beside the selected rows, so
+  the code being commented on stays visible; an overlay keeps the
+  renderer simple. The view scrolls to keep the rows clear; the box
+  covers them only when the selection fills the pane, after the user
+  scrolls behind the box, or in a pane too short for the box and a row.
+  The editor is a small readline-style box adapted from tuicr's
+  `text_edit.rs` (MIT, see THIRD-PARTY.md); `C-e` hands longer text to `$EDITOR`. Bracketed
   paste goes into the box with its newlines, so a paste never runs as
   keys.
 - **Kinds** are free-form ids from `[review] kinds`, with definitions
@@ -197,13 +201,14 @@ optional kind.
 ## Sessions
 
 The batch stays the live working set, shared with ramble and sent by
-`<leader>rr`. A session snapshots one commit's comments from it, plus the
-view. Restoring adds back unsent comments the batch lacks, under their old
-ids when free. Each commit visited this run has a dirty bit, set by user
-actions on it and cleared by a save or a successful send; the quit warning
-reads those bits. There is no autosave: the warning is the safety net.
-Sent comments stay in the session marked sent, so a review keeps its
-history and is never resent.
+`<leader>rr`. A session is written when the user saves (`<leader>ss`, or
+`s` at the quit warning), and updated afterwards when a restore remaps a
+comment id or a send marks its comments sent, so a review keeps its
+history and is never resent. Restoring adds back unsent comments the
+batch lacks, under their old ids when free. Each commit visited this run
+has a dirty bit, set by user actions on it and cleared by a save or a
+successful send; the quit warning reads those bits. There is no autosave:
+the warning is the safety net.
 
 ## Keys and help
 

@@ -487,3 +487,44 @@ fn a_resize_below_the_minimum_falls_back_while_commenting_and_the_box_follows() 
     assert_eq!((cs[0].side, cs[0].lines), (Some(Side::New), (4, 4)));
     assert_eq!(cs[0].body, "hi");
 }
+
+#[test]
+fn left_comments_on_a_renamed_file_use_the_old_path_and_show_markers() {
+    let lines: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+    let f = fixture_of(
+        "old.txt",
+        &format!("{lines}first\n"),
+        &format!("{lines}gone\n"),
+    );
+    std::fs::remove_file(f.root.join("old.txt")).unwrap();
+    std::fs::write(f.root.join("new.txt"), format!("{lines}added\n")).unwrap();
+    commit(&f.root, "rename");
+    for ctx in ["", "T"] {
+        let mut app = f.open_split();
+        keys(&mut app, ctx);
+        let ctx_row = row_of(app.split_rows(Side::Old), "line 20");
+        let gone = row_of(app.split_rows(Side::Old), "gone");
+        goto(&mut app, gone);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.split_side(), Some(Side::Old));
+        keys(&mut app, "kcc");
+        keys(&mut app, "left context");
+        press(&mut app, KeyCode::Enter);
+        keys(&mut app, "jcc");
+        keys(&mut app, "left removed");
+        press(&mut app, KeyCode::Enter);
+        let cs = f.comments();
+        let n = cs.len();
+        for c in &cs[n - 2..] {
+            assert_eq!((c.path.as_str(), c.side), ("old.txt", Some(Side::Old)));
+        }
+        assert_eq!((cs[n - 2].lines, cs[n - 1].lines), ((20, 20), (21, 21)));
+        assert_eq!(app.split_marked_rows(Side::Old), [ctx_row, gone]);
+        keys(&mut app, "gg]r");
+        assert_eq!(app.commit_cursor().row, ctx_row, "{ctx:?}");
+        keys(&mut app, "K");
+        assert!(app.popup().unwrap().contains("left context"), "{ctx:?}");
+        // Start the next round with no comments.
+        std::fs::remove_dir_all(&f.cache).unwrap();
+    }
+}

@@ -293,10 +293,10 @@ impl App {
         let n = self.commit_rows().len();
         let row = (0..n).find(|&r| self.row_in(r, c)).or_else(|| {
             let diff = self.commit_diff()?;
-            let f = diff
-                .files
-                .iter()
-                .position(|f| super::commit::file_path(f) == c.path)?;
+            let f = diff.files.iter().position(|f| {
+                super::commit::file_path(f) == c.path
+                    || f.old_path.as_deref() == Some(c.path.as_str())
+            })?;
             self.commit.as_ref()?.header_row(f)
         });
         if let (Some(row), Some(v)) = (row, &mut self.commit) {

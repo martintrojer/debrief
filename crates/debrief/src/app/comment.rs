@@ -618,8 +618,14 @@ impl App {
             .find(|r| r.info.commit == v.commit)
             .map(|r| &r.info)
             .ok_or("The commit is no longer in the log")?;
+        // The side's own path (K11): a renamed file's old lines are on its
+        // old path.
+        let path = match side {
+            Side::Old => f.old_path.as_deref().unwrap_or(file_path(f)),
+            Side::New => file_path(f),
+        };
         Ok(Draft {
-            path: file_path(f).to_string(),
+            path: path.to_string(),
             rev: Some(rev_of(info)),
             side: Some(side),
             lines: (a, b),

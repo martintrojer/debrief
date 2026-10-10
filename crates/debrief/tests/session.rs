@@ -660,6 +660,57 @@ fn the_working_copy_has_one_session_file() {
 }
 
 #[test]
+fn the_working_copy_session_opens_behind_a_filter() {
+    let f = fixture();
+    std::fs::write(f.root.join("b.txt"), "b1\nb2 new\nb3\n").unwrap();
+    let mut app = f.app();
+    open(&mut app, 0);
+    keys(&mut app, " ss");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "ftop");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.rows().iter().any(|r| r.working));
+    keys(&mut app, " rs");
+    assert_eq!(app.picker().unwrap().items[0].key, WORKING);
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        matches!(app.screen(), Screen::Commit(_)),
+        "{}",
+        app.status()
+    );
+    assert!(app.viewing_working_copy());
+}
+
+#[test]
+fn the_jj_working_copy_session_opens_behind_a_filter() {
+    if !have_jj() {
+        return;
+    }
+    let e = JjEnv::new(false);
+    e.write("a.txt", "one\ntwo\n");
+    e.jj(&["--quiet", "commit", "-m", "base"]);
+    e.write("a.txt", "one\nTHREE\n");
+    e.jj(&["--quiet", "describe", "-m", "working-change"]);
+    let cache = e.root.parent().unwrap().join("cache");
+    let mut app = app_at(&e.root, &cache);
+    let i = app.working_row_index().unwrap();
+    open(&mut app, i);
+    keys(&mut app, " ss");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "fbase");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.rows().iter().any(|r| r.working));
+    keys(&mut app, " rs");
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        matches!(app.screen(), Screen::Commit(_)),
+        "{}",
+        app.status()
+    );
+    assert!(app.viewing_working_copy());
+}
+
+#[test]
 fn files_focus_comes_back() {
     let f = fixture();
     let mut app = f.app();

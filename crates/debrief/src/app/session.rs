@@ -688,12 +688,23 @@ impl App {
 
     /// Enter in the session list: open its commit, if listed.
     pub(super) fn session_goto(&mut self, key: &str) {
+        // The working copy's row: git's synthetic one, jj's `@`.
+        let id = match key {
+            WORKING => self
+                .all_rows
+                .iter()
+                .find(|r| r.working)
+                .map(|r| r.info.commit.clone()),
+            _ => Some(key.to_string()),
+        };
+        if let Some(id) = &id
+            && self.unfilter_for(id)
+        {
+            self.commit_reindex();
+        }
         let i = if key == WORKING {
             self.working_index()
         } else {
-            if self.unfilter_for(key) {
-                self.commit_reindex();
-            }
             self.rows.iter().position(|r| r.info.commit == key)
         };
         match i {

@@ -34,6 +34,9 @@
 # context = "hunks"
 ## unified | split: the commit view in one column or side by side (t).
 # layout = "unified"
+## tree | flat: the commit view's file list as a directory tree or whole
+## paths in git's order (` in the list).
+# files = "tree"
 ## The narrowest diff pane (not counting the file list) shown side by side;
 ## below it the view is unified.
 # split_min_width = 140

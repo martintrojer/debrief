@@ -142,9 +142,6 @@ while the editor runs and comes back on the same row.
 
 ### The file list
 
-Each row is a status letter (`A` `M` `D` `R` `C`), the path and
-`+n −m`; `▎` marks the file holding the diff cursor.
-
 `[view] sidebar` is `"always"` (shown, `<leader>e` hides it), `"never"`
 (hidden, `<leader>e` shows it) or `"auto"`, a peek: hidden while you read
 the diff, shown while you move toward it (`C-h` or `C-w h`; on the right
@@ -157,8 +154,30 @@ side by side); otherwise it draws over the diff without reflowing it.
 `sidebar_auto_hide_below` (80) columns an always list hides, and comes
 back when the terminal grows unless `<leader>e` hid it; an auto list
 still peeks and pins there, drawn over the diff. `sidebar_width = "auto"`
-fits most paths within `sidebar_min_width` (16) and `sidebar_max_width`
+fits most rows within `sidebar_min_width` (16) and `sidebar_max_width`
 (48), and at most 35% of the terminal.
+
+The list is a tree, as in lazygit: files grouped by directory, directories
+first, each alphabetical, and a chain of directories holding only one
+directory shown as one row (`src/app/ui`). A directory row is `▾ name`
+(open) or `▸ name` (closed) with the summed `+n −m` of its files; a file
+row is its coloured status letter (`A` `M` `D` `R` `C`), its name and its counts. Every
+directory starts open. The diff lists the files in the tree's order, so
+`]f` `[f` and the list agree. `▎` marks the file holding the diff cursor,
+or the closed directory hiding it. Names too long for the list are cut in
+the middle, keeping the extension. `` ` `` switches to flat paths in git's
+order (and the diff with it); `[view] files` sets the start. A saved
+session keeps tree or flat and the closed directories.
+
+| Key in the list | Does |
+|---|---|
+| `j` `k` `gg` `G` `C-d` `C-u` | move over the rows (jumps the diff) |
+| `Enter` | on a file: jump to it; on a directory: open / close |
+| `h` | close the directory, or go to its parent |
+| `l` | open the directory; on a file: jump to it |
+| `-` / `=` | close / open every directory |
+| `` ` `` | tree / flat |
+| `Esc` | back to the diff |
 
 ## Panes and tmux
 
@@ -332,6 +351,7 @@ session. The rows without a key are set only in the file.
 | stats pane on the log | `<leader>e` | `view.stats` | `true` |
 | hunks / the full file | `T` | `view.context` | `"hunks"` (or `"full"`) |
 | unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
+| the file list as a tree / flat paths | `` ` `` | `view.files` | `"tree"` (or `"flat"`) |
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |

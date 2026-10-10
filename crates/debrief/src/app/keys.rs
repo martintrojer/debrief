@@ -23,7 +23,9 @@ pub const LEADER: char = ' ';
 /// starting state (`<leader>e` is the file list on the commit screen and
 /// the stats pane on the log). A new `Toggle*` action needs a row here, a
 /// key in `config.default.toml` and a row in the README's table (tests
-/// check all three).
+/// check all three). Config-only keys (`keys.pane_nav`, which binds
+/// `C-h/j/k/l` but no key flips) have no row here, only the README's;
+/// the test checks every `[view]` / `[keys]` key has one.
 pub const TOGGLES: &[(Action, &str, &str)] = &[
     (Action::ToggleSidebar, "<leader>e", "view.sidebar"),
     (Action::ToggleSidebar, "<leader>e", "view.stats"),

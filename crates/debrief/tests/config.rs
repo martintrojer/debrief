@@ -142,6 +142,32 @@ fn every_toggle_has_a_config_key_and_a_readme_row() {
     for r in &rows {
         assert!(documented(&r[2]), "{} not in config.default.toml", r[2]);
     }
+    // And every [view] / [keys] key has a row, key-bound or config-only
+    // (`keys.pane_nav` binds C-h/j/k/l but no key flips it, so it is a
+    // config-only row rather than a `keys::TOGGLES` entry).
+    let keys = default_keys(&["view", "keys"]);
+    assert!(keys.contains(&"keys.pane_nav".to_string()), "{keys:?}");
+    for k in &keys {
+        assert!(rows.iter().any(|r| r[2] == *k), "no README row for {k}");
+    }
+}
+
+/// `table.key` for every key set (commented out) under `# [table]` in the
+/// default file, for each of `tables`.
+fn default_keys(tables: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut table = None;
+    for l in config::DEFAULT_TOML.lines() {
+        if let Some(t) = l.strip_prefix("# [").and_then(|t| t.strip_suffix(']')) {
+            table = tables.contains(&t).then_some(t);
+        } else if let (Some(t), Some((k, _))) = (
+            table,
+            l.strip_prefix("# ").and_then(|r| r.split_once(" = ")),
+        ) {
+            out.push(format!("{t}.{k}"));
+        }
+    }
+    out
 }
 
 #[test]

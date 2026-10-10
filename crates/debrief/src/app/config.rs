@@ -15,12 +15,14 @@ use serde::Deserialize;
 
 use crate::vcs::Context as DiffContext;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// The built-in config, [`Config::defaults`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub send: SendConfig,
     pub review: ReviewConfig,
     pub render: RenderConfig,
     pub view: ViewConfig,
+    pub keys: KeysConfig,
     pub launch: Vec<Launcher>,
     /// Problems the file had that didn't stop it loading (dropped comment
     /// kinds); the app shows them in the status line at start.
@@ -49,9 +51,30 @@ impl Default for RenderConfig {
     }
 }
 
+/// `[keys]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeysConfig {
+    /// The `<leader>` key (Space by default).
+    pub leader: char,
+    /// After a pause in a key sequence, show the keys that can come next.
+    pub clue: bool,
+}
+
+impl Default for KeysConfig {
+    fn default() -> Self {
+        KeysConfig {
+            leader: crate::app::LEADER,
+            clue: true,
+        }
+    }
+}
+
 /// `[view]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewConfig {
+    /// The commit view's file list at start (on by default; `<leader>e`
+    /// toggles).
+    pub sidebar: bool,
     /// The log's stats pane at start (on by default; `<leader>e` toggles).
     pub stats: bool,
     /// The commit view's context at start: `"hunks"` (the default) or
@@ -80,6 +103,7 @@ pub enum Layout {
 impl Default for ViewConfig {
     fn default() -> Self {
         ViewConfig {
+            sidebar: true,
             stats: true,
             context: DiffContext::Default,
             layout: Layout::Unified,
@@ -126,6 +150,7 @@ impl Config {
             send: SendConfig::default(),
             render: RenderConfig::default(),
             view: ViewConfig::default(),
+            keys: KeysConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
             },
@@ -179,7 +204,18 @@ impl Config {
         if let Some(h) = raw.render.and_then(|r| r.highlight) {
             c.render.highlight = h;
         }
+        if let Some(k) = raw.keys {
+            if let Some(leader) = k.leader {
+                c.keys.leader = leader;
+            }
+            if let Some(clue) = k.clue {
+                c.keys.clue = clue;
+            }
+        }
         if let Some(v) = raw.view {
+            if let Some(sidebar) = v.sidebar {
+                c.view.sidebar = sidebar;
+            }
             if let Some(stats) = v.stats {
                 c.view.stats = stats;
             }
@@ -232,6 +268,12 @@ impl Config {
     }
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Config::defaults()
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
@@ -239,7 +281,15 @@ struct RawConfig {
     review: Option<RawReview>,
     render: Option<RawRender>,
     view: Option<RawView>,
+    keys: Option<RawKeys>,
     launch: Option<Vec<RawLauncher>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawKeys {
+    leader: Option<char>,
+    clue: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -257,6 +307,7 @@ struct RawRender {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawView {
+    sidebar: Option<bool>,
     stats: Option<bool>,
     context: Option<RawContext>,
     layout: Option<Layout>,
@@ -420,6 +471,18 @@ kinds = [
         assert!(Config::defaults().view.stats);
         assert!(!Config::parse("[view]\nstats = false\n").unwrap().view.stats);
         assert!(Config::parse("[view]\nnope = 1\n").is_err());
+    }
+
+    #[test]
+    fn view_sidebar_and_keys_default_on() {
+        let d = Config::defaults();
+        assert!(d.view.sidebar && d.keys.clue);
+        assert_eq!(d.keys.leader, ' ');
+        let c = Config::parse("[view]\nsidebar = false\n[keys]\nleader = \",\"\nclue = false\n")
+            .unwrap();
+        assert!(!c.view.sidebar && !c.keys.clue);
+        assert_eq!(c.keys.leader, ',');
+        assert!(Config::parse("[keys]\nleader = \"\"\n").is_err());
     }
 
     #[test]

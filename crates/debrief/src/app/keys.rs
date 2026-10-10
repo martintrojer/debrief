@@ -13,8 +13,22 @@ use super::{App, Mode, Screen};
 /// Cap on a typed count.
 const MAX_COUNT: usize = 1_000_000;
 
-/// The `<leader>` key (Space, as in ramble).
+/// The `<leader>` key as the keymaps see it (Space, as in ramble). A
+/// `[keys] leader` of another key is read as this one (see
+/// [`App::key`]).
 pub const LEADER: char = ' ';
+
+/// Every toggle: the action, its key, and the config key that sets its
+/// starting state (`<leader>e` is the file list on the commit screen and
+/// the stats pane on the log). A new `Toggle*` action needs a row here, a
+/// key in `config.default.toml` and a row in the README's table (tests
+/// check all three).
+pub const TOGGLES: &[(Action, &str, &str)] = &[
+    (Action::ToggleSidebar, "<leader>e", "view.sidebar"),
+    (Action::ToggleSidebar, "<leader>e", "view.stats"),
+    (Action::ToggleContext, "T", "view.context"),
+    (Action::ToggleLayout, "t", "view.layout"),
+];
 
 /// Everything a key can do. `Option<usize>` is the typed count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +191,10 @@ impl App {
             self.count = None;
             return;
         }
+        let key = match self.leader_key(key) {
+            Some(k) => k,
+            None => return,
+        };
         self.pending.push(key);
         let keys = std::mem::take(&mut self.pending);
         match self.keymap(&keys) {
@@ -195,6 +213,26 @@ impl App {
         }
         self.keep_visible();
         self.commit_follow();
+    }
+
+    /// A `[keys] leader` other than Space: at the start of a sequence in
+    /// normal or visual mode, that key is read as [`LEADER`] and Space is
+    /// dropped (`None`). Prompts and later keys of a sequence are as typed.
+    fn leader_key(&self, key: KeyEvent) -> Option<KeyEvent> {
+        let leader = self.config.keys.leader;
+        if leader == LEADER
+            || !self.pending.is_empty()
+            || !matches!(self.mode, Mode::Normal | Mode::Visual)
+        {
+            return Some(key);
+        }
+        match plain(&key) {
+            Some(c) if c == leader => {
+                Some(KeyEvent::new(KeyCode::Char(LEADER), KeyModifiers::NONE))
+            }
+            Some(LEADER) => None,
+            _ => Some(key),
+        }
     }
 
     /// Meaning of `keys` in the current mode and screen.

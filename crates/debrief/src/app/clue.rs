@@ -38,7 +38,9 @@ fn same_key(a: &KeyEvent, b: &KeyEvent) -> bool {
 
 impl App {
     fn clue_active(&self) -> bool {
-        !self.pending.is_empty() && matches!(self.mode, Mode::Normal | Mode::Visual)
+        self.config.keys.clue
+            && !self.pending.is_empty()
+            && matches!(self.mode, Mode::Normal | Mode::Visual)
     }
 
     /// Called after every key: start timing a new sequence, or forget the

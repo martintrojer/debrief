@@ -39,8 +39,8 @@ pub use clue::{CLUE_DELAY, ClueRow};
 pub use comment::{CommentAction, CommentBox, Draft};
 pub use commit::{Focus, Row as DiffRow, RowKind};
 pub use help::{HelpLine, HelpView, help_rect};
-pub use keys::LEADER;
 pub use keys::{Action, KeyResult};
+pub use keys::{LEADER, TOGGLES};
 pub use launch::{Effect, Exit, LaunchCommand};
 pub use log::{WORKING_ID, age, is_zero_id, short_id};
 pub use motion::Cursor;
@@ -58,7 +58,7 @@ pub struct StartOptions {
     pub cache_dir: PathBuf,
     pub revset: Option<String>,
     pub limit: usize,
-    /// `[send]`, `[review]` and `[[launch]]`.
+    /// `~/.config/debrief/config.toml` over the defaults.
     pub config: config::Config,
 }
 
@@ -316,6 +316,7 @@ impl App {
         };
         app.review_open();
         app.config = app.opts.config.clone();
+        app.sidebar_on = app.config.view.sidebar;
         app.stat.on = app.config.view.stats;
         app.context = app.config.view.context;
         app.split = app.config.view.layout == config::Layout::Split;

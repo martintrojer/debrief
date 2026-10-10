@@ -197,7 +197,7 @@ fn unknown_keys_name_the_key_and_the_allowed_ones() {
     assert!(e.contains("keys.leadr: unknown field"), "{e}");
     assert!(e.contains("expected `leader` or `clue`"), "{e}");
     let e = err_at("[viw]\n");
-    assert!(e.contains("line 1: unknown field `viw`"), "{e}");
+    assert!(e.contains("line 1: viw: unknown field `viw`"), "{e}");
     assert!(e.contains("`view`, `keys`"), "{e}");
 }
 
@@ -219,6 +219,19 @@ fn bad_values_name_the_key_and_the_allowed_values() {
         ("[keys]\nclue = \"no\"\n", "line 2: keys.clue: invalid type"),
         ("[keys]\nleader = \"ab\"\n", "keys.leader: invalid value"),
         ("\n[render]\nhighlight = 0\n", "line 3: render.highlight"),
+        // The key comes from the parser, not the text around the error.
+        (
+            "[view] # preferences\nlayout = \"side\"\n",
+            "line 2: view.layout: unknown variant `side`",
+        ),
+        (
+            "view = { layout = \"side\" }\n",
+            "line 1: view.layout: unknown variant `side`",
+        ),
+        (
+            "[[launch]]\nname = \"edit\"\ncommand = [\n  1\n]\n",
+            "line 4: launch.command: invalid type: integer `1`",
+        ),
     ] {
         let e = err_at(src);
         assert!(e.starts_with("config error at "), "{e}");

@@ -214,7 +214,13 @@ impl Config {
         let raw: RawConfig = toml::from_str(src).map_err(|e| {
             let at = e.span().map(|s| s.start);
             let msg = e.message().trim_end();
-            match at.and_then(|at| key_at(src, at)) {
+            // The key comes from the parsed document, not the text around
+            // the error; a syntax error has none.
+            let key = at.and_then(|at| {
+                let doc = toml::de::DeTable::parse(src).ok()?;
+                key_at(doc.get_ref(), at)
+            });
+            match key {
                 Some(key) => (at, format!("{key}: {msg}")),
                 None => (at, msg.to_string()),
             }
@@ -331,26 +337,35 @@ fn line_of(src: &str, at: usize) -> usize {
         + 1
 }
 
-/// The `table.key` whose `key = value` line holds byte offset `at`
-/// (the table from the last `[table]` / `[[table]]` header above it).
-fn key_at(src: &str, at: usize) -> Option<String> {
-    let at = at.min(src.len());
-    let start = src[..at].rfind('\n').map_or(0, |i| i + 1);
-    let line = src[start..].lines().next().unwrap_or("");
-    let (key, _) = line.split_once('=')?;
-    let key = key.trim().trim_matches('"');
-    if key.is_empty() || key.starts_with('#') || key.starts_with('[') {
-        return None;
+/// The dotted path (`view.layout`, `launch.command`) of the deepest key
+/// in the parsed `doc` whose key or value span holds byte offset `at`;
+/// array items add no segment.
+fn key_at(doc: &toml::de::DeTable, at: usize) -> Option<String> {
+    fn walk(t: &toml::de::DeTable, at: usize, path: &mut Vec<String>, best: &mut Vec<String>) {
+        for (k, v) in t {
+            path.push(k.get_ref().to_string());
+            if (k.span().contains(&at) || v.span().contains(&at)) && path.len() > best.len() {
+                *best = path.clone();
+            }
+            value(v, at, path, best);
+            path.pop();
+        }
     }
-    let table = src[..start].lines().rev().find_map(|l| {
-        let l = l.trim();
-        l.starts_with('[')
-            .then(|| l.trim_matches(|c| c == '[' || c == ']').trim().to_string())
-    });
-    Some(match table {
-        Some(t) => format!("{t}.{key}"),
-        None => key.to_string(),
-    })
+    fn value(
+        v: &toml::Spanned<toml::de::DeValue>,
+        at: usize,
+        path: &mut Vec<String>,
+        best: &mut Vec<String>,
+    ) {
+        match v.get_ref() {
+            toml::de::DeValue::Table(t) => walk(t, at, path, best),
+            toml::de::DeValue::Array(a) => a.iter().for_each(|i| value(i, at, path, best)),
+            _ => {}
+        }
+    }
+    let mut best = Vec::new();
+    walk(doc, at, &mut Vec::new(), &mut best);
+    (!best.is_empty()).then(|| best.join("."))
 }
 
 #[derive(Deserialize)]
@@ -570,8 +585,36 @@ kinds = [
         assert!(e.starts_with("view.sidebar: invalid type"), "{e}");
         let e = Config::parse("[[launch]]\nname = \"x\"\n\"kye\" = 1\n").unwrap_err();
         assert!(e.starts_with("launch.kye: unknown field"), "{e}");
-        assert_eq!(key_at("# x = 1\n", 0), None);
-        assert_eq!(key_at("a = 1\n", 4).as_deref(), Some("a"));
+        let key = |src: &str, at| key_at(toml::de::DeTable::parse(src).unwrap().get_ref(), at);
+        assert_eq!(key("# x = 1\n", 0), None);
+        assert_eq!(key("a = 1\n", 4).as_deref(), Some("a"));
+        // The path comes from the parser, whatever the text looks like.
+        for (src, want) in [
+            (
+                "[view] # preferences\nlayout = \"side\"\n",
+                "view.layout: unknown variant",
+            ),
+            (
+                "view = { layout = \"side\" }\n",
+                "view.layout: unknown variant",
+            ),
+            (
+                "[[launch]]\nname = \"edit\"\ncommand = [\n  1\n]\n",
+                "launch.command: invalid type",
+            ),
+            ("[ view ]\nsidebar = 1\n", "view.sidebar: invalid type"),
+            (
+                "[[launch]]\nname = \"x\"\nk = { a = 1 }\n",
+                "launch.k: unknown field",
+            ),
+            (
+                "[review]\nkinds = [{ id = \"x\", color = 1 }]\n",
+                "review.kinds.color: unknown field",
+            ),
+        ] {
+            let e = Config::parse(src).unwrap_err();
+            assert!(e.starts_with(want), "{src:?}: {e}");
+        }
     }
 
     #[test]

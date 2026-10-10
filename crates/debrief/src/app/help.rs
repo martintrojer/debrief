@@ -530,14 +530,18 @@ impl App {
         }
     }
 
-    /// Every help line for the current state, before the filter.
+    /// Every help line for the current state, before the filter. A key
+    /// that works in several contexts shown at once (the diff and the
+    /// file list) has a row per context; it is listed once.
     pub fn help_lines(&self) -> Vec<HelpLine> {
         let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for g in Group::ALL {
             let items: Vec<HelpLine> = self
                 .bindings()
                 .iter()
                 .filter(|b| b.group == g && self.ctx_shown(b.context))
+                .filter(|b| seen.insert((b.keys.to_string(), b.desc.to_string())))
                 .map(|b| HelpLine::Item {
                     keys: b.keys.to_string(),
                     desc: b.desc.to_string(),

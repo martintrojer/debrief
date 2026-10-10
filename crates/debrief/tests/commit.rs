@@ -690,3 +690,35 @@ fn colours_follow_the_diff_and_stale_ones_are_dropped() {
     app.event(fresh.next().unwrap());
     assert!(app.commit_spans(&added(&app)).is_some());
 }
+
+/// `g?` lists a key and its description once, on the log and on the
+/// commit screen (where the diff and the file list share many keys).
+#[test]
+fn help_lists_each_key_once() {
+    let (_d, root, cache) = repo();
+    let mut app = open(&root, &cache);
+    let dups = |app: &App| {
+        let mut seen = std::collections::HashSet::new();
+        app.help_lines()
+            .into_iter()
+            .filter_map(|l| match l {
+                debrief::app::HelpLine::Item { keys, desc } => Some((keys, desc)),
+                debrief::app::HelpLine::Group(_) => None,
+            })
+            .filter(|row| !seen.insert(row.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(dups(&app), Vec::<(String, String)>::new(), "log");
+    press(&mut app, KeyCode::Enter);
+    assert!(matches!(app.screen(), Screen::Commit(_)));
+    assert_eq!(dups(&app), Vec::<(String, String)>::new(), "commit");
+    // Every key still has its row.
+    let has = |app: &App, k: &str| {
+        app.help_lines()
+            .iter()
+            .any(|l| matches!(l, debrief::app::HelpLine::Item { keys, .. } if keys == k))
+    };
+    for k in ["<leader>e", "C-w h", "C-w l", "g?", "{1-9}", "<leader>rr"] {
+        assert!(has(&app, k), "{k}");
+    }
+}

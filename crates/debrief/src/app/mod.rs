@@ -57,7 +57,7 @@ pub const DEFAULT_LIMIT: usize = 200;
 /// What the binary was asked to show.
 #[derive(Debug, Clone)]
 pub struct StartOptions {
-    /// The debrief cache dir (seen state and, later, reviews live under it).
+    /// The debrief cache dir (seen state and the review batch live under it).
     pub cache_dir: PathBuf,
     /// The debrief state dir (saved review sessions live under it).
     pub state_dir: PathBuf,

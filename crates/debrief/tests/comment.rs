@@ -1338,7 +1338,7 @@ fn page_up_scrolls_a_selection_taller_than_the_screen_behind_the_box() {
     let mut app = f.open();
     app.event(AppEvent::Resize(100, 24));
     let first = added(&app, "g1");
-    // 47 and 50 rows at 100x24 (the reviewer's cases), and 30.
+    // Selections of 30, 47 and 50 rows in a 100x24 terminal.
     for k in [30, 47, 50] {
         let (lo, hi) = (first, first + k - 1);
         select_and_comment(&mut app, lo, hi);

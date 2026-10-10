@@ -1,5 +1,5 @@
-//! ratatui widgets only, no logic. `draw` lays out the screen and calls one
-//! widget per area; later screens add a file and one call here.
+//! ratatui widgets only, no logic. `draw` lays out the screen for the
+//! current screen and calls one widget per area.
 
 mod clue;
 mod comment_box;

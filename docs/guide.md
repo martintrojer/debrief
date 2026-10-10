@@ -102,7 +102,7 @@ left.
 | `r` | on the working copy: reload its diff in place |
 | `/` `?` `n` `N` | search |
 | `v` `V`, then `y` | select rows, copy them as diff text (OSC 52) |
-| `<leader>e` | show / hide the file list (`sidebar = "auto"`: pin it) |
+| `<leader>e` | show / hide the file list (`sidebar = "auto"`: pin a hidden one) |
 | `C-h` / `C-l` (or `C-w h` / `C-w l`) | move between the file list and the diff |
 | `Enter` | on a `.md` file header: open it in ramble |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
@@ -146,7 +146,8 @@ while the editor runs and comes back on the same row.
 (hidden, `<leader>e` shows it) or `"auto"`, a peek: hidden while you read
 the diff, shown while you move toward it (`C-h` or `C-w h`; on the right
 `C-l`), and hidden again when you jump to a file (`Enter`), press `Esc`
-in it or move back to the diff. `<leader>e` pins an auto list. A peek goes
+in it or move back to the diff. On an auto list `<leader>e` pins a hidden
+list and hides a shown one (a peek or a pin), back to peeking. A peek goes
 beside the diff when the diff keeps at least 80 columns (`split_min_width`
 side by side); otherwise it draws over the diff without reflowing it.
 
@@ -254,13 +255,17 @@ working copy's is `working-copy.json`. Nothing is saved automatically.
   that commit (for the working copy: its comments without a revision and
   removed-line comments on its base) and the view: context, layout, file
   list, focused pane and cursor. Saving again replaces it.
-- **Indicator:** log rows of commits with a session end in ``, with the
-  number of unsent comments when there are any (`3`); the
-  glyph is Nerd Font `nf-fa-bookmark`.
+- **Indicator:** log rows of commits with a session show a bookmark glyph
+  (Nerd Font `nf-fa-bookmark`, U+F02E) before the summary, led by the
+  number of unsent comments when there are any; git's working-copy row
+  ends with it.
 - **Restore:** opening a commit with a session puts its view back. The
-  first time this run, its unsent comments that the batch lacks are added
-  back. Opening the same commit again in this run shows the view you left.
-  If the saved cursor's file is gone, the cursor starts on the first row.
+  context, layout, file list and tree or flat mode apply app-wide, as if
+  you pressed the keys, so later commits without a session open the same
+  way. The first time this run, its unsent comments that the batch lacks
+  are added back. Opening the same commit again in this run shows the view
+  you left. If the saved cursor's file is gone, the cursor starts on the
+  first row.
 - **Sent comments:** comments debrief sends or copies stay in their
   session marked sent and are never restored. debrief doesn't see comments
   sent from ramble, so those may come back.

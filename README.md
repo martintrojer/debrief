@@ -29,8 +29,9 @@ agent as one markdown review.
   comments and view; reopening the commit restores them, and quitting with
   unsaved work asks first.
 - **It never writes to your repo.** No checkout, amend or index refresh,
-  and reviews live in your cache dir. The one exception is jj's working-copy
-  snapshot, which ordinary jj commands take too; `--no-snapshot` turns it off.
+  and reviews live in your cache and state dirs. The one exception is jj's
+  working-copy snapshot, which ordinary jj commands take too;
+  `--no-snapshot` turns it off.
 - **Your fingers already know it.** Vim motions, search and visual mode;
   `g?` lists every key, and `C-h/j/k/l` move between panes and on into
   tmux.
@@ -52,7 +53,8 @@ Prebuilt binaries for macOS (Apple silicon) and Linux (x86_64) are on the
 cargo install --path crates/debrief
 ```
 
-You need `git` or `jj` on `PATH`.
+You need `git` or `jj` on `PATH`. The log's session marker is a Nerd Font
+glyph.
 
 ## Use
 

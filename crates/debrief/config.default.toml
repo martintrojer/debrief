@@ -10,10 +10,11 @@
 # [view]
 ## The commit view's file list: always | never | auto. always: shown,
 ## <leader>e hides it. never: hidden, <leader>e shows it. auto: a peek,
-## shown while you move toward it (C-h / C-w h), hidden on Enter, Esc or a
-## move back to the diff; <leader>e pins it. Below sidebar_auto_hide_below,
-## or when it would leave the diff under 80 columns (split_min_width side
-## by side), a peek draws over the diff.
+## shown while you move toward it (C-h / C-w h), hidden on Enter on a file,
+## Esc or a move back to the diff; <leader>e pins a hidden list and hides a
+## shown one. Below sidebar_auto_hide_below, or when it would leave the
+## diff under 80 columns (split_min_width side by side), a peek draws over
+## the diff.
 # sidebar = "always"
 ## left | right: the file list's screen edge. Pane moves follow the
 ## screen: on the right, C-l goes to the list.

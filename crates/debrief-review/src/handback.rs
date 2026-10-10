@@ -43,6 +43,10 @@ fn send_with_timeout(
     }
 }
 
+/// How long a child whose input pipe broke has to exit before it counts as
+/// stuck (a child that exits as it closes its input isn't reapable at once).
+const EXIT_GRACE: Duration = Duration::from_millis(500);
+
 /// True if the command ran, took all of stdin and exited 0 within `timeout`.
 fn run(command: &[String], markdown: &str, root: &Path, timeout: Duration) -> bool {
     let Some((program, args)) = command.split_first() else {
@@ -72,13 +76,15 @@ fn run(command: &[String], markdown: &str, root: &Path, timeout: Duration) -> bo
     // its input, and then its exit status decides.
     let deadline = Instant::now() + timeout;
     let mut writer = Some(writer);
-    let mut broken_pipe = false;
+    // When the pipe broke: a child that exits right after closing its input
+    // may not be reapable yet, so it gets a moment before it counts as stuck.
+    let mut broken_pipe: Option<Instant> = None;
     loop {
         if writer.as_ref().is_some_and(|w| w.is_finished()) {
             match writer.take().map(|w| w.join()) {
                 Some(Ok(Ok(()))) => {}
                 Some(Ok(Err(e))) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                    broken_pipe = true;
+                    broken_pipe = Some(Instant::now());
                 }
                 _ => {
                     kill(&mut child);
@@ -89,9 +95,10 @@ fn run(command: &[String], markdown: &str, root: &Path, timeout: Duration) -> bo
         match child.try_wait() {
             // Success needs stdin settled; if the writer is still going, keep polling.
             Ok(Some(status)) if writer.is_none() => return status.success(),
-            // The pipe broke while the child still runs: it closed its input
-            // without exiting, so it won't get the review. Fall back.
-            Ok(None) if broken_pipe => {
+            // The pipe broke and the child still runs after the grace period:
+            // it closed its input without exiting, so it won't get the
+            // review. Fall back.
+            Ok(None) if broken_pipe.is_some_and(|t| t.elapsed() >= EXIT_GRACE) => {
                 kill(&mut child);
                 return false;
             }

@@ -62,23 +62,28 @@ impl Review {
 
     /// Adds `c` with the current time and a fresh id; returns the id.
     ///
-    /// The id is one past the larger of the max existing id and the current
-    /// unix time in milliseconds, so ids never repeat for a root even after the
-    /// batch file is deleted and a new one started.
+    /// The id is one past the largest of the existing ids, the last id issued
+    /// for this root (kept in the lock file, which outlives the batch file) and
+    /// the current unix time in milliseconds. So ids never repeat for a root,
+    /// even after the batch file is deleted and a new one started within the
+    /// same millisecond.
     pub fn add(&mut self, mut c: Comment) -> io::Result<u64> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
         c.created = now.as_secs();
         let now_ms = u64::try_from(now.as_millis()).unwrap_or(u64::MAX - 1);
-        self.mutate(move |comments| {
-            let max = comments.iter().map(|c| c.id).max().unwrap_or(0);
-            c.id = max.max(now_ms) + 1;
-            let id = c.id;
-            comments.push(c);
-            Some(id)
-        })
-        .map(|id| id.expect("add always writes"))
+        let mut lock = self.lock_exclusive()?;
+        let mut comments = self.read_file()?;
+        let max = comments.iter().map(|c| c.id).max().unwrap_or(0);
+        c.id = max.max(last_issued(&mut lock)).max(now_ms) + 1;
+        let id = c.id;
+        comments.push(c);
+        sort(&mut comments);
+        self.write_file(&comments)?;
+        record_issued(&mut lock, id)?;
+        self.comments = comments;
+        Ok(id)
     }
 
     /// Replaces the body of comment `id`; false if there is no such comment.
@@ -168,12 +173,15 @@ impl Review {
     }
 
     fn lock_exclusive(&self) -> io::Result<File> {
+        // The lock file also holds the last id issued (see `add`); it is
+        // opened read-write and never truncated on open.
         if let Some(dir) = self.lock.parent() {
             fs::create_dir_all(dir)?;
         }
         let f = OpenOptions::new()
             .create(true)
             .truncate(false)
+            .read(true)
             .write(true)
             .open(&self.lock)?;
         flock(&f, FlockOperation::LockExclusive)?;
@@ -235,6 +243,24 @@ impl Review {
 
 fn sort(comments: &mut [Comment]) {
     comments.sort_by(|a, b| (&a.path, a.lines.0, a.id).cmp(&(&b.path, b.lines.0, b.id)));
+}
+
+/// The last id issued for this root, from the held lock file (0 if none).
+fn last_issued(lock: &mut File) -> u64 {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut text = String::new();
+    if lock.seek(SeekFrom::Start(0)).is_err() || lock.read_to_string(&mut text).is_err() {
+        return 0;
+    }
+    text.trim().parse().unwrap_or(0)
+}
+
+/// Records `id` as the last id issued, in the held lock file.
+fn record_issued(lock: &mut File, id: u64) -> io::Result<()> {
+    use std::io::{Seek, SeekFrom, Write};
+    lock.set_len(0)?;
+    lock.seek(SeekFrom::Start(0))?;
+    writeln!(lock, "{id}")
 }
 
 fn remove_if_exists(path: &Path) -> io::Result<()> {

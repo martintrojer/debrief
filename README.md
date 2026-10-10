@@ -45,7 +45,10 @@ you saw the change, but it has been rewritten since). The cursor starts on
 the oldest unseen commit. The first run on a repo marks everything seen.
 Opening a commit marks it seen, and `m` marks the whole list seen. Seen
 state and reviews live in the user cache dir (`--cache-dir` or
-`$DEBRIEF_CACHE_DIR` overrides it).
+`$DEBRIEF_CACHE_DIR` overrides it). Saved review sessions live in the
+user state dir: `$XDG_STATE_HOME/debrief`, else `~/.local/state/debrief`
+(`--state-dir` or `$DEBRIEF_STATE_DIR` overrides it, used as is). See
+[Review sessions](#review-sessions).
 
 ## Working copy
 
@@ -102,7 +105,9 @@ after a pause in a key sequence a box shows what can follow.
 | `f` | filter; `Enter` keeps it, `Esc` clears it |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
-| `q` | quit |
+| `<leader>rs` | list the saved review sessions |
+| `<leader>ss` | says to open a commit first (sessions are saved from the commit view) |
+| `q` | quit (asks first when there is unsaved review work) |
 
 The stats pane shows the commit under the cursor like `git log --stat`:
 its ID (and jj change ID), author and date on one line, the full message
@@ -138,6 +143,8 @@ a file list on the left (hidden below 80 columns).
 | `<leader>e`, `C-w h` / `C-w l` | toggle the file list, move between panes |
 | `Enter` | on a `.md` file header: open it in ramble |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
+| `<leader>ss` | save this commit's review session |
+| `<leader>rs` | list the saved review sessions |
 | `q` `Esc` | back to the log |
 
 `T` shows each file whole: the diff is reloaded with unlimited context, so
@@ -211,6 +218,54 @@ files and files missing from the working copy are refused. The line
 number comes from the commit, so it can drift if the file has changed
 since then. The TUI suspends while the editor runs and comes back on the
 same row.
+
+## Review sessions
+
+A session is the saved state of one review of one commit: its comments
+and the view. There is one per repo root and commit, in
+`<state dir>/sessions/<16 hex of blake3(root)>/<commit id>.json`; the
+working copy has one, `working-copy.json`. Nothing is written until the
+first save, and nothing is saved automatically.
+
+- **Save:** `<leader>ss` in the commit view saves the open commit's
+  session: the batch's comments on that commit (for the working copy,
+  its comments without a revision and removed-line comments on its base)
+  and the view (`T` context, `t` layout, the file list, the focused pane,
+  and the cursor by file, side and line, plus its row and column).
+  Saving again replaces it. The status line says
+  `Session saved (3 comments)`.
+- **Indicator:** log rows of commits with a session end in `▣`, with the
+  number of unsent comments when there are any (`▣3`). Filtered and
+  searched lists keep it, and so does the working-copy row.
+- **Restore:** opening a commit with a session puts its view back once the
+  diff loads (unified while the pane is too narrow for side by side, side
+  by side again when it is wide enough). If the anchored file is gone,
+  the cursor goes to the first row. The first time this run, the
+  session's unsent comments that the batch lacks are added back to it,
+  under their old ids when free. The status says
+  `Restored session (saved 2h ago, 3 comments)`. Opening the same commit
+  again in this run shows the view you left, not the saved one.
+- **Sent comments:** comments debrief sends or copies (`<leader>rr`, or
+  `y` when quitting) stay in their session marked sent and are never
+  restored; `▣N` counts only unsent ones. debrief doesn't see comments
+  sent from ramble, so those may come back when a session is restored.
+- **Quit warning:** `q` on the log or `C-c` anywhere, with unsaved review
+  work, shows `Unsaved review: s save · y copy · q quit · Esc cancel`.
+  `s` saves every such commit's session and quits (a failed save stays
+  and says why), `y` copies the batch to the clipboard (OSC 52), marks it
+  sent and quits, `q` or a second `C-c` quits, `Esc` stays. Unsaved work
+  is a commit visited this run that you changed since it was last saved,
+  sent or copied (moved the cursor, `T`, `t`, `<leader>e`, added, edited
+  or removed its comments) and that has a session or comments, or a
+  commit with comments from before this run and no session (it stays
+  unsaved until you save or send it). Only looking at a commit with no
+  comments and no session never warns.
+- **List:** `<leader>rs` lists the repo's sessions, newest first: short
+  ID and summary, age, and comment count (`3 comments (2 sent)`), also for
+  commits no longer in the log (a jj rewrite is a new commit with no
+  session). `Enter` opens the commit and restores it (`Commit not in the
+  log` if it's gone); `C-d` deletes the session. A session file that
+  can't be read is skipped and reported once.
 
 ## Config
 

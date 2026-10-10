@@ -405,15 +405,9 @@ impl Config {
             c.render.highlight = h;
         }
         if let Some(k) = raw.keys {
-            if let Some(leader) = k.leader {
-                c.keys.leader = leader;
-            }
-            if let Some(clue) = k.clue {
-                c.keys.clue = clue;
-            }
-            if let Some(p) = k.pane_nav {
-                c.keys.pane_nav = p;
-            }
+            set(&mut c.keys.leader, k.leader);
+            set(&mut c.keys.clue, k.clue);
+            set(&mut c.keys.pane_nav, k.pane_nav);
         }
         if let Some(v) = raw.view {
             set(&mut c.view.sidebar, v.sidebar);
@@ -425,23 +419,15 @@ impl Config {
             set(&mut c.view.sidebar_width, v.sidebar_width);
             set(&mut c.view.sidebar_min_width, v.sidebar_min_width);
             set(&mut c.view.sidebar_max_width, v.sidebar_max_width);
-            if let Some(stats) = v.stats {
-                c.view.stats = stats;
-            }
+            set(&mut c.view.stats, v.stats);
             match v.context {
                 Some(RawContext::Hunks) => c.view.context = DiffContext::Default,
                 Some(RawContext::Full) => c.view.context = DiffContext::Full,
                 None => {}
             }
-            if let Some(l) = v.layout {
-                c.view.layout = l;
-            }
-            if let Some(f) = v.files {
-                c.view.files = f;
-            }
-            if let Some(w) = v.split_min_width {
-                c.view.split_min_width = w;
-            }
+            set(&mut c.view.layout, v.layout);
+            set(&mut c.view.files, v.files);
+            set(&mut c.view.split_min_width, v.split_min_width);
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);

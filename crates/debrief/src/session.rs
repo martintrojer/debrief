@@ -147,10 +147,24 @@ impl Session {
 /// `$XDG_STATE_HOME` or `~/.local/state`; elsewhere `~/.local/state`)
 /// plus `debrief`.
 pub fn state_dir() -> Option<PathBuf> {
-    match std::env::var_os("DEBRIEF_STATE_DIR") {
+    resolve_state_dir(
+        std::env::var_os("DEBRIEF_STATE_DIR"),
+        dirs::state_dir(),
+        dirs::home_dir(),
+    )
+}
+
+/// [`state_dir`] from `$DEBRIEF_STATE_DIR` (`env`), the platform's
+/// state dir (`state`) and the home dir (`home`).
+fn resolve_state_dir(
+    env: Option<std::ffi::OsString>,
+    state: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match env {
         Some(d) if !d.is_empty() => Some(PathBuf::from(d)),
-        _ => dirs::state_dir()
-            .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("state")))
+        _ => state
+            .or_else(|| home.map(|h| h.join(".local").join("state")))
             .map(|d| d.join("debrief")),
     }
 }
@@ -238,17 +252,11 @@ impl Store {
         Ok(s)
     }
 
-    /// Write `s` (its `version` and `root` set here), replacing the
-    /// commit's session.
+    /// Write `s` as is, replacing the commit's session.
     pub fn save(&self, s: &Session) -> io::Result<()> {
         let path = self.path(&s.commit)?;
-        let s = Session {
-            version: VERSION,
-            root: self.root.clone(),
-            ..s.clone()
-        };
         fs::create_dir_all(&self.dir)?;
-        let json = serde_json::to_vec_pretty(&s).map_err(|e| invalid(e.to_string()))?;
+        let json = serde_json::to_vec_pretty(s).map_err(|e| invalid(e.to_string()))?;
         let mut tmp = path.clone().into_os_string();
         tmp.push(".tmp");
         fs::write(&tmp, json)?;
@@ -293,10 +301,10 @@ impl Store {
 mod tests {
     use super::*;
 
-    fn session(commit: &str, saved: u64) -> Session {
+    fn session(st: &Store, commit: &str, saved: u64) -> Session {
         Session {
             version: VERSION,
-            root: PathBuf::new(),
+            root: st.root().to_path_buf(),
             commit: commit.into(),
             change: None,
             summary: "s".into(),
@@ -324,9 +332,8 @@ mod tests {
         assert!(st.dir().starts_with(state.path().join("sessions")));
         assert_eq!(st.load("abc1").unwrap(), None);
         assert!(!state.path().join("sessions").exists(), "nothing written");
-        let mut s = session("abc1", 5);
+        let mut s = session(&st, "abc1", 5);
         st.save(&s).unwrap();
-        s.root = st.root().to_path_buf();
         assert_eq!(st.load("abc1").unwrap(), Some(s.clone()));
         assert_eq!(st.path("abc1").unwrap(), st.dir().join("abc1.json"));
         s.summary = "again".into();
@@ -334,7 +341,7 @@ mod tests {
         let files: Vec<_> = fs::read_dir(st.dir()).unwrap().collect();
         assert_eq!(files.len(), 1, "saving twice overwrites");
         assert_eq!(st.load("abc1").unwrap().unwrap().summary, "again");
-        st.save(&session(WORKING, 9)).unwrap();
+        st.save(&session(&st, WORKING, 9)).unwrap();
         assert!(st.dir().join("working-copy.json").is_file());
         let (list, errors) = st.list();
         assert!(errors.is_empty());
@@ -350,7 +357,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let st = Store::new(state.path(), root.path());
-        st.save(&session("good", 1)).unwrap();
+        st.save(&session(&st, "good", 1)).unwrap();
         fs::write(st.dir().join("bad.json"), "{not json").unwrap();
         let mut v2 = serde_json::to_value(st.load("good").unwrap().unwrap()).unwrap();
         v2["version"] = 2.into();
@@ -369,7 +376,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let st = Store::new(state.path(), root.path());
-        st.save(&session("c", 1)).unwrap();
+        st.save(&session(&st, "c", 1)).unwrap();
         let mut v = serde_json::to_value(st.load("c").unwrap().unwrap()).unwrap();
         v["future"] = 1.into();
         v["view"]["later"] = true.into();
@@ -377,5 +384,20 @@ mod tests {
         assert!(st.load("c").unwrap().is_some());
         assert!(st.path("../x").is_err());
         assert!(st.path("").is_err());
+    }
+
+    #[test]
+    fn the_state_dir_is_the_env_var_else_the_state_dir_else_home() {
+        let state = Some(PathBuf::from("/state"));
+        let home = Some(PathBuf::from("/home/me"));
+        let got = resolve_state_dir(Some("/env".into()), state.clone(), home.clone());
+        assert_eq!(got, Some(PathBuf::from("/env")), "set: as is");
+        let got = resolve_state_dir(Some("".into()), state.clone(), home.clone());
+        assert_eq!(got, Some(PathBuf::from("/state/debrief")), "empty: unset");
+        let got = resolve_state_dir(None, state, home.clone());
+        assert_eq!(got, Some(PathBuf::from("/state/debrief")));
+        let got = resolve_state_dir(None, None, home);
+        assert_eq!(got, Some(PathBuf::from("/home/me/.local/state/debrief")));
+        assert_eq!(resolve_state_dir(None, None, None), None);
     }
 }

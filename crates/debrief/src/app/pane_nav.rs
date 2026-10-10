@@ -97,6 +97,11 @@ impl App {
 /// Default pane runner: start the command with no terminal I/O and wait at
 /// most [`TMUX_WAIT`]; a slower command finishes on its own.
 pub fn spawn_capped(cmd: &LaunchCommand) -> anyhow::Result<Exit> {
+    spawn_within(cmd, TMUX_WAIT)
+}
+
+/// [`spawn_capped`] with the wait as a parameter.
+fn spawn_within(cmd: &LaunchCommand, wait: Duration) -> anyhow::Result<Exit> {
     use std::process::{Command, Stdio};
     let (prog, args) = cmd
         .argv
@@ -109,7 +114,7 @@ pub fn spawn_capped(cmd: &LaunchCommand) -> anyhow::Result<Exit> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    let deadline = Instant::now() + TMUX_WAIT;
+    let deadline = Instant::now() + wait;
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(Exit::Code(status.code().unwrap_or(-1)));
@@ -117,7 +122,7 @@ pub fn spawn_capped(cmd: &LaunchCommand) -> anyhow::Result<Exit> {
         if Instant::now() >= deadline {
             // Reap it off the UI thread.
             std::thread::spawn(move || child.wait());
-            anyhow::bail!("{prog} still running after {TMUX_WAIT:?}");
+            anyhow::bail!("{prog} still running after {wait:?}");
         }
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -153,8 +158,11 @@ mod tests {
 
     #[test]
     fn spawn_capped_returns_the_exit_code_of_a_quick_command() {
+        // A generous wait: process start-up on a loaded machine can take
+        // longer than the 200 ms the UI allows, and that isn't what this
+        // checks.
         assert!(matches!(
-            spawn_capped(&cmd(&["sh", "-c", "exit 3"])),
+            spawn_within(&cmd(&["sh", "-c", "exit 3"]), Duration::from_secs(10)),
             Ok(Exit::Code(3))
         ));
         assert!(spawn_capped(&cmd(&["/nonexistent/debrief-test"])).is_err());

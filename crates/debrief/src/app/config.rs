@@ -179,19 +179,42 @@ impl Config {
         Some(base.join("debrief").join("config.toml"))
     }
 
-    /// Load `path` over the defaults; a missing file is the defaults.
+    /// Load `path` over the defaults; a missing file is the defaults. An
+    /// error names the file, the line and the key: `config error at PATH
+    /// line N: view.layout: unknown variant `side`, expected `unified` or
+    /// `split``.
     pub fn load(path: &Path) -> anyhow::Result<Config> {
         let src = match std::fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::defaults()),
             Err(e) => return Err(anyhow!("cannot read config {}: {e}", path.display())),
         };
-        Config::parse(&src).map_err(|e| anyhow!("config error in {}: {e}", path.display()))
+        Config::parse_at(&src).map_err(|(at, msg)| match at {
+            Some(at) => anyhow!(
+                "config error at {} line {}: {msg}",
+                path.display(),
+                line_of(&src, at)
+            ),
+            None => anyhow!("config error at {}: {msg}", path.display()),
+        })
     }
 
-    /// Parse `src` over the defaults.
+    /// Parse `src` over the defaults; the error is [`Config::load`]'s
+    /// message without the file and line.
     pub fn parse(src: &str) -> Result<Config, String> {
-        let raw: RawConfig = toml::from_str(src).map_err(|e| e.to_string().trim().to_string())?;
+        Config::parse_at(src).map_err(|(_, msg)| msg)
+    }
+
+    /// [`Config::parse`]; the error carries its byte offset if known.
+    fn parse_at(src: &str) -> Result<Config, (Option<usize>, String)> {
+        let raw: RawConfig = toml::from_str(src).map_err(|e| {
+            let at = e.span().map(|s| s.start);
+            let msg = e.message().trim_end();
+            match at.and_then(|at| key_at(src, at)) {
+                Some(key) => (at, format!("{key}: {msg}")),
+                None => (at, msg.to_string()),
+            }
+        })?;
         let mut c = Config::defaults();
         if let Some(s) = raw.send {
             if let Some(cmd) = s.command {
@@ -250,8 +273,9 @@ impl Config {
                 ),
                 None => (
                     l.key,
-                    l.command
-                        .ok_or_else(|| format!("launcher `{}` is missing `command`", l.name))?,
+                    l.command.ok_or_else(|| {
+                        (None, format!("launcher `{}` is missing `command`", l.name))
+                    })?,
                 ),
             };
             let new = Launcher {
@@ -272,6 +296,37 @@ impl Default for Config {
     fn default() -> Self {
         Config::defaults()
     }
+}
+
+/// 1-based line of byte offset `at` in `src`.
+fn line_of(src: &str, at: usize) -> usize {
+    src.as_bytes()[..at.min(src.len())]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
+        + 1
+}
+
+/// The `table.key` whose `key = value` line holds byte offset `at`
+/// (the table from the last `[table]` / `[[table]]` header above it).
+fn key_at(src: &str, at: usize) -> Option<String> {
+    let at = at.min(src.len());
+    let start = src[..at].rfind('\n').map_or(0, |i| i + 1);
+    let line = src[start..].lines().next().unwrap_or("");
+    let (key, _) = line.split_once('=')?;
+    let key = key.trim().trim_matches('"');
+    if key.is_empty() || key.starts_with('#') || key.starts_with('[') {
+        return None;
+    }
+    let table = src[..start].lines().rev().find_map(|l| {
+        let l = l.trim();
+        l.starts_with('[')
+            .then(|| l.trim_matches(|c| c == '[' || c == ']').trim().to_string())
+    });
+    Some(match table {
+        Some(t) => format!("{t}.{key}"),
+        None => key.to_string(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -483,6 +538,16 @@ kinds = [
         assert!(!c.view.sidebar && !c.keys.clue);
         assert_eq!(c.keys.leader, ',');
         assert!(Config::parse("[keys]\nleader = \"\"\n").is_err());
+    }
+
+    #[test]
+    fn errors_name_the_table_and_key() {
+        let e = Config::parse("[view]\nsidebar = 1\n").unwrap_err();
+        assert!(e.starts_with("view.sidebar: invalid type"), "{e}");
+        let e = Config::parse("[[launch]]\nname = \"x\"\n\"kye\" = 1\n").unwrap_err();
+        assert!(e.starts_with("launch.kye: unknown field"), "{e}");
+        assert_eq!(key_at("# x = 1\n", 0), None);
+        assert_eq!(key_at("a = 1\n", 4).as_deref(), Some("a"));
     }
 
     #[test]

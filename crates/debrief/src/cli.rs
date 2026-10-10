@@ -150,7 +150,13 @@ mod tests {
         );
         std::fs::write(&p, "[bad]\n").unwrap();
         let e = c.start_options(Some("/d".into()), None).unwrap_err().0;
-        assert!(e.starts_with("debrief: config error in "), "{e}");
+        assert!(
+            e.starts_with(&format!(
+                "debrief: config error at {} line 1: ",
+                p.display()
+            )),
+            "{e}"
+        );
     }
 
     #[test]

@@ -504,7 +504,10 @@ impl App {
             }
             QuitChoice::Save => {
                 self.mode = self.sessions.quit_from;
-                self.review_reload();
+                // A batch that can't be read can't be saved (S14).
+                if let Err(e) = self.batch_reload() {
+                    return self.set_status(format!("session not saved: {e} (not quitting)"));
+                }
                 let keys = self.unsaved();
                 let mut saved = 0;
                 for k in &keys {
@@ -580,6 +583,14 @@ impl App {
         }
     }
 
+    /// Re-read the batch before saving from it.
+    fn batch_reload(&mut self) -> std::io::Result<()> {
+        match &mut self.review {
+            Some(r) => r.reload().map(|_| ()),
+            None => Ok(()),
+        }
+    }
+
     /// Write the session of `key` from the batch and its view (captured,
     /// or the open one); returns how many comments it holds unsent.
     fn session_save_key(&mut self, key: &str) -> std::io::Result<usize> {
@@ -642,8 +653,10 @@ impl App {
         else {
             return self.set_status(OPEN_TO_SAVE);
         };
-        self.review_reload();
-        let msg = match self.session_save_key(&key) {
+        let msg = match self
+            .batch_reload()
+            .and_then(|()| self.session_save_key(&key))
+        {
             Ok(n) => format!("Session saved ({})", comments_label(n)),
             Err(e) => format!("session not saved: {e}"),
         };

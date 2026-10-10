@@ -506,6 +506,50 @@ fn quit_prompt_s_that_fails_does_not_quit() {
     );
 }
 
+/// Make the batch file unreadable JSON.
+fn corrupt_batch(f: &Fixture) {
+    let p = std::fs::read_dir(f.cache.join("reviews"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "json"))
+        .unwrap();
+    std::fs::write(p, "{not json").unwrap();
+}
+
+#[test]
+fn quit_prompt_s_with_an_unreadable_batch_does_not_save_or_quit() {
+    let f = fixture();
+    let mut app = with_unsaved(&f);
+    let top = app.rows()[0].info.commit.clone();
+    keys(&mut app, "q");
+    assert_eq!(app.mode(), Mode::QuitPrompt);
+    corrupt_batch(&f);
+    keys(&mut app, "s");
+    assert!(!app.should_quit());
+    assert!(
+        app.status().starts_with("session not saved: "),
+        "{}",
+        app.status()
+    );
+    assert!(f.store().load(&top).unwrap().is_none(), "no stale save");
+}
+
+#[test]
+fn leader_ss_with_an_unreadable_batch_does_not_save() {
+    let f = fixture();
+    let mut app = with_unsaved(&f);
+    let top = app.rows()[0].info.commit.clone();
+    open(&mut app, 0);
+    corrupt_batch(&f);
+    keys(&mut app, " ss");
+    assert!(
+        app.status().starts_with("session not saved: "),
+        "{}",
+        app.status()
+    );
+    assert!(f.store().load(&top).unwrap().is_none(), "no stale save");
+}
+
 #[test]
 fn quit_prompt_y_copies_marks_sent_and_quits() {
     let f = fixture();

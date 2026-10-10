@@ -78,7 +78,9 @@ fn quote(p: &Path) -> String {
 
 /// Start the binary on `repo` in a fresh tmux server; the shell writes
 /// debrief's exit status to `status_file`. Sessions go to `<cache>/state`,
-/// never the real state dir.
+/// never the real state dir, and `XDG_CONFIG_HOME` is the empty
+/// `<cache>/config`, so the user's debrief config (and git's XDG ignore
+/// file) never applies; `env` comes after and can override it.
 fn start(repo: &Path, cache: &Path, status_file: &Path, env: &str) -> Option<Tmux> {
     start_with(repo, cache, status_file, env, "")
 }
@@ -103,7 +105,8 @@ fn start_with(
     };
     let bin = env!("CARGO_BIN_EXE_debrief");
     let shell_cmd = format!(
-        "env {env} {} {} --cache-dir {} --state-dir {} {flags}; echo $? > {}",
+        "env XDG_CONFIG_HOME={} {env} {} {} --cache-dir {} --state-dir {} {flags}; echo $? > {}",
+        quote(&cache.join("config")),
         quote(Path::new(bin)),
         quote(repo),
         quote(cache),
@@ -211,9 +214,8 @@ fn send_copies_the_review_with_one_osc52_write() {
     std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
     commit(&root, "second");
     let status = dir.path().join("status");
-    // No [send] command: the review goes to the clipboard.
-    let env = format!("XDG_CONFIG_HOME={}", quote(&dir.path().join("cfg")));
-    let Some(tmux) = start(&root, &dir.path().join("cache"), &status, &env) else {
+    // No config, so no [send] command: the review goes to the clipboard.
+    let Some(tmux) = start(&root, &dir.path().join("cache"), &status, "") else {
         return;
     };
     tmux.wait_for("the log", |s| s.contains("second"));

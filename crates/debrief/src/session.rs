@@ -279,8 +279,14 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return (out, errors),
             Err(e) => return (out, vec![in_file(&self.dir, e)]),
         };
-        for e in entries.flatten() {
-            let path = e.path();
+        for e in entries {
+            let path = match e {
+                Ok(e) => e.path(),
+                Err(e) => {
+                    errors.push(in_file(&self.dir, e));
+                    continue;
+                }
+            };
             if path.extension().is_none_or(|x| x != "json") {
                 continue;
             }

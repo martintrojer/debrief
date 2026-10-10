@@ -282,11 +282,12 @@ impl App {
             .collect()
     }
 
-    /// The open view as a [`View`]; `None` before its diff loads.
-    fn current_view(&self) -> Option<View> {
+    /// The open view as a [`View`]. The app-wide context, layout, file
+    /// list and focus are always current; before the diff loads the
+    /// cursor (anchor, row, column) is `prev`'s.
+    fn current_view(&self, prev: Option<&View>) -> Option<View> {
         let v = self.commit.as_ref()?;
-        v.diff.as_ref()?;
-        Some(View {
+        let mut view = View {
             context: to_view_context(self.context),
             layout: if self.split {
                 ViewLayout::Split
@@ -294,20 +295,35 @@ impl App {
                 ViewLayout::Unified
             },
             sidebar: self.sidebar_on,
-            focus: match self.focus {
-                Focus::Diff => ViewFocus::Diff,
-                Focus::Files => ViewFocus::Files,
+            // A restore still waiting for the diff holds the wanted focus.
+            focus: match (&v.restore, self.focus) {
+                (Some(r), _) if v.diff.is_none() => r.focus,
+                (_, Focus::Diff) => ViewFocus::Diff,
+                (_, Focus::Files) => ViewFocus::Files,
             },
-            anchor: v.anchor(),
-            row: v.cur.row,
-            col: v.cur.col,
-        })
+            ..prev.cloned().unwrap_or_default()
+        };
+        if v.diff.is_some() {
+            view.anchor = v.anchor();
+            view.row = v.cur.row;
+            view.col = v.cur.col;
+        }
+        Some(view)
     }
 
-    /// Remember the open view (when loaded) for its session, before it is
-    /// replaced or closed.
+    /// Remember the open view for its session, before it is replaced or
+    /// closed; while its diff loads, the cursor captured earlier this run
+    /// (else the saved one) stays.
     pub(super) fn session_capture(&mut self) {
-        let (Some(key), Some(view)) = (self.open_key(), self.current_view()) else {
+        let Some(key) = self.open_key() else { return };
+        let Some(visit) = self.sessions.visits.get(&key) else {
+            return;
+        };
+        let prev = visit
+            .view
+            .clone()
+            .or_else(|| self.sessions.saved.get(&key).map(|s| s.view.clone()));
+        let Some(view) = self.current_view(prev.as_ref()) else {
             return;
         };
         if let Some(visit) = self.sessions.visits.get_mut(&key) {

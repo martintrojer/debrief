@@ -254,6 +254,27 @@ fn the_view_restores_after_an_async_load_with_context_layout_side_and_column() {
 }
 
 #[test]
+fn view_changes_while_the_diff_loads_are_saved_when_it_closes() {
+    let f = fixture();
+    let (top, _) = save_top_with_comment(&f);
+    let saved = f.store().load(&top).unwrap().unwrap().view;
+    assert_eq!(saved.context, debrief::session::ViewContext::Hunks);
+    let mut app = f.app();
+    let (tx, _rx) = mpsc::channel();
+    app.set_sender(tx);
+    open(&mut app, 0);
+    assert!(app.commit_loading());
+    keys(&mut app, "T");
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "qs");
+    assert!(app.should_quit(), "{}", app.status());
+    let s = f.store().load(&top).unwrap().unwrap().view;
+    assert_eq!(s.context, debrief::session::ViewContext::Full, "T kept");
+    assert_eq!(s.anchor, saved.anchor, "the saved cursor stays");
+    assert_eq!((s.row, s.col), (saved.row, saved.col));
+}
+
+#[test]
 fn a_narrow_terminal_restores_unified_and_keeps_the_saved_layout() {
     let f = fixture();
     let mut app = f.app();

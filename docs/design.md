@@ -47,7 +47,8 @@ crates/
     ├── seen         new / updated / seen state per repo root
     ├── session      saved review sessions on disk
     ├── app          state and event loop: log, commit, split, comment, review, picker,
-    │                session, sidebar, pane_nav, highlight, stat, watch, launch, keys, help
+    │                session, sidebar, file_tree, pane_nav, highlight, stat, watch, launch,
+    │                keys, help
     └── ui           ratatui widgets only, no logic
 ```
 
@@ -161,6 +162,23 @@ action that starts it.
   renderer's.
 - **No wrapping.** Long lines scroll horizontally by display width.
   Wrapping would break the cell-column cursor model.
+- **The file list drives the diff's order.** `app/file_tree` builds the
+  list from the diff's paths, as lazygit's commit files panel does: a
+  tree of directories, each level directories first and then files,
+  each alphabetical, emitted depth first; a chain of directories that
+  hold one directory and no files is one row (`pkg/gui/controllers`),
+  and files are never folded in. A directory's counts are its files'
+  sums. Flat mode is the paths in git's order. The order of the list's
+  files is the order the row model lays out the diff, unified and side
+  by side, so `]f`, the rows and the list read the same way. Collapsed
+  directories only hide list rows: each hidden entry maps to the row
+  that shows it, which carries the current-file marker. `` ` ``
+  rebuilds the rows in the other order and keeps the cursor's offset
+  from its file header and its column, since a file's rows are the
+  same in either order. The auto width fits the visible rows' names
+  (indent plus name, not whole paths), so ` and opening or closing a
+  directory make an open peek decide again between beside and over the
+  diff.
 
 ## Comments and export
 
@@ -209,6 +227,14 @@ batch lacks, under their old ids when free. Each commit visited this run
 has a dirty bit, set by user actions on it and cleared by a save or a
 successful send; the quit warning reads those bits. There is no autosave:
 the warning is the safety net.
+
+A session saves the view as well as comments: context, layout, file
+list show/hide, focus, the cursor (as a file-and-line anchor, plus row
+and column), the file list's mode (`files`: tree or flat) and its
+collapsed directories (paths from the root). Opening the commit applies
+them app-wide before the diff loads, as the keys would. A session saved
+before `files` and `collapsed` existed opens in `[view] files` mode with
+every directory open, not in the mode the previous commit left.
 
 ## Keys and help
 

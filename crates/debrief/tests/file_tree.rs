@@ -512,3 +512,25 @@ fn a_wider_list_moves_an_open_peek_over_the_diff() {
     assert!(!app.sidebar_overlay());
     assert!(app.split_side().is_some());
 }
+
+/// docs/design.md maps app/file_tree and describes the tree, the
+/// list-driven diff order and what sessions save of the list.
+#[test]
+fn the_design_doc_covers_the_file_tree() {
+    let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/design.md"))
+        .unwrap();
+    let map = &doc[doc.find("## Architecture").unwrap()..doc.find("## Data flow").unwrap()];
+    assert!(map.contains("file_tree"), "module map");
+    let view = &doc[doc.find("## The commit view").unwrap()..];
+    for s in [
+        "directories first",
+        "git's order",
+        "drives the diff's order",
+    ] {
+        assert!(view.contains(s), "commit view: {s}");
+    }
+    let sessions = &doc[doc.find("## Sessions").unwrap()..];
+    for s in ["`files`", "`collapsed`", "`[view] files`"] {
+        assert!(sessions.contains(s), "sessions: {s}");
+    }
+}

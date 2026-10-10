@@ -345,6 +345,12 @@ impl TreeFilter {
         if !path.starts_with(&self.root) {
             return false;
         }
+        // An event for a `.gitignore` can be lost: inotify watches a new
+        // dir only once it sees the dir appear, so a file written straight
+        // after `mkdir` goes unseen. Check the dirs on the way to `path`.
+        if self.rules.stale_for(&self.root, path) {
+            self.rules = Rules::build(&self.root, &self.git_dir, &self.global);
+        }
         if !self.rules.ignored(path) {
             return true;
         }
@@ -383,6 +389,18 @@ impl Rules {
             nested,
             global: b.build().unwrap_or_else(|_| Gitignore::empty()),
         }
+    }
+
+    /// Whether a `.gitignore` between `root` and `path` appeared or went
+    /// away since these rules were built.
+    fn stale_for(&self, root: &Path, path: &Path) -> bool {
+        path.ancestors()
+            .skip(1)
+            .take_while(|d| d.starts_with(root))
+            .any(|d| {
+                let known = self.nested.iter().any(|(n, _)| n == d);
+                known != d.join(".gitignore").is_file()
+            })
     }
 
     /// git's verdict on `path` (or a parent dir of it): the deepest

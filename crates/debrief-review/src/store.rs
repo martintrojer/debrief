@@ -4,6 +4,9 @@
 //! file, applies the change and writes by rename, so two processes on the same
 //! root can't lose each other's comments. Reads take a shared lock when the lock
 //! file exists. Opening never creates anything.
+//!
+//! Ids are unique within a batch. [`Review::add`] never reuses an id for a
+//! root; [`Review::restore`] may bring a comment back under its former id.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -84,6 +87,46 @@ impl Review {
         record_issued(&mut lock, id)?;
         self.comments = comments;
         Ok(id)
+    }
+
+    /// Adds back comments saved elsewhere (a review session), under the
+    /// exclusive lock after re-reading the file. A comment already in the
+    /// batch (same id, path, revision, side, lines and creation time) is
+    /// skipped: the batch's version wins. Any other comment keeps its id
+    /// when no comment in the batch (or restored before it in this call)
+    /// has it, else it gets a fresh id as [`Review::add`] would issue.
+    /// The last issued id becomes the largest of it and every id restored,
+    /// never lower. Returns `(old id, new id)` per comment added.
+    pub fn restore(&mut self, restored: &[Comment]) -> io::Result<Vec<(u64, u64)>> {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX - 1))
+            .unwrap_or_default();
+        let mut lock = self.lock_exclusive()?;
+        let mut comments = self.read_file()?;
+        let mut last = last_issued(&mut lock);
+        let mut out = Vec::new();
+        for c in restored {
+            if comments.iter().any(|b| same_comment(b, c)) {
+                continue;
+            }
+            let old = c.id;
+            let mut c = c.clone();
+            if comments.iter().any(|b| b.id == c.id) {
+                let max = comments.iter().map(|b| b.id).max().unwrap_or(0);
+                c.id = max.max(last).max(now_ms) + 1;
+            }
+            last = last.max(c.id);
+            out.push((old, c.id));
+            comments.push(c);
+        }
+        if !out.is_empty() {
+            sort(&mut comments);
+            self.write_file(&comments)?;
+            record_issued(&mut lock, last)?;
+        }
+        self.comments = comments;
+        Ok(out)
     }
 
     /// Replaces the body of comment `id`; false if there is no such comment.
@@ -239,6 +282,17 @@ impl Review {
         fs::write(&tmp, json)?;
         fs::rename(&tmp, &self.file)
     }
+}
+
+/// `b` is `c` as saved: the same id and anchor (body and kind may have
+/// been edited since).
+fn same_comment(b: &Comment, c: &Comment) -> bool {
+    b.id == c.id
+        && b.path == c.path
+        && b.rev.as_ref().map(|r| &r.commit) == c.rev.as_ref().map(|r| &r.commit)
+        && b.side == c.side
+        && b.lines == c.lines
+        && b.created == c.created
 }
 
 fn sort(comments: &mut [Comment]) {

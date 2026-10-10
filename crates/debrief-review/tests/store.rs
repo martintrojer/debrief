@@ -454,3 +454,94 @@ fn builtin_kinds_are_the_four_with_definitions() {
     assert_eq!(ids, ["issue", "suggestion", "question", "nit"]);
     assert_eq!(debrief_review::Kind::label("nit"), "NIT");
 }
+
+fn lock_file(cache: &Path) -> std::path::PathBuf {
+    fs::read_dir(cache.join("reviews"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().unwrap() == "lock")
+        .unwrap()
+}
+
+#[test]
+fn restore_keeps_ids_into_an_empty_batch() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let a = r.add(note("a", 1, "one")).unwrap();
+    let b = r.add(note("b", 2, "two")).unwrap();
+    let saved = r.comments().to_vec();
+    r.clear().unwrap();
+    let map = r.restore(&saved).unwrap();
+    assert_eq!(map, [(a, a), (b, b)]);
+    assert_eq!(r.comments(), saved);
+    let fresh = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(fresh.comments(), saved);
+    // add never reissues a restored id.
+    let c = r.add(note("c", 1, "three")).unwrap();
+    assert!(c > b);
+}
+
+#[test]
+fn restore_skips_comments_already_present() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let a = r.add(note("a", 1, "one")).unwrap();
+    let b = r.add(note("b", 2, "two")).unwrap();
+    let saved = r.comments().to_vec();
+    r.edit(a, "edited").unwrap();
+    r.remove(b).unwrap();
+    let map = r.restore(&saved).unwrap();
+    assert_eq!(map, [(b, b)], "a is present: the batch's version wins");
+    assert_eq!(r.comments().len(), 2);
+    assert_eq!(r.comments()[0].body, "edited");
+    assert!(r.restore(&saved).unwrap().is_empty(), "nothing twice");
+    assert_eq!(r.comments().len(), 2);
+}
+
+#[test]
+fn restore_gives_a_clashing_id_a_fresh_one() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let a = r.add(note("a", 1, "saved")).unwrap();
+    let saved = r.comments().to_vec();
+    r.clear().unwrap();
+    // A wiped lock lets add reissue the id for a different comment.
+    fs::remove_file(lock_file(cache.path())).unwrap();
+    let mut clash = note("z", 9, "other");
+    clash.id = a;
+    clash.created = 1;
+    r.restore(&[clash]).unwrap();
+    assert_eq!(r.comments()[0].id, a);
+    let map = r.restore(&saved).unwrap();
+    assert_eq!(map.len(), 1);
+    let (old, new) = map[0];
+    assert_eq!(old, a);
+    assert!(new > a, "{new} > {a}");
+    let bodies: Vec<_> = r
+        .comments()
+        .iter()
+        .map(|c| (c.id, c.body.as_str()))
+        .collect();
+    assert_eq!(bodies, [(new, "saved"), (a, "other")]);
+    let last: u64 = fs::read_to_string(lock_file(cache.path()))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(last, new);
+    assert!(r.add(note("n", 1, "next")).unwrap() > new);
+}
+
+#[test]
+fn restore_never_lowers_the_last_issued_id() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let a = r.add(note("a", 1, "one")).unwrap();
+    let saved = r.comments().to_vec();
+    r.clear().unwrap();
+    let b = r.add(note("b", 1, "two")).unwrap();
+    r.clear().unwrap();
+    assert_eq!(r.restore(&saved).unwrap(), [(a, a)]);
+    let c = r.add(note("c", 1, "three")).unwrap();
+    assert!(c > b, "{c} > {b}");
+}

@@ -542,6 +542,14 @@ fn restore_never_lowers_the_last_issued_id() {
     let b = r.add(note("b", 1, "two")).unwrap();
     r.clear().unwrap();
     assert_eq!(r.restore(&saved).unwrap(), [(a, a)]);
+    // Read the counter itself: add also takes the clock, which would hide
+    // a counter lowered to `a`.
+    let last: u64 = fs::read_to_string(lock_file(cache.path()))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(last, b);
     let c = r.add(note("c", 1, "three")).unwrap();
     assert!(c > b, "{c} > {b}");
 }

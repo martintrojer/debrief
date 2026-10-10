@@ -640,11 +640,17 @@ impl App {
             }
             A::FileTop => return self.select_row(0),
             A::FileBottom => return self.select_row(usize::MAX),
-            A::FileOpen => return self.file_open(),
-            A::FileCollapse => return self.file_collapse(),
-            A::FileExpand => return self.file_expand(),
-            A::FileAll(collapse) => return self.file_all(collapse),
-            A::ToggleFiles => return self.toggle_files(),
+            A::FileOpen | A::FileCollapse | A::FileExpand | A::FileAll(_) | A::ToggleFiles => {
+                match action {
+                    A::FileOpen => self.file_open(),
+                    A::FileCollapse => self.file_collapse(),
+                    A::FileExpand => self.file_expand(),
+                    A::FileAll(collapse) => self.file_all(collapse),
+                    _ => self.toggle_files(),
+                }
+                // They change which rows show, so the list's width.
+                return self.sidebar_refit();
+            }
             _ => {}
         }
         let full = self.context == crate::vcs::Context::Full;

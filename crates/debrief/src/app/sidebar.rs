@@ -193,6 +193,13 @@ impl App {
             self.sidebar.narrow_override = None;
         }
         self.size.0 = cols;
+        self.sidebar_refit();
+    }
+
+    /// The file list's width may have changed (` or a directory opened
+    /// or closed): an open peek decides again between beside and over
+    /// the diff, as on a resize.
+    pub(super) fn sidebar_refit(&mut self) {
         if self.sidebar.peeked {
             self.sidebar.overlay = !self.peek_fits_beside();
         }

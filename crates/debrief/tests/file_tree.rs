@@ -87,8 +87,13 @@ fn keys(app: &mut App, s: &str) {
 }
 
 fn to_list(app: &mut App) {
-    ctrl(app, 'w');
-    keys(app, "h");
+    // Side by side, the first `C-w h` may only reach the left side.
+    for _ in 0..2 {
+        if app.focus() != Focus::Files {
+            ctrl(app, 'w');
+            keys(app, "h");
+        }
+    }
     assert_eq!(app.focus(), Focus::Files);
 }
 
@@ -473,4 +478,37 @@ fn an_old_session_opens_in_the_config_mode_after_a_flat_one() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.commit_id().unwrap(), base);
     assert!(app.files_tree(), "[view] files, not the last session's");
+}
+
+/// ` widens the list (flat rows are whole paths): an open side-by-side
+/// peek that no longer leaves `split_min_width` beside it goes over the
+/// diff instead of reflowing it to unified.
+#[test]
+fn a_wider_list_moves_an_open_peek_over_the_diff() {
+    let f = fixture();
+    let mut app = f.open(
+        "[view]\nsidebar = \"auto\"\nlayout = \"split\"\nsplit_min_width = 100\nsidebar_min_width = 1\n",
+    );
+    // The tree peek is 26 wide, flat 31: 128 fits only the tree beside.
+    const W: u16 = 128;
+    app.event(AppEvent::Resize(W, ROWS));
+    let draw = |app: &mut App| {
+        let mut t = Terminal::new(TestBackend::new(W, ROWS)).unwrap();
+        t.draw(|f| app.render(f)).unwrap();
+    };
+    draw(&mut app);
+    assert!(app.split_side().is_some());
+    to_list(&mut app);
+    draw(&mut app);
+    assert!(!app.sidebar_overlay(), "the tree fits beside");
+    assert!(app.split_side().is_some());
+    keys(&mut app, "`");
+    draw(&mut app);
+    assert!(app.sidebar_overlay(), "flat does not: over the diff");
+    assert!(app.split_side().is_some(), "still side by side");
+    // And back: the tree fits beside again.
+    keys(&mut app, "`");
+    draw(&mut app);
+    assert!(!app.sidebar_overlay());
+    assert!(app.split_side().is_some());
 }

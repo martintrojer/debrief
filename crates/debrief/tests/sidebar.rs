@@ -520,3 +520,51 @@ fn a_saved_file_list_focus_peeks_an_auto_list() {
     assert_eq!(app.focus(), Focus::Files);
     assert!(app.sidebar_visible());
 }
+
+#[test]
+fn a_saved_never_or_old_false_wins_over_an_auto_config() {
+    for legacy in [false, true] {
+        let f = fixture();
+        let mut app = f.open("[view]\nsidebar = \"never\"\n", 170);
+        keys(&mut app, " ss");
+        drop(app);
+        let id = git(&f.root, &["rev-parse", "HEAD"]).trim().to_string();
+        if legacy {
+            let store = debrief::session::Store::new(&f.cache.join("state"), &f.root);
+            let p = store.dir().join(format!("{id}.json"));
+            let json = std::fs::read_to_string(&p).unwrap();
+            let old = json.replace("\"sidebar\": \"never\"", "\"sidebar\": false");
+            assert_ne!(json, old, "legacy={legacy}");
+            std::fs::write(p, old).unwrap();
+        }
+        let mut app = f.open("[view]\nsidebar = \"auto\"\n", 170);
+        assert_eq!(app.sidebar_show(), SidebarShow::Never, "legacy={legacy}");
+        ctrl(&mut app, 'h');
+        assert!(
+            !app.sidebar_visible(),
+            "never opens no peek, legacy={legacy}"
+        );
+        keys(&mut app, " ss");
+        let saved = app.saved_session(&id).unwrap().view.sidebar;
+        assert_eq!(saved, SidebarShow::Never, "saved back unchanged");
+    }
+}
+
+#[test]
+fn a_saved_auto_wins_over_an_always_config() {
+    let f = fixture();
+    let mut app = f.open("[view]\nsidebar = \"auto\"\n", 170);
+    keys(&mut app, " ss");
+    drop(app);
+    let mut app = f.open("", 170);
+    assert_eq!(app.sidebar_show(), SidebarShow::Auto);
+    assert!(!app.sidebar_visible());
+    ctrl(&mut app, 'h');
+    assert!(app.sidebar_visible(), "a peek");
+    keys(&mut app, " ss");
+    let id = git(&f.root, &["rev-parse", "HEAD"]).trim().to_string();
+    assert_eq!(
+        app.saved_session(&id).unwrap().view.sidebar,
+        SidebarShow::Auto
+    );
+}

@@ -102,13 +102,14 @@ impl App {
         }
     }
 
-    /// Put back a saved `sidebar` (a session), as if `<leader>e` had left
-    /// it so. While auto, always / never pin / unpin the list (it stays a
-    /// peek); a saved auto starts peeking. No peek is open after.
+    /// Put back a saved `sidebar` (a session): it wins over `[view]
+    /// sidebar` and [`App::sidebar_show`] reports it unchanged. While auto,
+    /// a saved always pins the list (the pin [`App::sidebar_show`] saves
+    /// as always); otherwise the saved value is the mode. No peek is open
+    /// after.
     pub(super) fn set_sidebar_show(&mut self, show: SidebarShow) {
         match (self.sidebar.show, show) {
             (SidebarShow::Auto, SidebarShow::Always) => self.sidebar.pinned = true,
-            (SidebarShow::Auto, _) => self.sidebar.pinned = false,
             (_, s) => {
                 self.sidebar.show = s;
                 self.sidebar.pinned = false;

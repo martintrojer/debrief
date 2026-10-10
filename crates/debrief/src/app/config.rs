@@ -333,11 +333,12 @@ pub fn write_default(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `s` with control characters (newlines from a quoted value) escaped.
+/// `s` with control characters and the Unicode line and paragraph
+/// separators (newlines from a quoted value) escaped.
 fn one_line(s: &str) -> String {
     s.chars()
         .map(|c| {
-            if c.is_control() {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
                 c.escape_default().to_string()
             } else {
                 c.to_string()
@@ -377,7 +378,14 @@ fn key_at(doc: &toml::de::DeTable, at: usize) -> Option<String> {
     ) {
         match v.get_ref() {
             toml::de::DeValue::Table(t) => walk(t, at, path, best),
-            toml::de::DeValue::Array(a) => a.iter().for_each(|i| value(i, at, path, best)),
+            toml::de::DeValue::Array(a) => a.iter().for_each(|i| {
+                // An item of `[[launch]]` holding `at` names its array,
+                // even when the array's own span covers only the first.
+                if i.span().contains(&at) && path.len() > best.len() {
+                    *best = path.clone();
+                }
+                value(i, at, path, best)
+            }),
             _ => {}
         }
     }
@@ -629,10 +637,23 @@ kinds = [
                 "[review]\nkinds = [{ id = \"x\", color = 1 }]\n",
                 "review.kinds.color: unknown field",
             ),
+            // A later [[launch]] entry names its array too.
+            (
+                "[[launch]]\nname = \"a\"\ncommand = [\"x\"]\n[[launch]]\ncommand = [\"y\"]\n",
+                "launch: missing field `name`",
+            ),
         ] {
             let e = Config::parse(src).unwrap_err();
             assert!(e.starts_with(want), "{src:?}: {e}");
         }
+    }
+
+    #[test]
+    fn one_line_escapes_unicode_line_separators() {
+        assert_eq!(
+            one_line("a\u{2028}b\u{2029}c\nd"),
+            "a\\u{2028}b\\u{2029}c\\nd"
+        );
     }
 
     #[test]

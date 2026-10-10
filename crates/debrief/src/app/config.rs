@@ -209,8 +209,13 @@ impl Config {
         Config::parse_at(src).map_err(|(_, msg)| msg)
     }
 
-    /// [`Config::parse`]; the error carries its byte offset if known.
+    /// [`Config::parse`]; the error carries its byte offset if known and
+    /// is one line (values quoted in it may hold newlines).
     fn parse_at(src: &str) -> Result<Config, (Option<usize>, String)> {
+        Config::parse_raw(src).map_err(|(at, msg)| (at, one_line(&msg)))
+    }
+
+    fn parse_raw(src: &str) -> Result<Config, (Option<usize>, String)> {
         let raw: RawConfig = toml::from_str(src).map_err(|e| {
             let at = e.span().map(|s| s.start);
             let msg = e.message().trim_end();
@@ -326,6 +331,19 @@ pub fn write_default(path: &Path) -> anyhow::Result<()> {
     std::io::Write::write_all(&mut f, DEFAULT_TOML.as_bytes())
         .map_err(|e| anyhow!("cannot write {}: {e}", path.display()))?;
     Ok(())
+}
+
+/// `s` with control characters (newlines from a quoted value) escaped.
+fn one_line(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_control() {
+                c.escape_default().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
 /// 1-based line of byte offset `at` in `src`.

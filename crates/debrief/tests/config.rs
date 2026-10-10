@@ -232,6 +232,15 @@ fn bad_values_name_the_key_and_the_allowed_values() {
             "[[launch]]\nname = \"edit\"\ncommand = [\n  1\n]\n",
             "line 4: launch.command: invalid type: integer `1`",
         ),
+        // A decoded newline in a value stays escaped: still one line.
+        (
+            "[view]\nlayout = \"side\\nby side\"\n",
+            "line 2: view.layout: unknown variant `side\\nby side`, expected",
+        ),
+        (
+            "[[launch]]\nname = \"a\\r\\nb\"\n",
+            "launcher `a\\r\\nb` is missing `command`",
+        ),
     ] {
         let e = err_at(src);
         assert!(e.starts_with("config error at "), "{e}");
@@ -255,6 +264,21 @@ fn a_bad_config_exits_2_with_the_message_on_stderr() {
     let e = String::from_utf8_lossy(&out.stderr);
     assert!(e.starts_with("debrief: config error at "), "{e}");
     assert!(e.contains("view.layout"), "{e}");
+
+    std::fs::write(&p, "[view]\nlayout = \"side\\nby side\"\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_debrief"))
+        .arg("--config")
+        .arg(&p)
+        .arg(d.path())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let e = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(e.lines().count(), 1, "one line: {e:?}");
+    assert!(
+        e.contains("view.layout: unknown variant `side\\nby side`"),
+        "{e}"
+    );
 }
 
 // --- starting states, on a real git repo ------------------------------

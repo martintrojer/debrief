@@ -228,10 +228,16 @@ impl CommitView {
     pub(super) fn switch_side(&mut self) {
         let Some(s) = &self.split else { return };
         let row = self.cur.row;
+        // The change block: removed/added lines, fillers and no-newline
+        // rows between context lines.
         let in_block = |r: usize| {
             matches!(
                 s.rows.get(r).map(|r| r.kind),
-                Some(RowKind::Line(_) | RowKind::Filler | RowKind::NoNewline)
+                Some(
+                    RowKind::Line(LineKind::Removed | LineKind::Added)
+                        | RowKind::Filler
+                        | RowKind::NoNewline
+                )
             )
         };
         let filler = |r: usize| s.rows.get(r).map(|r| r.kind) == Some(RowKind::Filler);

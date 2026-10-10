@@ -25,13 +25,18 @@ struct Fixture {
 /// `base`, then `change`: x.txt replaces lines 2-3 (`r1` `r2`) with three
 /// (`a1` `a2` `a3`) between context lines.
 fn fixture() -> Fixture {
+    fixture_of("x.txt", "c1\nr1\nr2\nc2\n", "c1\na1\na2\na3\nc2\n")
+}
+
+/// `base` with `file` = `old`, then `change` with `file` = `new`.
+fn fixture_of(file: &str, old: &str, new: &str) -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
     std::fs::create_dir(&root).unwrap();
     git(&root, &["init", "-q"]);
-    std::fs::write(root.join("x.txt"), "c1\nr1\nr2\nc2\n").unwrap();
+    std::fs::write(root.join(file), old).unwrap();
     commit(&root, "base");
-    std::fs::write(root.join("x.txt"), "c1\na1\na2\na3\nc2\n").unwrap();
+    std::fs::write(root.join(file), new).unwrap();
     commit(&root, "change");
     Fixture {
         root: root.canonicalize().unwrap(),
@@ -399,4 +404,33 @@ fn a_working_copy_comment_on_the_left_is_on_the_base_revision() {
         Some("change")
     );
     assert_eq!(cs[1].lines, (2, 2));
+}
+
+#[test]
+fn tab_from_a_filler_stays_in_its_change_block() {
+    let added: String = (1..=8).map(|i| format!("a{i}\n")).collect();
+    let removed: String = (1..=8).map(|i| format!("r{i}\n")).collect();
+    for ctx in ["", "T"] {
+        // One removed, eight added: the left of a8 is filler, nearer the
+        // context below than `r` above.
+        let f = fixture_of("x.txt", "c1\nr\nc2\n", &format!("c1\n{added}c2\n"));
+        let mut app = f.open_split();
+        keys(&mut app, ctx);
+        let row = row_of(app.commit_rows(), "a8");
+        goto(&mut app, row);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.split_side(), Some(Side::Old));
+        assert_eq!(cur_text(&app), "r", "{ctx:?}");
+        // Mirrored: eight removed, one added.
+        let f = fixture_of("x.txt", &format!("c1\n{removed}c2\n"), "c1\na\nc2\n");
+        let mut app = f.open_split();
+        keys(&mut app, ctx);
+        let row = row_of(app.split_rows(Side::Old), "r8");
+        goto(&mut app, row);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(cur_text(&app), "r8");
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.split_side(), Some(Side::New));
+        assert_eq!(cur_text(&app), "a", "{ctx:?}");
+    }
 }

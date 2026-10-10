@@ -1301,3 +1301,96 @@ fn the_box_is_drawn_over_everything_with_the_file_list_shown_and_resized() {
         assert_eq!(cur, (bx.rect.x + 6, bx.rect.y + 1), "{w}x{h} cursor");
     }
 }
+
+/// The box in the diff pane after a scroll, at `w`x`h`: off every selected
+/// row on screen unless rows `lo..=hi` fill the pane (then at its bottom);
+/// the cursor on screen and off the box. The scroll.
+fn check_after_scroll(app: &mut App, w: u16, h: u16, lo: usize, hi: usize) -> usize {
+    let (_, bx, _) = draw_box(app, w, h);
+    let bx = bx.unwrap();
+    let pane = app.commit_layout(Rect::new(0, 0, w, h - 1)).diff;
+    let s = app.commit_scroll().0;
+    let ph = usize::from(pane.height);
+    let fills = lo <= s && hi + 1 >= s + ph;
+    if fills {
+        assert_eq!(bx.rect.bottom(), pane.bottom(), "filled: at the bottom");
+    } else {
+        assert!(
+            off_the_rows(app, &bx, lo, hi, pane.y),
+            "scroll {s}: {:?} over rows {lo}..={hi}",
+            bx.rect
+        );
+    }
+    let cur = app.commit_cursor().row;
+    assert!((s..s + ph).contains(&cur), "cursor {cur} on screen at {s}");
+    let y = pane.y + (cur - s) as u16;
+    assert!(
+        y < bx.rect.y || y >= bx.rect.bottom(),
+        "cursor {cur} under {:?} scroll {s} rows {lo}..={hi} pane {pane:?}",
+        bx.rect
+    );
+    s
+}
+
+#[test]
+fn page_up_scrolls_a_selection_taller_than_the_screen_behind_the_box() {
+    let f = fixture();
+    let mut app = f.open();
+    app.event(AppEvent::Resize(100, 24));
+    let first = added(&app, "g1");
+    // 47 and 50 rows at 100x24 (the reviewer's cases), and 30.
+    for k in [30, 47, 50] {
+        let (lo, hi) = (first, first + k - 1);
+        select_and_comment(&mut app, lo, hi);
+        assert_eq!(app.mode(), Mode::Comment, "{}", app.status());
+        let mut s = check_after_scroll(&mut app, 100, 24, lo, hi);
+        let start = s;
+        // Up page by page to the top of the diff: each moves the view.
+        while s > 0 {
+            press(&mut app, KeyCode::PageUp);
+            let t = check_after_scroll(&mut app, 100, 24, lo, hi);
+            assert!(t < s, "{k} rows: PageUp from {s} went to {t}");
+            s = t;
+        }
+        // And back down to the end, through where it started.
+        loop {
+            press(&mut app, KeyCode::PageDown);
+            let t = check_after_scroll(&mut app, 100, 24, lo, hi);
+            if t == s {
+                break;
+            }
+            assert!(t > s, "{k} rows: PageDown from {s} went to {t}");
+            s = t;
+        }
+        assert!(s >= start, "{k} rows: PageDown back to {s} (from {start})");
+        assert_eq!(app.mode(), Mode::Comment);
+        press(&mut app, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn a_scrolled_selection_keeps_the_box_off_its_rows_at_small_heights() {
+    let f = fixture();
+    let mut app = f.open();
+    let first = added(&app, "g1");
+    for h in [6, 8, 12] {
+        app.event(AppEvent::Resize(60, h));
+        for (a, b) in [(0, 49), (10, 39), (5, 25)] {
+            let (lo, hi) = (first + a, first + b);
+            select_and_comment(&mut app, lo, hi);
+            let mut seen = vec![check_after_scroll(&mut app, 60, h, lo, hi)];
+            for k in std::iter::repeat_n(KeyCode::PageUp, 24)
+                .chain(std::iter::repeat_n(KeyCode::PageDown, 48))
+            {
+                press(&mut app, k);
+                seen.push(check_after_scroll(&mut app, 60, h, lo, hi));
+            }
+            // Up to the top of the diff, back down at least to where the
+            // box opened.
+            let (top, end) = (seen[24], *seen.last().unwrap());
+            assert_eq!(top, 0, "h {h} rows {lo}..={hi}: {seen:?}");
+            assert!(end >= seen[0], "h {h} rows {lo}..={hi}: {seen:?}");
+            press(&mut app, KeyCode::Esc);
+        }
+    }
+}

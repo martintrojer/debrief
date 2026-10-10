@@ -92,7 +92,8 @@ fn guide_rows() -> Vec<Vec<String>> {
         .map(|l| {
             l.trim_matches('|')
                 .split('|')
-                .map(|c| c.trim().trim_matches('`').to_string())
+                // `` ` `` (a backtick key) leaves ` ` ` once its fences go.
+                .map(|c| c.trim().trim_matches('`').trim().to_string())
                 .collect()
         })
         .collect()

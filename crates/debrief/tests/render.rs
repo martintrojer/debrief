@@ -385,12 +385,13 @@ fn sidebar_letters_mode_changes_and_empty_files() {
     ];
     let (_tmp, mut app) = open(files);
     let buf = draw(&mut app, 100, 40);
+    // Top-level files: the tree lists them alphabetically.
     let want = [
         ('A', "added.rs", palette::GREEN),
-        ('M', "mod.rs", palette::YELLOW),
-        ('D', "gone.rs", palette::RED),
-        ('R', "new.rs", palette::PINK),
         ('C', "copy.rs", palette::TEAL),
+        ('D', "gone.rs", palette::RED),
+        ('M', "mod.rs", palette::YELLOW),
+        ('R', "new.rs", palette::PINK),
         ('M', "run.sh", palette::YELLOW),
     ];
     for (y, (letter, path, color)) in want.into_iter().enumerate() {

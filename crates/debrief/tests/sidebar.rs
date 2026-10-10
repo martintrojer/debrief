@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use common::{commit, git};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use debrief::app::config::{Config, SidebarShow};
+use debrief::app::config::{Config, FilesLayout, SidebarShow};
 use debrief::app::sidebar::Pane;
 use debrief::app::{App, AppEvent, Focus, HelpLine, Screen, StartOptions};
 use debrief::session::View;
@@ -54,6 +54,9 @@ impl Fixture {
     fn app(&self, toml: &str, cols: u16) -> App {
         let mut opts = StartOptions::new(self.cache.clone());
         opts.config = Config::parse(toml).unwrap();
+        // The widths here are measured on flat rows (`LONG`'s whole
+        // path); tests/file_tree.rs covers the tree's.
+        opts.config.view.files = FilesLayout::Flat;
         let mut app = App::new(
             vcs::open(&self.root, vcs::OpenOptions::default()).unwrap(),
             opts,
@@ -249,7 +252,8 @@ fn a_peek_without_room_beside_draws_over_the_diff_without_reflow() {
         assert_eq!(tail, was_tail, "row {y} right of the list");
     }
     assert!(s[0].contains('│'), "{s:?}");
-    assert!(s[1].contains("…c/deeply/nested/path/x.rs"), "{s:?}");
+    // Clipped in the middle, the extension kept.
+    assert!(s[1].contains("src/deeply/ne…ed/path/x.rs"), "{s:?}");
     // Rows under the list don't show the diff through.
     let under: String = s[ROWS as usize - 3].chars().take(35).collect();
     assert_eq!(under.trim(), "", "{s:?}");

@@ -318,12 +318,14 @@ impl App {
                 ViewFiles::Flat
             }),
             collapsed: v.collapsed.iter().cloned().collect(),
-            // A restore still waiting for the diff holds the wanted focus.
+            // The commit list is part of the file list's pane; browsing
+            // it wins. Else a restore still waiting for the diff holds
+            // the wanted focus.
             focus: match (&v.restore, self.focus) {
+                (_, Focus::Commits) => ViewFocus::Files,
                 (Some(r), _) if v.diff.is_none() => r.focus,
                 (_, Focus::Diff) => ViewFocus::Diff,
-                // The commit list is part of the file list's pane.
-                (_, Focus::Files | Focus::Commits) => ViewFocus::Files,
+                (_, Focus::Files) => ViewFocus::Files,
             },
             ..prev.cloned().unwrap_or_default()
         };

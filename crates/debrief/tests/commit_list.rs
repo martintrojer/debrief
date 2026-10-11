@@ -631,6 +631,40 @@ fn the_row_backgrounds_fill_the_whole_row() {
 }
 
 #[test]
+fn saving_from_the_list_while_a_restored_commit_loads_saves_files_focus() {
+    let f = fixture();
+    let mut app = f.open(ON, 1);
+    keys(&mut app, " ss");
+    let id = app.rows()[1].info.commit.clone();
+    assert_eq!(
+        f.store().load(&id).unwrap().unwrap().view.focus,
+        ViewFocus::Diff
+    );
+    drop(app);
+    let mut app = f.app(ON);
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    loaded(&mut app, &rx);
+    to_list(&mut app);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.commit_loading());
+    assert_eq!(app.focus(), Focus::Commits);
+    keys(&mut app, " ss");
+    assert!(
+        app.status().starts_with("Session saved"),
+        "{}",
+        app.status()
+    );
+    assert_eq!(
+        f.store().load(&id).unwrap().unwrap().view.focus,
+        ViewFocus::Files
+    );
+}
+
+#[test]
 fn enter_onto_a_commit_with_a_saved_session_keeps_the_list_focused() {
     let f = fixture();
     // Saved with the tree focused.

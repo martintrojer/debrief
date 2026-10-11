@@ -167,10 +167,20 @@ impl App {
         self.commit_list_refocus();
     }
 
-    /// The list (or the whole sidebar, an empty commit's) went away
-    /// while it had the keys: the tree takes them, else the diff.
+    /// The list went away (toggled off, too short, or the whole sidebar,
+    /// an empty commit's): a hold it kept ends, and keys it or a
+    /// now-hidden tree had go to the tree if shown, else the diff.
     pub(super) fn commit_list_refocus(&mut self) {
-        if self.focus == Focus::Commits && !self.commit_list_visible() {
+        if self.commit_list_visible() {
+            return;
+        }
+        self.sidebar.held = false;
+        let lost = match self.focus {
+            Focus::Commits => true,
+            Focus::Files => !self.sidebar_visible(),
+            Focus::Diff => false,
+        };
+        if lost {
             let tree = self.sidebar_visible() && self.tree_has_files();
             self.set_focus(if tree { Focus::Files } else { Focus::Diff });
         }

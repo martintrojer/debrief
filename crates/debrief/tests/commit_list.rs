@@ -709,6 +709,26 @@ fn enter_onto_a_session_with_the_file_list_hidden_keeps_browsing() {
     assert!(!app.sidebar_visible());
 }
 
+/// A hold ends when the commit list goes away, even with the tree
+/// focused: the hidden file list doesn't come back with the list.
+#[test]
+fn a_hold_ends_when_the_list_goes_away() {
+    let f = fixture();
+    save_hidden_session(&f);
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.commit_list_visible(), "held");
+    ctrl(&mut app, 'k');
+    assert_eq!(app.focus(), Focus::Files);
+    keys(&mut app, " E");
+    assert!(!app.sidebar_visible(), "the session's never applies");
+    assert_eq!(app.focus(), Focus::Diff);
+    keys(&mut app, " E");
+    assert!(!app.sidebar_visible(), "no hold comes back with the list");
+}
+
 #[test]
 fn enter_onto_a_session_in_a_narrow_terminal_keeps_browsing() {
     let f = fixture();

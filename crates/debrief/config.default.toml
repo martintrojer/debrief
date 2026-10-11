@@ -70,6 +70,16 @@
 # pane_nav = true
 
 ## ---------------------------------------------------------------------------
+## Mouse
+# [mouse]
+## Capture the mouse: click to focus a pane and select a row (double-click
+## opens), drag in the diff to select lines, the wheel scrolls the pane
+## under the pointer. Shift+drag still selects text in most terminals.
+## false: no capture, the terminal keeps its own selection and scrolling
+## (and the wheel no longer scrolls the log's stats pane).
+# enabled = true
+
+## ---------------------------------------------------------------------------
 ## Comment kinds (the same shape as ramble's). Tab in the comment box
 ## cycles untyped -> kinds in order -> untyped. A typed comment exports as
 ## "## Item N [ISSUE]", with a legend of the kinds used. A list replaces

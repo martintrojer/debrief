@@ -2,7 +2,8 @@
 //! `<leader>rr` hands the review back, shared in meaning with ramble's),
 //! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
 //! (syntax highlighting), `[view]` (what shows at start: the stats pane,
-//! hunks or the full file, unified or side by side) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
+//! hunks or the full file, unified or side by side), `[mouse]` (capture
+//! on or off) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one. `config.default.toml` documents every key with its default
@@ -27,6 +28,7 @@ pub struct Config {
     pub render: RenderConfig,
     pub view: ViewConfig,
     pub keys: KeysConfig,
+    pub mouse: MouseConfig,
     pub launch: Vec<Launcher>,
     /// Problems the file had that didn't stop it loading (dropped comment
     /// kinds); the app shows them in the status line at start.
@@ -74,6 +76,21 @@ impl Default for KeysConfig {
             clue: true,
             pane_nav: true,
         }
+    }
+}
+
+/// `[mouse]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MouseConfig {
+    /// Capture the mouse: clicks, drags and the wheel act in debrief (on
+    /// by default); false leaves the terminal its own selection and
+    /// scrolling.
+    pub enabled: bool,
+}
+
+impl Default for MouseConfig {
+    fn default() -> Self {
+        MouseConfig { enabled: true }
     }
 }
 
@@ -321,6 +338,7 @@ impl Config {
             render: RenderConfig::default(),
             view: ViewConfig::default(),
             keys: KeysConfig::default(),
+            mouse: MouseConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
             },
@@ -412,6 +430,9 @@ impl Config {
             set(&mut c.keys.leader, k.leader);
             set(&mut c.keys.clue, k.clue);
             set(&mut c.keys.pane_nav, k.pane_nav);
+        }
+        if let Some(m) = raw.mouse {
+            set(&mut c.mouse.enabled, m.enabled);
         }
         if let Some(v) = raw.view {
             set(&mut c.view.sidebar, v.sidebar);
@@ -574,7 +595,14 @@ struct RawConfig {
     render: Option<RawRender>,
     view: Option<RawView>,
     keys: Option<RawKeys>,
+    mouse: Option<RawMouse>,
     launch: Option<Vec<RawLauncher>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMouse {
+    enabled: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -833,6 +861,16 @@ kinds = [
         assert_eq!(c("[view]\nsidebar_commits = true\n"), Ok(true));
         assert_eq!(c("[view]\nsidebar_commits = false\n"), Ok(false));
         assert!(c("[view]\nsidebar_commits = \"on\"\n").is_err());
+    }
+
+    #[test]
+    fn mouse_enabled_defaults_on() {
+        assert!(Config::defaults().mouse.enabled);
+        let c = |src: &str| Config::parse(src).map(|c| c.mouse.enabled);
+        assert_eq!(c("[mouse]\n"), Ok(true));
+        assert_eq!(c("[mouse]\nenabled = false\n"), Ok(false));
+        assert!(c("[mouse]\nenabled = \"no\"\n").is_err());
+        assert!(c("[mouse]\nwheel = 3\n").is_err());
     }
 
     #[test]

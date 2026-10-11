@@ -368,8 +368,8 @@ on the status line: a launcher with a bad `key` is left unbound, and an
 empty or repeated `[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
-(highlighting), `[keys]`, `[review]` (comment kinds), `[send]` (where
-`<leader>rr` goes) and `[[launch]]`.
+(highlighting), `[keys]`, `[mouse]`, `[review]` (comment kinds), `[send]`
+(where `<leader>rr` goes) and `[[launch]]`.
 
 ### Toggles
 
@@ -394,10 +394,9 @@ session. The rows without a key are set only in the file.
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |
 | the `<leader>` key | — | `keys.leader` | `" "` |
+| mouse clicks, drags and wheel | — | `mouse.enabled` | `true` |
 | comment kinds Tab cycles through | — | `review.kinds` | issue, suggestion, question, nit |
 
-debrief never captures the mouse, so the terminal keeps its own selection
-and scrolling.
 
 ### Launchers
 

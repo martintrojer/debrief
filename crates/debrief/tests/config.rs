@@ -51,6 +51,7 @@ fn uncommented_default_file_is_the_defaults() {
         "[view]",
         "[render]",
         "[keys]",
+        "[mouse]",
         "[review]",
         "[send]",
         "[[launch]]",
@@ -143,11 +144,12 @@ fn every_toggle_has_a_config_key_and_a_guide_row() {
     for r in &rows {
         assert!(documented(&r[2]), "{} not in config.default.toml", r[2]);
     }
-    // And every [view] / [keys] key has a row, key-bound or config-only
-    // (`keys.pane_nav` binds C-h/j/k/l but no key flips it, so it is a
-    // config-only row rather than a `keys::TOGGLES` entry).
-    let keys = default_keys(&["view", "keys"]);
+    // And every [view] / [keys] / [mouse] key has a row, key-bound or
+    // config-only (`keys.pane_nav` binds C-h/j/k/l but no key flips it, so
+    // it is a config-only row rather than a `keys::TOGGLES` entry).
+    let keys = default_keys(&["view", "keys", "mouse"]);
     assert!(keys.contains(&"keys.pane_nav".to_string()), "{keys:?}");
+    assert!(keys.contains(&"mouse.enabled".to_string()), "{keys:?}");
     for k in &keys {
         assert!(
             rows.iter().any(|r| r[2] == *k),

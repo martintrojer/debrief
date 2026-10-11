@@ -83,3 +83,30 @@ the log's stats pane, and never enables capture.
   test reads the user's real config or state dirs.
 - Read-only rule unchanged: debrief never writes to the repo.
 - Comments describe the code, no spec or question ids.
+
+## 3. Log scope, pagination and commit-list search (Q54–Q56, 2026-10-11)
+
+**Problem.** In jj repos the default log is jj's `revsets.log`
+(`bookmarks() | @ | ancestors(bookmarks() | @, 2)` here: 5 commits), while
+git shows `HEAD`'s whole history up to the limit. Long histories stop at
+`--limit` (200) with no way to load more.
+
+- **Same default for git and jj:** the ancestors of the current commit:
+  git `HEAD`, jj `::@` (the root commit is already dropped). `[log] revset`
+  in config overrides it (a jj revset or a git revision range, as
+  `--revset`); `--revset` overrides both. `[log] limit` (default 200) sets
+  how many load at first and per page; `--limit` overrides it.
+- **Pagination:** when the loaded log is full (as many rows as asked for),
+  moving past its last row (`j`, `G`, `C-d`, the wheel, and the same in
+  the commit list) loads the next page off the UI thread: the log re-runs
+  with limit + page, the cursor stays on its commit, the status line says
+  `loading more…`. A `… more` row ends the log and the commit list while
+  more may exist; it goes once a load returns fewer than asked. Reloads
+  (watcher, `R`-style refreshes) keep the grown limit.
+- **Search and filter** stay on the loaded rows. When a filter or search
+  finds no match and more history exists, the status line says so
+  (`… more not loaded`); nothing loads by itself.
+- **Commit list search:** `/` `?` `n` `N` in the commit list search the
+  log's rows with the log's matching (summary, author, ids), moving the
+  list cursor without opening. `f` in the list opens the log's one
+  filter prompt; the list, the log and `]]`/`[[` keep agreeing.

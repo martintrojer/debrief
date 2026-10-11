@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+use crate::app::StartOptions;
 use crate::app::config::{self, Config};
-use crate::app::{DEFAULT_LIMIT, StartOptions};
 use crate::vcs::OpenOptions;
 
 #[derive(Debug, Parser)]
@@ -18,12 +18,13 @@ use crate::vcs::OpenOptions;
 pub struct Cli {
     /// A path inside the git or jj repository (default: the working directory).
     pub path: Option<PathBuf>,
-    /// Revset (jj) or revision range (git) to list instead of the default.
+    /// Revset (jj) or revision range (git) to list instead of `[log]
+    /// revset`, else the current commit and its ancestors.
     #[arg(long, value_name = "R")]
     pub revset: Option<String>,
-    /// Most commits listed.
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_LIMIT)]
-    pub limit: usize,
+    /// Most commits listed (default: `[log] limit`, else 200).
+    #[arg(long, value_name = "N")]
+    pub limit: Option<usize>,
     /// Where seen state and reviews live (default: the user cache dir's
     /// `debrief`, or `$DEBRIEF_CACHE_DIR`).
     #[arg(long, value_name = "DIR")]
@@ -84,8 +85,8 @@ impl Cli {
         Ok(StartOptions {
             cache_dir,
             state_dir,
-            revset: self.revset.clone(),
-            limit: self.limit,
+            revset: self.revset.clone().or_else(|| config.log.revset.clone()),
+            limit: self.limit.unwrap_or(config.log.limit),
             config,
         })
     }
@@ -153,6 +154,29 @@ mod tests {
         assert_eq!(o.state_dir, PathBuf::from("/s/debrief"));
         assert_eq!(o.limit, 200);
         assert_eq!(o.revset, None);
+    }
+
+    #[test]
+    fn log_config_applies_unless_a_flag_is_given() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("c.toml");
+        std::fs::write(&p, "[log]\nrevset = \"main..\"\nlimit = 7\n").unwrap();
+        let opts = |args: &[&str]| {
+            let mut argv = vec!["debrief", "--config", p.to_str().unwrap()];
+            argv.extend(args);
+            Cli::try_parse_from(argv)
+                .unwrap()
+                .start_options(Some("/d".into()), Some("/s".into()), None)
+                .unwrap()
+        };
+        let o = opts(&[]);
+        assert_eq!((o.revset.as_deref(), o.limit), (Some("main.."), 7));
+        let o = opts(&["--revset", "::@", "--limit", "3"]);
+        assert_eq!((o.revset.as_deref(), o.limit), (Some("::@"), 3));
+        let o = opts(&["--limit", "3"]);
+        assert_eq!((o.revset.as_deref(), o.limit), (Some("main.."), 3));
+        let o = opts(&["--revset", "::@"]);
+        assert_eq!((o.revset.as_deref(), o.limit), (Some("::@"), 7));
     }
 
     #[test]

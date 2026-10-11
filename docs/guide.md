@@ -9,14 +9,17 @@ What debrief does and how to drive it. For in-app key help, see
 ```sh
 debrief                    # the repo holding the working directory
 debrief path/to/repo       # or any path inside a repo
-debrief --revset 'main..'  # jj revset, or git revision range
-debrief --limit 500        # how many commits to load (default 200)
+debrief --revset 'main..'  # jj revset, or git revision range ([log] revset)
+debrief --limit 500        # how many commits to load ([log] limit, default 200)
 debrief --no-snapshot      # jj: don't snapshot; @ as of the last jj command
 debrief --init-config      # write ~/.config/debrief/config.toml
 ```
 
-jj is used when a `.jj` is found above the path, else git. The default
-revset is jj's `revsets.log`, or git's `HEAD`.
+jj is used when a `.jj` is found above the path, else git. Both list the
+current commit and its ancestors by default: jj `::@` (not jj's own
+`revsets.log`), git `HEAD`. `[log] revset` and `[log] limit` in the
+[config file](#config) change the defaults; `--revset` and `--limit`
+override them.
 
 debrief keeps seen state and the review batch in the user cache dir
 (`--cache-dir` or `$DEBRIEF_CACHE_DIR` moves it), and saved sessions in
@@ -398,7 +401,8 @@ on the status line: a launcher with a bad `key` is left unbound, and an
 empty or repeated `[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
-(highlighting), `[keys]`, `[mouse]`, `[review]` (comment kinds), `[send]`
+(highlighting), `[keys]`, `[mouse]`, `[log]` (which commits load),
+`[review]` (comment kinds), `[send]`
 (where `<leader>rr` goes) and `[[launch]]`.
 
 ### Toggles

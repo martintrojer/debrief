@@ -203,13 +203,9 @@ impl Vcs for Jj {
 
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {
         let limit = limit.to_string();
-        let mut args = vec!["log", "--no-graph", "-n", &limit, "-T", LOG_TEMPLATE];
         // One argv element, so the revset can never be read as a flag.
-        let rev;
-        if let Some(r) = revset {
-            rev = format!("--revisions={r}");
-            args.push(&rev);
-        }
+        let rev = format!("--revisions={}", revset.unwrap_or("::@"));
+        let args = ["log", "--no-graph", "-n", &limit, "-T", LOG_TEMPLATE, &rev];
         let out = self.jj(&self.at_op()?, &args)?;
         out.split('\x1e')
             .filter(|r| !r.trim().is_empty())

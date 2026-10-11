@@ -236,16 +236,14 @@ fn jj_log_markers_updated_and_reload() {
     e.write("b.txt", "b\n");
     e.jj(&["--quiet", "commit", "-m", "two"]);
     let cache = e.root.parent().unwrap().join("cache");
-    let opts = || StartOptions {
-        revset: Some("::@".into()),
-        ..StartOptions::new(cache.clone())
-    };
+    let opts = || StartOptions::new(cache.clone());
     let app = App::new(
         vcs::open(&e.root, vcs::OpenOptions::default()).unwrap(),
         opts(),
     )
     .unwrap();
-    // The root commit is not listed: @ (empty), two, one.
+    // The default log is @ and its ancestors, without the root commit:
+    // @ (empty), two, one.
     let sums: Vec<_> = app.rows().iter().map(|r| r.info.summary.as_str()).collect();
     assert_eq!(sums, ["", "two", "one"]);
     assert!(

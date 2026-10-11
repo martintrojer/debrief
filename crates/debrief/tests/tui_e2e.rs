@@ -297,13 +297,7 @@ fn jj_snapshot_and_no_snapshot() {
     let ops = e.op_count();
     // --no-snapshot: @ is as of the last jj command, nothing is written.
     let status = dir.join("status1");
-    let Some(tmux) = start_with(
-        &e.root,
-        &dir.join("cache"),
-        &status,
-        &env,
-        "--no-snapshot --revset '::@ ~ root()'",
-    ) else {
+    let Some(tmux) = start_with(&e.root, &dir.join("cache"), &status, &env, "--no-snapshot") else {
         return;
     };
     tmux.wait_for("the log", |s| s.contains("jj first"));
@@ -319,13 +313,7 @@ fn jj_snapshot_and_no_snapshot() {
     drop(tmux);
     // Default: the snapshot makes the edit visible in @.
     let status = dir.join("status2");
-    let Some(tmux) = start_with(
-        &e.root,
-        &dir.join("cache"),
-        &status,
-        &env,
-        "--revset '::@ ~ root()'",
-    ) else {
+    let Some(tmux) = start_with(&e.root, &dir.join("cache"), &status, &env, "") else {
         return;
     };
     tmux.wait_for("the log", |s| s.contains("jj first"));

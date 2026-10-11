@@ -272,8 +272,8 @@ pub trait Vcs {
     fn working_copy_commit(&self) -> Result<Option<String>> {
         Ok(None)
     }
-    /// Newest first. `None` uses the default: `HEAD` for git, the user's
-    /// `revsets.log` for jj.
+    /// Newest first. `None` uses the default, the current commit and its
+    /// ancestors: `HEAD` for git, `::@` for jj (jj's root commit included).
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>>;
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
     /// revision naming one commit. `context`: hunks or the whole file.

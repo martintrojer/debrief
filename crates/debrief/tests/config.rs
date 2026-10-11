@@ -52,6 +52,7 @@ fn uncommented_default_file_is_the_defaults() {
         "[render]",
         "[keys]",
         "[mouse]",
+        "[log]",
         "[review]",
         "[send]",
         "[[launch]]",

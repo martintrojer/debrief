@@ -630,7 +630,7 @@ fn jj_at_shows_the_edit_after_the_snapshot() {
     }
     let e = jj_sample();
     e.write("a.txt", "one\ntwo\nthree\n");
-    let mut app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    let mut app = jj_app(&e, OpenOptions::default(), None);
     assert_eq!(summaries(&app), ["", "first"]);
     assert!(app.rows()[0].working, "@ is marked");
     assert!(!app.rows()[1].working);
@@ -660,7 +660,7 @@ fn jj_no_snapshot_shows_at_as_of_the_last_command() {
     let e = jj_sample();
     e.write("a.txt", "one\ntwo\nthree\n");
     let ops = e.op_count();
-    let mut app = jj_app(&e, OpenOptions { snapshot: false }, Some("::@ ~ root()"));
+    let mut app = jj_app(&e, OpenOptions { snapshot: false }, None);
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
     assert!(added_texts(&app).is_empty());
@@ -709,7 +709,7 @@ fn jj_comments_on_at() {
     }
     let e = jj_sample();
     e.write("a.txt", "one\nTWO\n");
-    let mut app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    let mut app = jj_app(&e, OpenOptions::default(), None);
     let parent = app.rows()[1].info.clone();
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
@@ -745,7 +745,7 @@ fn jj_merge_at_refuses_old_side_comments() {
         "description(glob:right*)",
     ]);
     e.write("b.txt", "b1\nB2\n");
-    let mut app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    let mut app = jj_app(&e, OpenOptions::default(), None);
     let at = app.working_row_index().unwrap();
     assert_eq!(app.rows()[at].info.parents.len(), 2);
     keys(&mut app, &format!("{}G", at + 1));
@@ -775,7 +775,7 @@ fn jj_snapshot_failure_shows_in_the_status_line() {
         }
     };
     lock(0o555);
-    let app = jj_app(&e, OpenOptions::default(), Some("::@ ~ root()"));
+    let app = jj_app(&e, OpenOptions::default(), None);
     lock(0o755);
     assert!(
         app.status().starts_with("jj snapshot failed: "),

@@ -39,8 +39,69 @@ fn log_has_change_ids_and_parents() {
     assert_eq!(log[0].parents[0], log[1].commit);
     assert_eq!(log[1].parents[0], log[2].commit);
     assert_eq!(v.log(Some("::@ ~ root()"), 1).unwrap().len(), 1);
-    // Default revset (the user's revsets.log) works too.
-    assert!(!v.log(None, 200).unwrap().is_empty());
+}
+
+/// Set in the child process [`default_log_is_every_ancestor_of_at`] runs.
+const CHILD_REPO: &str = "DEBRIEF_TEST_JJ_REPO";
+
+#[test]
+fn default_log_is_every_ancestor_of_at() {
+    if !have_jj() {
+        return;
+    }
+    // The child: debrief's jj runs with the narrow config set below.
+    if let Some(root) = std::env::var_os(CHILD_REPO) {
+        let v = vcs::open(std::path::Path::new(&root), NO_SNAPSHOT).unwrap();
+        let log = v.log(None, 200).unwrap();
+        let summaries: Vec<_> = log.iter().map(|c| c.summary.as_str()).collect();
+        // @, its five ancestors, then jj's root commit.
+        assert_eq!(summaries, ["", "c5", "c4", "c3", "c2", "c1", ""]);
+        assert!(log[6].commit.bytes().all(|b| b == b'0'), "{:?}", log[6]);
+        return;
+    }
+    let e = Env::new(false);
+    for i in 1..=5 {
+        e.write("a.txt", &format!("{i}\n"));
+        e.jj(&["--quiet", "commit", "-m", &format!("c{i}")]);
+    }
+    e.jj(&["--quiet", "bookmark", "set", "old", "-r", "@----"]);
+    // jj's own default log, with this config, is @ alone. Passed through
+    // the environment: a repo-level jj config would live in the user's
+    // config dir.
+    let dir = e.root.parent().unwrap();
+    let narrow = dir.join("narrow.toml");
+    let cfg = std::fs::read_to_string(&e.cfg).unwrap();
+    std::fs::write(&narrow, format!("{cfg}[revsets]\nlog = \"@\"\n")).unwrap();
+    let narrow = narrow.to_str().unwrap();
+    let xdg = dir.join("xdg");
+    let env = [
+        ("JJ_CONFIG", narrow),
+        ("XDG_CONFIG_HOME", xdg.to_str().unwrap()),
+    ];
+    let jj_default = common::sh_env(
+        &e.root,
+        "jj",
+        &["log", "--no-graph", "-T", r#"description ++ "|""#],
+        &env,
+    );
+    assert_eq!(jj_default, "|", "the fixture hides the ancestors");
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "default_log_is_every_ancestor_of_at",
+            "--nocapture",
+        ])
+        .env(CHILD_REPO, &e.root)
+        .envs(env)
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "the child ran the test: {text}");
 }
 
 #[test]

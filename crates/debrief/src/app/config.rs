@@ -2,13 +2,15 @@
 //! `<leader>rr` hands the review back, shared in meaning with ramble's),
 //! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
 //! (syntax highlighting), `[view]` (what shows at start: the stats pane,
-//! hunks or the full file, unified or side by side), `[mouse]` (capture
-//! on or off) and `[[launch]]` (commands run with the TUI suspended, like ramble's).
+//! hunks or the full file, unified or side by side), `[log]` (which
+//! commits load), `[mouse]` (capture on or off) and `[[launch]]` (commands
+//! run with the TUI suspended, like ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one. `config.default.toml` documents every key with its default
 //! (`debrief --init-config` writes it).
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail};
@@ -29,6 +31,7 @@ pub struct Config {
     pub view: ViewConfig,
     pub keys: KeysConfig,
     pub mouse: MouseConfig,
+    pub log: LogConfig,
     pub launch: Vec<Launcher>,
     /// Problems the file had that didn't stop it loading (dropped comment
     /// kinds); the app shows them in the status line at start.
@@ -91,6 +94,25 @@ pub struct MouseConfig {
 impl Default for MouseConfig {
     fn default() -> Self {
         MouseConfig { enabled: true }
+    }
+}
+
+/// `[log]`; `--revset` and `--limit` override it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogConfig {
+    /// A jj revset or git revision range; `None` is the current commit
+    /// and its ancestors (jj `::@`, git `HEAD`).
+    pub revset: Option<String>,
+    /// Most commits listed (at least 1).
+    pub limit: usize,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        LogConfig {
+            revset: None,
+            limit: crate::app::DEFAULT_LIMIT,
+        }
     }
 }
 
@@ -339,6 +361,7 @@ impl Config {
             view: ViewConfig::default(),
             keys: KeysConfig::default(),
             mouse: MouseConfig::default(),
+            log: LogConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
             },
@@ -433,6 +456,12 @@ impl Config {
         }
         if let Some(m) = raw.mouse {
             set(&mut c.mouse.enabled, m.enabled);
+        }
+        if let Some(l) = raw.log {
+            if l.revset.is_some() {
+                c.log.revset = l.revset;
+            }
+            set(&mut c.log.limit, l.limit.map(NonZeroUsize::get));
         }
         if let Some(v) = raw.view {
             set(&mut c.view.sidebar, v.sidebar);
@@ -596,7 +625,25 @@ struct RawConfig {
     view: Option<RawView>,
     keys: Option<RawKeys>,
     mouse: Option<RawMouse>,
+    log: Option<RawLog>,
     launch: Option<Vec<RawLauncher>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLog {
+    #[serde(default, deserialize_with = "non_empty")]
+    revset: Option<String>,
+    limit: Option<NonZeroUsize>,
+}
+
+/// A string with something in it besides whitespace.
+fn non_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let s = String::deserialize(d)?;
+    if s.trim().is_empty() {
+        return Err(serde::de::Error::custom("expected a non-empty string"));
+    }
+    Ok(Some(s))
 }
 
 #[derive(Deserialize)]
@@ -871,6 +918,31 @@ kinds = [
         assert_eq!(c("[mouse]\nenabled = false\n"), Ok(false));
         assert!(c("[mouse]\nenabled = \"no\"\n").is_err());
         assert!(c("[mouse]\nwheel = 3\n").is_err());
+    }
+
+    #[test]
+    fn log_defaults_to_no_revset_and_200() {
+        assert_eq!(
+            Config::defaults().log,
+            LogConfig {
+                revset: None,
+                limit: 200
+            }
+        );
+        let c = Config::parse("[log]\nrevset = \"main..\"\nlimit = 50\n").unwrap();
+        assert_eq!(c.log.revset.as_deref(), Some("main.."));
+        assert_eq!(c.log.limit, 50);
+        for (src, want) in [
+            ("[log]\nlimit = 0\n", "log.limit: "),
+            ("[log]\nlimit = -1\n", "log.limit: "),
+            ("[log]\nlimit = \"all\"\n", "log.limit: "),
+            ("[log]\nrevset = \"\"\n", "log.revset: "),
+            ("[log]\nrevset = 3\n", "log.revset: "),
+            ("[log]\nrevsets = \"x\"\n", "log.revsets: unknown field"),
+        ] {
+            let e = Config::parse(src).unwrap_err();
+            assert!(e.starts_with(want), "{src:?}: {e}");
+        }
     }
 
     #[test]

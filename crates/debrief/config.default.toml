@@ -49,6 +49,15 @@
 # split_min_width = 140
 
 ## ---------------------------------------------------------------------------
+## Which commits load
+# [log]
+## A jj revset or git revision range, as --revset (which overrides it).
+## Unset: the current commit and its ancestors (jj ::@, git HEAD).
+##   revset = "trunk().."
+## Most commits listed (at least 1); --limit overrides it.
+# limit = 200
+
+## ---------------------------------------------------------------------------
 ## Rendering
 # [render]
 ## Syntax-highlight diff lines (catppuccin-mocha). Each hunk is coloured on

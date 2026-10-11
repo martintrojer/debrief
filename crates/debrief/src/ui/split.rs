@@ -16,15 +16,8 @@ use ratatui::widgets::Paragraph;
 use super::commit::{Pane, diff_line, draw_row, sign_of};
 use super::palette;
 use crate::app::commit::side_gutter_width;
-use crate::app::{App, DiffRow, Focus, Mode, RowKind};
-
-/// Rows drawn once across both halves.
-fn spans_both(kind: RowKind) -> bool {
-    !matches!(
-        kind,
-        RowKind::Line(_) | RowKind::NoNewline | RowKind::Filler
-    )
-}
+use crate::app::split::spans_both;
+use crate::app::{App, DiffRow, Focus, Mode};
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let Some(mine) = app.split_side() else { return };

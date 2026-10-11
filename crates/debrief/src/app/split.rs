@@ -29,6 +29,15 @@ pub fn too_narrow(min: u16, have: u16) -> String {
     format!("side by side needs {min} columns (have {have})")
 }
 
+/// Rows drawn once across both halves side by side, with the cursor
+/// side's gutter and scroll.
+pub fn spans_both(kind: RowKind) -> bool {
+    !matches!(
+        kind,
+        RowKind::Line(_) | RowKind::NoNewline | RowKind::Filler
+    )
+}
+
 /// The side the cursor is not on.
 pub(super) fn other(side: Side) -> Side {
     match side {

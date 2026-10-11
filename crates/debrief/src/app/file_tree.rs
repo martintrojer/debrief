@@ -477,6 +477,19 @@ impl App {
 }
 
 impl App {
+    /// The file list's first drawn row in a list `h` rows tall: the
+    /// least that shows the selection while the list has the keys, else
+    /// the diff cursor's file.
+    pub fn files_skip(&self, h: usize) -> usize {
+        let Some(l) = self.file_list() else { return 0 };
+        let follow = if self.focus == super::Focus::Files {
+            Some(l.selected)
+        } else {
+            l.current
+        };
+        follow.map_or(0, |r| (r + 1).saturating_sub(h))
+    }
+
     /// Rows `C-d` / `C-u` move in the file list: half its tree's height.
     pub(super) fn files_half(&self) -> usize {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));

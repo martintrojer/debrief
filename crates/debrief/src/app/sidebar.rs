@@ -8,6 +8,7 @@ use debrief_review::Side;
 
 use super::commit::Focus;
 use super::config::{SidebarShow, SidebarSide, SidebarWidth};
+use super::file_tree::{Entry, indent};
 use super::pane_nav::Dir;
 use super::{App, Screen};
 
@@ -100,6 +101,18 @@ fn cap_width(fit: u16, cols: u16, min: u16, max: u16) -> u16 {
 /// A file row's count column: ` +n −m`.
 pub fn counts_label(add: usize, del: usize) -> String {
     format!(" +{add} −{del}")
+}
+
+/// The column of entry `e`'s status letter or folder arrow in a list
+/// `width` columns wide (after the gutter and the indent).
+pub fn lead_col(e: &Entry, width: usize) -> usize {
+    let counts = counts_label(e.add, e.del).width();
+    GUTTER_COLS
+        + indent(
+            e.depth,
+            width.saturating_sub(counts),
+            GUTTER_COLS + STATUS_COLS,
+        )
 }
 
 impl App {

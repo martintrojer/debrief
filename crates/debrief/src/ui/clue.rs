@@ -70,19 +70,15 @@ fn layout(rows: &[ClueRow], per: usize, width: usize) -> Vec<Col<'_>> {
     cols
 }
 
-/// Draw the key clue box.
-pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
-    if !app.clue_visible() || area.width < 6 || area.height < 3 {
-        return;
-    }
-    let rows = app.clue_rows();
+/// `rows` laid out in columns for `area`, and the box around them with
+/// `title`, at the bottom right.
+fn placed<'a>(rows: &'a [ClueRow], title: &str, area: Rect) -> (Vec<Col<'a>>, Rect) {
     let max_h = (area.height / 2).max(3);
     let per = (max_h as usize - 2).max(1);
     let max_inner = area.width.saturating_sub(4 + 2) as usize;
-    let cols = layout(&rows, per, max_inner);
-    let title = format!(" {} ", app.clue_title());
+    let cols = layout(rows, per, max_inner);
     let content_w = cols.iter().map(Col::width).sum::<usize>() + GAP * (cols.len() - 1);
-    let inner_w = content_w.max(width(&title)).min(max_inner);
+    let inner_w = content_w.max(width(title)).min(max_inner);
     let inner_h = cols.iter().map(|c| c.rows.len()).max().unwrap_or(0);
     let w = inner_w as u16 + 2;
     let h = inner_h as u16 + 2;
@@ -93,6 +89,30 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         h,
     )
     .intersection(area);
+    (cols, rect)
+}
+
+fn shown(app: &App, area: Rect) -> bool {
+    app.clue_visible() && area.width >= 6 && area.height >= 3
+}
+
+/// The clue box's rect in `area` (above the status line), if it is drawn.
+pub fn rect(app: &App, area: Rect) -> Option<Rect> {
+    shown(app, area).then(|| placed(&app.clue_rows(), &title(app), area).1)
+}
+
+fn title(app: &App) -> String {
+    format!(" {} ", app.clue_title())
+}
+
+/// Draw the key clue box.
+pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    if !shown(app, area) {
+        return;
+    }
+    let rows = app.clue_rows();
+    let title = title(app);
+    let (cols, rect) = placed(&rows, &title, area);
     frame.render_widget(Clear, rect);
     let base = Style::new().fg(palette::TEXT).bg(BG);
     let block = Block::default()

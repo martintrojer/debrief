@@ -20,9 +20,8 @@ use unicode_width::UnicodeWidthStr;
 use super::log::{WORKING_MARKER, marker};
 use super::palette;
 use crate::app::config::SidebarSide;
-use crate::app::file_tree::{clip_middle, indent};
-use crate::app::sidebar::STATUS_COLS;
-use crate::app::sidebar::counts_label;
+use crate::app::file_tree::clip_middle;
+use crate::app::sidebar::{GUTTER_COLS, STATUS_COLS, counts_label, lead_col};
 use crate::app::{App, Focus, WORKING_ID, short_id};
 use crate::vcs::FileStatus;
 
@@ -151,11 +150,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focus() == Focus::Files;
     let sel = list.selected;
     let h = inner.height as usize;
-    let skip = if focused {
-        (sel + 1).saturating_sub(h)
-    } else {
-        list.current.map_or(0, |c| (c + 1).saturating_sub(h))
-    };
+    let skip = app.files_skip(h);
     let width = inner.width as usize;
     let lines: Vec<Line> = (skip..list.visible.rows.len())
         .take(h)
@@ -184,11 +179,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled(format!("{arrow} "), base.fg(palette::BLUE))
                 }
             };
-            let pad_l = indent(
-                e.depth,
-                width.saturating_sub(counts.width()),
-                1 + STATUS_COLS,
-            );
+            let pad_l = lead_col(e, width) - GUTTER_COLS;
             let room = width.saturating_sub(1 + pad_l + STATUS_COLS + counts.width());
             let name = clip_middle(&e.name, room);
             let name_style = if e.is_dir() {

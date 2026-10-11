@@ -996,6 +996,7 @@ impl App {
         self.commit_list_keep_visible();
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
         self.sidebar_remember_width();
+        self.files_pin_settle();
         let diff = self.commit_layout(area).diff;
         self.layout_sync(diff.width);
         let marks = self.review_gutter();

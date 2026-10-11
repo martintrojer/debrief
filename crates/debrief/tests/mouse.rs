@@ -440,6 +440,27 @@ fn a_shorter_list_after_the_wheel_shows_the_selection() {
     assert!(selection_shown(&app), "the shorter list still shows it");
 }
 
+/// A pin left by the wheel ends when the list's height changes, so a
+/// round trip back to the old height does not hide the selection again.
+#[test]
+fn a_height_round_trip_after_the_wheel_keeps_the_selection_shown() {
+    let f = fixture();
+    let mut app = f.open("");
+    let t = tree_inner(&app);
+    ctrl(&mut app, 'h');
+    assert_eq!(app.focus(), Focus::Files);
+    keys(&mut app, "gg");
+    wheel(&mut app, t.x + 3, t.y + 3, true);
+    draw(&mut app);
+    assert!(!selection_shown(&app), "the wheel scrolled row 0 away");
+    app.event(AppEvent::Resize(COLS, ROWS - 6));
+    draw(&mut app);
+    assert!(selection_shown(&app));
+    app.event(AppEvent::Resize(COLS, ROWS));
+    draw(&mut app);
+    assert!(selection_shown(&app), "the old pin does not come back");
+}
+
 #[test]
 fn a_click_on_a_directory_arrow_opens_and_closes_it() {
     let f = fixture();

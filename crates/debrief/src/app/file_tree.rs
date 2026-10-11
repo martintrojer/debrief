@@ -518,6 +518,29 @@ impl App {
         }
     }
 
+    /// Drop a pin left for another height or another followed row, so a
+    /// later return to that height or row does not bring it back (run
+    /// before each draw, after the pinned top has served its one move).
+    pub(super) fn files_pin_settle(&mut self) {
+        let Some(inner) = self.tree_inner() else {
+            return;
+        };
+        let h = inner.height as usize;
+        let Some(l) = self.file_list() else { return };
+        let follow = Some(self.files_follow(&l));
+        let top = self.files_skip(h);
+        if let Some(v) = &mut self.commit
+            && let Some(t) = v.files_top
+            && (t.h != h || t.follow != follow)
+        {
+            v.files_top = Some(FilesTop {
+                top,
+                h,
+                follow: None,
+            });
+        }
+    }
+
     /// A key moved in the file list: its view shows the selection again,
     /// moving as little as it must from where it is.
     pub(super) fn files_unpin(&mut self) {

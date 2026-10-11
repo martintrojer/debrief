@@ -128,7 +128,7 @@ impl App {
     }
 
     /// The file list's tree inside its border, as drawn.
-    fn tree_inner(&self) -> Option<Rect> {
+    pub(super) fn tree_inner(&self) -> Option<Rect> {
         let side = self.config.view.sidebar_side;
         let l = self.commit_layout(self.main_area());
         l.sidebar.map(|r| list_inner(r, side))

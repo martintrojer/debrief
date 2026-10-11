@@ -68,8 +68,19 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         0 => " 0/0 ".to_string(),
         n => format!(" {}/{n} ", app.cursor() + 1),
     };
+    let mut msg = String::new();
+    if app.loading_more() {
+        msg.push_str("  loading more…");
+    }
+    if !app.status().is_empty() {
+        msg.push_str(&format!("  {}", app.status()));
+    }
+    // The root is elided first, so the message shows whole while it fits.
     let tail = [format!("  {kind}"), format!("  {counts}")];
-    let fixed: usize = 1 + tail.iter().map(|t| t.chars().count()).sum::<usize>() + right.len();
+    let fixed: usize = 1
+        + tail.iter().map(|t| t.chars().count()).sum::<usize>()
+        + Span::raw(msg.as_str()).width()
+        + right.len();
     let root = elide_left(
         &app.root_label(),
         (area.width as usize).saturating_sub(fixed),
@@ -80,14 +91,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(kind, base.fg(palette::OVERLAY)),
         Span::styled(counts, base.fg(palette::SKY)),
     ];
-    if app.loading_more() {
-        spans.push(Span::styled("  loading more…", base.fg(palette::YELLOW)));
-    }
-    if !app.status().is_empty() {
-        spans.push(Span::styled(
-            format!("  {}", app.status()),
-            base.fg(palette::YELLOW),
-        ));
+    if !msg.is_empty() {
+        spans.push(Span::styled(msg, base.fg(palette::YELLOW)));
     }
     let left_w: usize = spans.iter().map(Span::width).sum();
     let right_w = Span::raw(right.as_str()).width();

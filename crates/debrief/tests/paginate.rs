@@ -7,7 +7,9 @@
 
 mod common;
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -25,8 +27,13 @@ const NOT_LOADED: &str = "… more not loaded";
 
 /// A git repo with `commit 1` .. `commit {n}` (row 0 is `commit {n}`).
 fn git_repo(n: usize) -> (tempfile::TempDir, PathBuf) {
+    git_repo_in("repo", n)
+}
+
+/// [`git_repo`] in a directory `name` under the temp dir.
+fn git_repo_in(name: &str, n: usize) -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("repo");
+    let root = tmp.path().join(name);
     std::fs::create_dir(&root).unwrap();
     git(&root, &["init", "-q"]);
     for i in 1..=n {
@@ -201,6 +208,70 @@ fn a_reload_keeps_the_grown_count() {
 
 // --- off the UI thread -------------------------------------------------
 
+/// A git [`vcs::Vcs`] counting the `log` reads made through it: the app's
+/// own handle, on the UI thread (a worker reopens the repo).
+struct Counting {
+    inner: Box<dyn vcs::Vcs>,
+    logs: Rc<Cell<usize>>,
+}
+
+impl vcs::Vcs for Counting {
+    fn kind(&self) -> vcs::Kind {
+        self.inner.kind()
+    }
+    fn root(&self) -> &Path {
+        self.inner.root()
+    }
+    fn open_options(&self) -> vcs::OpenOptions {
+        self.inner.open_options()
+    }
+    fn refresh(&self, snapshot: bool) -> anyhow::Result<()> {
+        self.inner.refresh(snapshot)
+    }
+    fn working_status(&self) -> anyhow::Result<Option<vcs::WorkingStatus>> {
+        self.inner.working_status()
+    }
+    fn pinned_op(&self) -> Option<String> {
+        self.inner.pinned_op()
+    }
+    fn working_copy_commit(&self) -> anyhow::Result<Option<String>> {
+        self.inner.working_copy_commit()
+    }
+    fn log(&self, revset: Option<&str>, limit: usize) -> anyhow::Result<Vec<vcs::CommitInfo>> {
+        self.logs.set(self.logs.get() + 1);
+        self.inner.log(revset, limit)
+    }
+    fn show(&self, commit: &str, context: vcs::Context) -> anyhow::Result<vcs::CommitDiff> {
+        self.inner.show(commit, context)
+    }
+    fn stat(&self, commit: &str) -> anyhow::Result<vcs::CommitStat> {
+        self.inner.stat(commit)
+    }
+}
+
+#[test]
+fn with_a_sender_the_ui_thread_never_reads_the_page() {
+    let (tmp, root) = git_repo(12);
+    let logs = Rc::new(Cell::new(0));
+    let v = Counting {
+        inner: vcs::open(&root, vcs::OpenOptions::default()).unwrap(),
+        logs: logs.clone(),
+    };
+    let mut opts = StartOptions::new(tmp.path().join("cache"));
+    opts.config.view.stats = false;
+    opts.limit = 5;
+    let mut app = App::new(Box::new(v), opts).unwrap();
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    logs.set(0);
+    keys(&mut app, "G");
+    assert!(app.loading_more());
+    assert_eq!(logs.get(), 0, "the page was read on the UI thread");
+    app.event(page_event(&rx));
+    assert_eq!(app.rows().len(), 10);
+    assert_eq!(logs.get(), 0);
+}
+
 #[test]
 fn with_a_sender_the_page_loads_on_a_worker_once() {
     let (_t, _root, mut app) = twelve();
@@ -257,6 +328,25 @@ fn a_reload_during_a_page_load_takes_its_count_and_drops_its_reply() {
     app.event(stale);
     assert_eq!(summaries(&app)[0], "commit 13", "the stale reply dropped");
     assert_eq!(app.rows().len(), 10);
+}
+
+// --- the status line ---------------------------------------------------
+
+#[test]
+fn a_long_root_leaves_room_for_loading_more_and_more_not_loaded() {
+    let (tmp, root) = git_repo_in(&"r".repeat(120), 12);
+    let mut app = open(&root, &tmp.path().join("cache"), 5, "");
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    keys(&mut app, "G");
+    let s = screen(&mut app, 80, 12);
+    assert!(s[11].contains("  loading more…"), "{s:#?}");
+    assert!(s[11].contains('…'), "the root is elided: {s:#?}");
+    app.event(page_event(&rx));
+    keys(&mut app, "/zzz");
+    press(&mut app, KeyCode::Enter);
+    let s = screen(&mut app, 80, 12);
+    assert!(s[11].contains(NOT_LOADED), "{s:#?}");
 }
 
 // --- search and filter -------------------------------------------------

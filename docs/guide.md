@@ -10,7 +10,7 @@ What debrief does and how to drive it. For in-app key help, see
 debrief                    # the repo holding the working directory
 debrief path/to/repo       # or any path inside a repo
 debrief --revset 'main..'  # jj revset, or git revision range ([log] revset)
-debrief --limit 500        # how many commits to load ([log] limit, default 200)
+debrief --limit 500        # commits to load at first and per page ([log] limit, default 200)
 debrief --no-snapshot      # jj: don't snapshot; @ as of the last jj command
 debrief --init-config      # write ~/.config/debrief/config.toml
 ```
@@ -33,6 +33,13 @@ updated one (jj: you saw the change, but it has been rewritten since). The
 cursor starts on the oldest unseen commit. The first run on a repo marks
 everything seen. Opening a commit marks it seen, and `m` marks the whole
 list seen. The log reloads when the repo changes.
+
+The log loads `--limit` commits (`[log] limit`, 200 by default). While
+more may exist, a dim `… more` row ends the log. Moving past the last row
+(`j`, `G` without a count, `C-d`, or the wheel once the `… more` row is on
+screen) loads the next page in the background, with `loading more…` on
+the status line. The cursor stays on its commit. A reload keeps however
+many have loaded. The commit list pages the same way.
 
 | Key | Does |
 |---|---|
@@ -58,7 +65,9 @@ terminals, and loads once the cursor rests on a commit.
 
 Search and filter match the summary, the author, the commit ID and the jj
 change ID as substrings, case-insensitive unless the pattern has a
-capital, over the loaded commits. The filter narrows the list as you type,
+capital, over the loaded commits; neither loads more. When nothing loaded
+matches and more may exist, the prompt and then the status line say
+`… more not loaded`. The filter narrows the list as you type,
 and the status line shows `filter: x (12/200)`. `m`, `Enter` and `]]` /
 `[[` act on the filtered list, and `r` keeps the filter.
 

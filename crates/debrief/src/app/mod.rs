@@ -47,7 +47,7 @@ pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::{Action, KeyResult};
 pub use keys::{LEADER, TOGGLES};
 pub use launch::{Effect, Exit, LaunchCommand};
-pub use log::{WORKING_ID, age, is_zero_id, short_id};
+pub use log::{MORE_ROW, NOT_LOADED, WORKING_ID, age, is_zero_id, short_id};
 pub use motion::Cursor;
 pub use mouse::{Hit, MULTI_CLICK, WHEEL_ROWS};
 pub use picker::{PickerAction, PickerItem, PickerKind, PickerView};
@@ -127,6 +127,12 @@ pub enum AppEvent {
         request: u64,
         result: Result<CommitStat, String>,
     },
+    /// The log re-read with a larger limit (the next page) from the
+    /// loader thread, tagged with its request.
+    LogPage {
+        request: u64,
+        result: Result<Vec<CommitInfo>, String>,
+    },
 }
 
 /// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
@@ -194,6 +200,8 @@ pub struct App {
     log_search: log_search::LogSearch,
     /// The log's stats pane.
     stat: stat::StatState,
+    /// How many commits the log asks for, and the next page loading.
+    page: log::Paging,
     cursor: usize,
     /// First row drawn.
     scroll: usize,
@@ -291,6 +299,7 @@ impl App {
         let seen = Seen::open(&opts.cache_dir, vcs.root())
             .with_context(|| format!("cannot read seen state in {}", opts.cache_dir.display()))?;
         let opts_state = opts.state_dir.clone();
+        let limit = opts.limit;
         let root = vcs.root().to_path_buf();
         let mut app = App {
             vcs,
@@ -300,6 +309,7 @@ impl App {
             all_rows: Vec::new(),
             log_search: log_search::LogSearch::default(),
             stat: stat::StatState::default(),
+            page: log::Paging::new(limit),
             cursor: 0,
             scroll: 0,
             view_h: 20,
@@ -388,6 +398,7 @@ impl App {
             AppEvent::WorkingRow { request, result } => self.working_row_loaded(request, result),
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
+            AppEvent::LogPage { request, result } => self.page_loaded(request, result),
             AppEvent::Mouse(m) => self.mouse(m, Instant::now()),
         }
     }

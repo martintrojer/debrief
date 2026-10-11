@@ -103,7 +103,7 @@ pub struct LogConfig {
     /// A jj revset or git revision range; `None` is the current commit
     /// and its ancestors (jj `::@`, git `HEAD`).
     pub revset: Option<String>,
-    /// Most commits listed (at least 1).
+    /// Commits loaded at first and per page (at least 1).
     pub limit: usize,
 }
 

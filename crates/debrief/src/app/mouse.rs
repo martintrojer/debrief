@@ -562,10 +562,13 @@ impl App {
     }
 
     /// Scroll the log `delta` rows; the cursor moves only to stay on
-    /// screen.
+    /// screen. Down with the view at its end: the next page.
     fn log_wheel(&mut self, delta: isize) {
         let h = self.view_h.max(1);
-        let max = self.rows.len().saturating_sub(h);
+        let max = self.log_len().saturating_sub(h);
+        if delta > 0 && self.scroll >= max {
+            return self.page_wheel();
+        }
         self.scroll = self.scroll.saturating_add_signed(delta).min(max);
         self.cursor = self
             .cursor

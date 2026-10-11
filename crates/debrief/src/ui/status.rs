@@ -1,5 +1,6 @@
-//! The status line: repo root, VCS kind, the new count, a status message,
-//! the `g?` hint and the cursor position.
+//! The status line: repo root, VCS kind, the new count, a status message
+//! (`loading more…` while a page of the log loads), the `g?` hint and the
+//! cursor position; while a prompt is open, the prompt and its note.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -38,7 +39,11 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     if let Some(p) = app.search_prompt() {
         let x = area.x + Span::raw(p.as_str()).width() as u16;
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
-        frame.render_widget(Paragraph::new(p).style(base), area);
+        let mut spans = vec![Span::raw(p)];
+        if let Some(note) = app.log_prompt_note().filter(|_| app.screen() == Screen::Log) {
+            spans.push(Span::styled(format!("  {note}"), base.fg(palette::YELLOW)));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
         return;
     }
     if let Screen::Commit(_) = app.screen() {
@@ -75,6 +80,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(kind, base.fg(palette::OVERLAY)),
         Span::styled(counts, base.fg(palette::SKY)),
     ];
+    if app.loading_more() {
+        spans.push(Span::styled("  loading more…", base.fg(palette::YELLOW)));
+    }
     if !app.status().is_empty() {
         spans.push(Span::styled(
             format!("  {}", app.status()),
@@ -116,6 +124,8 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     let preview = app.review_preview();
     let msg = if app.commit_loading() {
         "loading…"
+    } else if app.loading_more() {
+        "loading more…"
     } else if !app.status().is_empty() {
         app.status()
     } else {

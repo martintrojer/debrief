@@ -8,7 +8,8 @@
 //! Under the tree, the commit list (`[view] sidebar_commits`): a rule,
 //! then the log's rows as `<marker> <short id> [session] <summary>`,
 //! clipped to the width; the open commit's row on the cursor-row
-//! background, the list's cursor bold on it while the list has focus.
+//! background, the list's cursor bold on it while the list has focus;
+//! the log's dim `… more` row ends it while more commits may exist.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -17,7 +18,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::log::{WORKING_MARKER, marker};
+use super::log::{WORKING_MARKER, marker, more_line};
 use super::palette;
 use crate::app::config::SidebarSide;
 use crate::app::file_tree::clip_middle;
@@ -96,7 +97,7 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
     let open = app.commit_list_open_row();
     let cursor = app.commit_list_cursor();
     let width = list.width as usize;
-    let lines: Vec<Line> = app
+    let mut lines: Vec<Line> = app
         .rows()
         .iter()
         .enumerate()
@@ -139,6 +140,10 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(spans).style(base)
         })
         .collect();
+    let shown = app.rows().len().saturating_sub(app.commit_list_offset());
+    if app.more_row() && shown < list.height as usize {
+        lines.push(more_line());
+    }
     frame.render_widget(Paragraph::new(lines), list);
 }
 

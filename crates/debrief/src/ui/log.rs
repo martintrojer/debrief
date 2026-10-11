@@ -3,6 +3,7 @@
 //! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker. A
 //! commit with a saved review session shows `` (`3`: three unsent
 //! comments) before its summary; git's working-copy row ends with it.
+//! While more commits may exist, a dim `… more` row ends the list.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,7 +15,7 @@ use ratatui::widgets::Paragraph;
 
 use super::palette;
 use crate::app::search::find_all;
-use crate::app::{App, WORKING_ID, age, short_id};
+use crate::app::{App, MORE_ROW, WORKING_ID, age, short_id};
 use crate::seen::Status;
 
 /// Columns given to the author.
@@ -82,7 +83,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     }
     let now = now();
     let pats = app.log_patterns();
-    let lines: Vec<Line> = app
+    let mut lines: Vec<Line> = app
         .rows()
         .iter()
         .enumerate()
@@ -135,5 +136,14 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(spans).style(base)
         })
         .collect();
+    if app.more_row() && app.rows().len() - app.scroll() < area.height as usize {
+        lines.push(more_line());
+    }
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// The dim row ending the log and the commit list while more commits may
+/// exist.
+pub fn more_line() -> Line<'static> {
+    Line::styled(format!("  {MORE_ROW}"), Style::new().fg(palette::OVERLAY))
 }

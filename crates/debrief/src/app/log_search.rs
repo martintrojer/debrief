@@ -6,7 +6,12 @@
 //! The filter keeps every loaded row in `all_rows`; `rows` is the
 //! narrowed list, so the cursor, Enter, `m` and `]]` / `[[` act on what
 //! is shown.
+//!
+//! Neither loads more commits. When one finds nothing among the loaded
+//! commits and more may exist, the prompt line and then the status line
+//! say so ([`NOT_LOADED`]).
 
+use super::log::NOT_LOADED;
 use super::search::find_all;
 use super::{App, Mode, Row};
 
@@ -53,17 +58,31 @@ impl App {
         Some(format!("{}{p}", if s.forward { '/' } else { '?' }))
     }
 
-    /// A kept filter for the status line: `filter: x (12/200)`.
+    /// Said after the open prompt: [`NOT_LOADED`] when its pattern
+    /// matches no loaded row and more may exist.
+    pub fn log_prompt_note(&self) -> Option<&'static str> {
+        let s = &self.log_search;
+        let pat = if s.filtering {
+            &s.filter
+        } else {
+            s.prompt.as_ref()?
+        };
+        let miss = !pat.is_empty() && !self.rows.iter().any(|r| row_matches(r, pat));
+        (miss && self.log_more()).then_some(NOT_LOADED)
+    }
+
+    /// A kept filter for the status line: `filter: x (12/200)`, then
+    /// [`NOT_LOADED`] when nothing loaded matches and more may exist.
     pub fn filter_label(&self) -> Option<String> {
         let f = &self.log_search.filter;
         if f.is_empty() || self.log_search.filtering {
             return None;
         }
-        Some(format!(
-            "filter: {f} ({}/{})",
-            self.rows.len(),
-            self.all_rows.len()
-        ))
+        let mut label = format!("filter: {f} ({}/{})", self.rows.len(), self.all_rows.len());
+        if self.rows.is_empty() && self.log_more() {
+            label.push_str(&format!("  {NOT_LOADED}"));
+        }
+        Some(label)
     }
 
     /// Patterns to highlight in log rows: the search's and the filter's.
@@ -215,7 +234,12 @@ impl App {
             .filter(|&i| row_matches(&self.rows[i], &pat))
             .collect();
         let (Some(&first), Some(&last)) = (hits.first(), hits.last()) else {
-            return self.set_status(format!("pattern not found: {pat}"));
+            let more = if self.log_more() {
+                format!("  {NOT_LOADED}")
+            } else {
+                String::new()
+            };
+            return self.set_status(format!("pattern not found: {pat}{more}"));
         };
         let forward = self.log_search.forward == same;
         let mut cur = self.cursor;

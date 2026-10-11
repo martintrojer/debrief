@@ -83,21 +83,26 @@ impl App {
         split_rows(self.size.1.saturating_sub(1)).map_or(1, |(_, list)| (list as usize - 1).max(1))
     }
 
+    /// Rows and the `… more` row past the last screenful.
     fn commit_list_max_scroll(&self) -> usize {
-        self.rows.len().saturating_sub(self.commit_list_height())
+        self.log_len().saturating_sub(self.commit_list_height())
     }
 
-    /// Scroll so the cursor (clamped to the rows) is on screen.
+    /// Scroll so the cursor (clamped to the rows) is on screen (on the
+    /// last row, the `… more` row under it too).
     pub(super) fn commit_list_keep_visible(&mut self) {
         let h = self.commit_list_height();
         let last = self.last_row();
         let max = self.commit_list_max_scroll();
+        self.commit_list.cursor = self.commit_list.cursor.min(last);
+        let bottom = self
+            .bottom_of(self.commit_list.cursor)
+            .min(self.commit_list.cursor + h - 1);
         let l = &mut self.commit_list;
-        l.cursor = l.cursor.min(last);
         if l.cursor < l.scroll {
             l.scroll = l.cursor;
-        } else if l.cursor >= l.scroll + h {
-            l.scroll = l.cursor + 1 - h;
+        } else if bottom >= l.scroll + h {
+            l.scroll = bottom + 1 - h;
         }
         l.scroll = l.scroll.min(max);
     }
@@ -114,11 +119,6 @@ impl App {
     pub(super) fn commit_list_goto(&mut self, row: usize) {
         self.commit_list.cursor = row.min(self.last_row());
         self.commit_list_keep_visible();
-    }
-
-    /// The cursor `delta` rows down (up when negative).
-    pub(super) fn commit_list_move(&mut self, delta: isize) {
-        self.commit_list_goto(self.commit_list.cursor.saturating_add_signed(delta));
     }
 
     /// `C-d` / `C-u` in the list: half its height.
@@ -151,10 +151,14 @@ impl App {
     }
 
     /// Scroll the list's view `delta` rows (down when positive); the
-    /// cursor stays on screen.
+    /// cursor stays on screen. Down with the view at its end: the next
+    /// page.
     pub fn commit_list_scroll(&mut self, delta: isize) {
         let h = self.commit_list_height();
         let max = self.commit_list_max_scroll();
+        if delta > 0 && self.commit_list.scroll >= max {
+            return self.page_wheel();
+        }
         let last = self.last_row();
         let l = &mut self.commit_list;
         l.scroll = l.scroll.saturating_add_signed(delta).min(max);

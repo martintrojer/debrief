@@ -618,7 +618,7 @@ impl App {
             A::Down(c) => self.vertical(n(c)),
             A::Up(c) => self.vertical(-n(c)),
             A::GotoTop(c) => self.goto_row(c.map_or(0, |c| c.saturating_sub(1))),
-            A::GotoBottom(c) => self.goto_row(c.map_or(self.last_row(), |c| c.saturating_sub(1))),
+            A::GotoBottom(c) => self.goto_bottom(c),
             A::HalfPageDown => self.half_page(true),
             A::HalfPageUp => self.half_page(false),
             A::Open => self.open_commit(),
@@ -725,9 +725,7 @@ impl App {
             A::CommitsDown(c) => return self.commit_list_move(n(c) as isize),
             A::CommitsUp(c) => return self.commit_list_move(-(n(c) as isize)),
             A::CommitsTop(c) => return self.commit_list_goto(c.map_or(0, |c| c.saturating_sub(1))),
-            A::CommitsBottom(c) => {
-                return self.commit_list_goto(c.map_or(usize::MAX, |c| c.saturating_sub(1)));
-            }
+            A::CommitsBottom(c) => return self.commit_list_bottom(c),
             A::CommitsHalfDown => return self.commit_list_move(self.commit_list_half()),
             A::CommitsHalfUp => return self.commit_list_move(-self.commit_list_half()),
             A::CommitsOpen => return self.commit_list_open(),

@@ -22,7 +22,8 @@ pub struct Cli {
     /// revset`, else the current commit and its ancestors.
     #[arg(long, value_name = "R")]
     pub revset: Option<String>,
-    /// Most commits listed (default: `[log] limit`, else 200).
+    /// Commits loaded at first and per page (default: `[log] limit`, else
+    /// 200).
     #[arg(long, value_name = "N")]
     pub limit: Option<usize>,
     /// Where seen state and reviews live (default: the user cache dir's

@@ -568,8 +568,8 @@ impl App {
             v.tree = tree;
         }
         if from_list {
-            // A saved session's file list setting closes a peek.
-            self.peek_open();
+            // A saved session's file list setting may hide the list.
+            self.sidebar_hold();
             self.commit_list_refocus();
         }
         request

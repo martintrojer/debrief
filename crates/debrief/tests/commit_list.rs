@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use common::{commit, ctrl, git, keys, press};
 use crossterm::event::KeyCode;
-use debrief::app::config::Config;
+use debrief::app::config::{Config, SidebarShow};
 use debrief::app::{App, AppEvent, Exit, Focus, HelpLine, Screen, StartOptions, short_id};
 use debrief::seen::Status;
 use debrief::session::{Store, ViewFocus};
@@ -630,6 +630,17 @@ fn the_row_backgrounds_fill_the_whole_row() {
     assert_eq!(buf[(x, list_y(&app, 4))].bg, Color::Reset);
 }
 
+/// Saved sessions for log row 1: the file list hidden, the diff focused.
+fn save_hidden_session(f: &Fixture) {
+    let mut app = f.open(ON, 1);
+    keys(&mut app, " e ss");
+    assert!(
+        app.status().starts_with("Session saved"),
+        "{}",
+        app.status()
+    );
+}
+
 #[test]
 fn saving_from_the_list_while_a_restored_commit_loads_saves_files_focus() {
     let f = fixture();
@@ -662,6 +673,63 @@ fn saving_from_the_list_while_a_restored_commit_loads_saves_files_focus() {
         f.store().load(&id).unwrap().unwrap().view.focus,
         ViewFocus::Files
     );
+}
+
+#[test]
+fn enter_onto_a_session_with_the_file_list_hidden_keeps_browsing() {
+    let f = fixture();
+    save_hidden_session(&f);
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen(), Screen::Commit(1));
+    assert_eq!(
+        app.sidebar_show(),
+        SidebarShow::Never,
+        "the session's setting"
+    );
+    assert!(app.commit_list_visible(), "the list browse wins");
+    assert_eq!(app.focus(), Focus::Commits);
+    keys(&mut app, "k");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen(), Screen::Commit(0));
+    assert_eq!(app.focus(), Focus::Commits);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.commit_list_visible());
+    // Leaving the sidebar lets the session's setting apply.
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.focus(), Focus::Diff);
+    assert!(!app.sidebar_visible());
+    // Off, the session hides the list as before.
+    let mut app = f.open("", 0);
+    keys(&mut app, "q");
+    open_row(&mut app, 1);
+    assert!(!app.sidebar_visible());
+}
+
+#[test]
+fn enter_onto_a_session_in_a_narrow_terminal_keeps_browsing() {
+    let f = fixture();
+    let mut app = f.open(ON, 1);
+    keys(&mut app, " ss");
+    drop(app);
+    // Below sidebar_auto_hide_below an always list shows only after
+    // <leader>e; a restored session drops that choice.
+    let (mut app, _) = f.app_sized(ON, 70, ROWS);
+    open_row(&mut app, 0);
+    assert!(!app.sidebar_visible());
+    keys(&mut app, " e");
+    to_list(&mut app);
+    keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen(), Screen::Commit(1));
+    assert!(app.commit_list_visible(), "the list browse wins");
+    assert_eq!(app.focus(), Focus::Commits);
+    ctrl(&mut app, 'l');
+    assert_eq!(app.focus(), Focus::Diff);
+    assert!(!app.sidebar_visible());
 }
 
 #[test]

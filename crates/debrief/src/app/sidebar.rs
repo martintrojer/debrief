@@ -55,6 +55,9 @@ pub(super) struct SidebarState {
     /// last file list with rows, kept while the next commit loads (or
     /// has no files) under the commit list.
     pub(super) last_fit: Option<u16>,
+    /// A commit opened from the commit list whose session hid the file
+    /// list: it stays shown until the focus leaves it.
+    pub(super) held: bool,
 }
 
 /// A pane of the commit screen, left to right on screen.
@@ -165,6 +168,7 @@ impl App {
     /// a pin), back to peeking.
     pub(super) fn toggle_sidebar(&mut self) {
         let shown = self.sidebar_visible();
+        self.sidebar.held = false;
         match self.sidebar.show {
             SidebarShow::Auto => {
                 self.sidebar.pinned = !shown;
@@ -190,10 +194,14 @@ impl App {
     /// `[view] sidebar`: always (unless the terminal is narrower than
     /// `sidebar_auto_hide_below`, or `<leader>e` chose otherwise while it
     /// was), never (unless `<leader>e` showed it), auto (pinned or
-    /// peeking).
+    /// peeking); and while the commit list holds it (see
+    /// [`App::sidebar_hold`]).
     pub fn sidebar_visible(&self) -> bool {
         if !self.sidebar_has_files() {
             return false;
+        }
+        if self.sidebar.held && self.commit_list_fits() {
+            return true;
         }
         match self.sidebar.show {
             SidebarShow::Auto => self.sidebar.pinned || self.sidebar.peeked,
@@ -256,11 +264,23 @@ impl App {
         }
     }
 
-    /// Give `f` the keys; leaving the list closes an auto peek.
+    /// Give `f` the keys; leaving the list closes an auto peek and ends
+    /// a hold.
     pub(super) fn set_focus(&mut self, f: Focus) {
         self.focus = f;
         if f == Focus::Diff {
             self.sidebar.peeked = false;
+            self.sidebar.held = false;
+        }
+    }
+
+    /// Opened from the commit list: a saved session that hid the file
+    /// list (never, or an always list in a narrow terminal) leaves it
+    /// shown while the commit list has the keys; an auto list peeks.
+    pub(super) fn sidebar_hold(&mut self) {
+        self.peek_open();
+        if !self.sidebar_visible() {
+            self.sidebar.held = true;
         }
     }
 

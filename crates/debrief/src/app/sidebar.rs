@@ -51,9 +51,10 @@ pub(super) struct SidebarState {
     /// A `<leader>e` choice made below `sidebar_auto_hide_below`; it
     /// holds until the terminal width changes.
     pub(super) narrow_override: Option<bool>,
-    /// The auto width of the last file list shown, kept while the next
-    /// commit loads (or has no files) under the commit list.
-    pub(super) last_auto: Option<u16>,
+    /// The auto fit (before the bounds and the terminal's cap) of the
+    /// last file list with rows, kept while the next commit loads (or
+    /// has no files) under the commit list.
+    pub(super) last_fit: Option<u16>,
 }
 
 /// A pane of the commit screen, left to right on screen.
@@ -71,6 +72,12 @@ pub enum Pane {
 /// 10 rows) plus one column of padding, clamped to `[min, min(max, 35% of
 /// cols)]`.
 pub fn sidebar_width(need: &[u16], cols: u16, min: u16, max: u16) -> u16 {
+    cap_width(fit_width(need), cols, min, max)
+}
+
+/// The 90th percentile of `need` (the maximum under 10 rows) plus one
+/// column of padding.
+fn fit_width(need: &[u16]) -> u16 {
     let mut sorted = need.to_vec();
     sorted.sort_unstable();
     let fit = match sorted.len() {
@@ -78,8 +85,13 @@ pub fn sidebar_width(need: &[u16], cols: u16, min: u16, max: u16) -> u16 {
         n if n < 10 => sorted[n - 1],
         n => sorted[(n * 9).div_ceil(10) - 1],
     };
+    fit.saturating_add(1)
+}
+
+/// `fit` clamped to `[min, min(max, 35% of cols)]`.
+fn cap_width(fit: u16, cols: u16, min: u16, max: u16) -> u16 {
     let pct = (u32::from(cols) * 35 / 100) as u16;
-    fit.saturating_add(1).min(pct.min(max)).max(min)
+    fit.min(pct.min(max)).max(min)
 }
 
 /// A file row's count column: ` +n −m`.
@@ -406,22 +418,26 @@ impl App {
     fn sidebar_cols(&self, cols: u16) -> u16 {
         let v = &self.config.view;
         let w = match v.sidebar_width {
-            SidebarWidth::Auto => match self.sidebar_needs() {
-                need if need.is_empty() && self.commit_list_fits() => {
-                    self.sidebar.last_auto.unwrap_or(v.sidebar_min_width)
-                }
-                need => sidebar_width(&need, cols, v.sidebar_min_width, v.sidebar_max_width),
-            },
+            SidebarWidth::Auto => {
+                let need = self.sidebar_needs();
+                let fit = match self.sidebar.last_fit {
+                    Some(fit) if need.is_empty() && self.commit_list_fits() => fit,
+                    _ => fit_width(&need),
+                };
+                cap_width(fit, cols, v.sidebar_min_width, v.sidebar_max_width)
+            }
             SidebarWidth::Fixed(n) => n,
         };
         w.min(cols.saturating_sub(1))
     }
 
-    /// Remember the auto width of a file list with rows, for the commits
-    /// that follow it under the commit list.
+    /// Remember the auto fit of a file list with rows, for the commits
+    /// that follow it under the commit list (capped again for the
+    /// terminal they show in).
     pub(super) fn sidebar_remember_width(&mut self) {
-        if !self.sidebar_needs().is_empty() {
-            self.sidebar.last_auto = Some(self.sidebar_cols(self.size.0));
+        let need = self.sidebar_needs();
+        if !need.is_empty() {
+            self.sidebar.last_fit = Some(fit_width(&need));
         }
     }
 

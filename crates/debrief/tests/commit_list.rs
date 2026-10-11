@@ -799,6 +799,29 @@ fn an_open_commit_gone_from_the_log_highlights_no_row() {
     }
 }
 
+#[test]
+fn a_remembered_width_keeps_the_cap_of_the_current_terminal() {
+    let f = fixture();
+    let long = "src/a/really/quite/long/directory/name/for/the/list/x.rs";
+    std::fs::create_dir_all(f.root.join(long).parent().unwrap()).unwrap();
+    std::fs::write(f.root.join(long), "x\n").unwrap();
+    commit(&f.root, "long");
+    git(&f.root, &["commit", "-q", "--allow-empty", "-m", "empty"]);
+    let toml = format!("{ON}files = \"flat\"\n");
+    let (mut app, _) = f.app_sized(&toml, 160, ROWS);
+    open_row(&mut app, 1);
+    let wide = Rect::new(0, 0, 160, ROWS - 1);
+    assert_eq!(app.commit_layout(wide).sidebar.unwrap().width, 49, "max 48");
+    to_list(&mut app);
+    keys(&mut app, "k");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_diff().map(|d| d.files.len()), Some(0));
+    assert_eq!(app.commit_layout(wide).sidebar.unwrap().width, 49, "kept");
+    app.event(AppEvent::Resize(100, ROWS));
+    let narrow = Rect::new(0, 0, 100, ROWS - 1);
+    assert_eq!(app.commit_layout(narrow).sidebar.unwrap().width, 36, "35%");
+}
+
 // --- the tree half ---------------------------------------------------------
 
 #[test]

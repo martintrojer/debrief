@@ -244,7 +244,7 @@ impl FileList<'_> {
 }
 
 use super::App;
-use super::commit::{CommitView, file_counts, file_path};
+use super::commit::{CommitView, FilesTop, file_counts, file_path};
 use crate::vcs::CommitDiff;
 
 impl CommitView {
@@ -488,15 +488,16 @@ impl App {
     /// The file list's first drawn row in a list `h` rows tall. It keeps
     /// the selection on screen while the list has the keys, else the diff
     /// cursor's file: the least scroll that does, or, after a wheel scroll
-    /// or a click, the least move from the row left there (none while
-    /// what it follows hasn't changed since).
+    /// or a click, the least move from the row left there. That row holds
+    /// as it was (even with the selection off screen) until what the view
+    /// follows changes, a key moves in the list, or the height changes.
     pub fn files_skip(&self, h: usize) -> usize {
         let Some(l) = self.file_list() else { return 0 };
         let follow = self.files_follow(&l);
         let max = l.visible.rows.len().saturating_sub(h);
         let top = match self.commit.as_ref().and_then(|v| v.files_top) {
-            Some((at, top)) if at == follow => return top.min(max),
-            Some((_, top)) => top,
+            Some(t) if t.follow == Some(follow) && t.h == h => return t.top.min(max),
+            Some(t) => t.top,
             None => 0,
         };
         let top = match follow.1 {
@@ -507,13 +508,21 @@ impl App {
         top.min(max)
     }
 
-    /// Leave the file list's first row at `top` until what it follows
-    /// changes.
-    pub(super) fn files_pin(&mut self, top: usize) {
+    /// Leave the first row of the file list, `h` rows tall, at `top`
+    /// until what it follows changes (see [`App::files_skip`]).
+    pub(super) fn files_pin(&mut self, top: usize, h: usize) {
         let Some(l) = self.file_list() else { return };
-        let follow = self.files_follow(&l);
+        let follow = Some(self.files_follow(&l));
         if let Some(v) = &mut self.commit {
-            v.files_top = Some((follow, top));
+            v.files_top = Some(FilesTop { top, h, follow });
+        }
+    }
+
+    /// A key moved in the file list: its view shows the selection again,
+    /// moving as little as it must from where it is.
+    pub(super) fn files_unpin(&mut self) {
+        if let Some(t) = self.commit.as_mut().and_then(|v| v.files_top.as_mut()) {
+            t.follow = None;
         }
     }
 
@@ -527,7 +536,7 @@ impl App {
             .files_skip(h)
             .saturating_add_signed(delta)
             .min(len.saturating_sub(h));
-        self.files_pin(top);
+        self.files_pin(top, h);
     }
 
     /// Rows `C-d` / `C-u` move in the file list: half its tree's height.

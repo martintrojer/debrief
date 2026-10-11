@@ -409,10 +409,11 @@ impl App {
             return;
         };
         self.visual_leave();
-        let top = self.files_skip(inner.height as usize);
+        let h = inner.height as usize;
+        let top = self.files_skip(h);
         self.focus_pane(Focus::Files);
         self.select_row(row);
-        self.files_pin(top);
+        self.files_pin(top, h);
         let on_arrow = self
             .file_list()
             .and_then(|l| l.entry(row).filter(|e| e.is_dir()).cloned())

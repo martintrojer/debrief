@@ -375,6 +375,71 @@ fn a_click_does_not_scroll_the_file_list_under_the_pointer() {
     assert_eq!(app.files_skip(t.height as usize), skip - 1);
 }
 
+/// The file list's selection is among the rows drawn.
+fn selection_shown(app: &App) -> bool {
+    let h = tree_inner(app).height as usize;
+    let skip = app.files_skip(h);
+    (skip..skip + h).contains(&app.sidebar_selected())
+}
+
+#[test]
+fn gg_after_the_wheel_shows_the_selected_first_row() {
+    let f = fixture();
+    let mut app = f.open("");
+    ctrl(&mut app, 'h');
+    keys(&mut app, "gg");
+    assert_eq!(app.sidebar_selected(), 0);
+    let t = tree_inner(&app);
+    wheel(&mut app, t.x + 3, t.y + 3, true);
+    assert!(!selection_shown(&app), "the wheel scrolled it away");
+    // gg selects the row already selected: the list still shows it.
+    keys(&mut app, "gg");
+    assert_eq!(app.files_skip(t.height as usize), 0);
+    // So do k and C-u at the top, which leave the selection where it is.
+    for key in ["k", "C-u"] {
+        wheel(&mut app, t.x + 3, t.y + 3, true);
+        assert!(!selection_shown(&app), "{key}: the wheel scrolled it away");
+        match key {
+            "C-u" => ctrl(&mut app, 'u'),
+            k => keys(&mut app, k),
+        }
+        assert_eq!(app.sidebar_selected(), 0);
+        assert_eq!(app.files_skip(t.height as usize), 0, "{key}");
+    }
+}
+
+#[test]
+fn g_after_the_wheel_up_shows_the_selected_last_row() {
+    let f = fixture();
+    let mut app = f.open("");
+    ctrl(&mut app, 'h');
+    keys(&mut app, "G");
+    let t = tree_inner(&app);
+    let h = t.height as usize;
+    let last = app.file_list().unwrap().visible.rows.len() - 1;
+    assert_eq!(app.sidebar_selected(), last);
+    wheel(&mut app, t.x + 3, t.y + 3, false);
+    assert!(!selection_shown(&app), "the wheel scrolled it away");
+    keys(&mut app, "G");
+    assert_eq!(app.files_skip(h), last + 1 - h);
+}
+
+#[test]
+fn a_shorter_list_after_the_wheel_shows_the_selection() {
+    let f = fixture();
+    let mut clock = Clock::new();
+    let mut app = f.open("");
+    let t = tree_inner(&app);
+    wheel(&mut app, t.x + 3, t.y + 3, true);
+    // Select the bottom row drawn: shown, and pinned there.
+    click(&mut app, &mut clock, t.x + 6, t.bottom() - 1);
+    assert_eq!(app.focus(), Focus::Files);
+    assert!(selection_shown(&app));
+    app.event(AppEvent::Resize(COLS, ROWS - 6));
+    draw(&mut app);
+    assert!(selection_shown(&app), "the shorter list still shows it");
+}
+
 #[test]
 fn a_click_on_a_directory_arrow_opens_and_closes_it() {
     let f = fixture();

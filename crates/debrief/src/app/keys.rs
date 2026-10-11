@@ -659,6 +659,22 @@ impl App {
     fn apply_commit(&mut self, action: Action) {
         use Action as A;
         let n = |c: Option<usize>| c.unwrap_or(1).max(1);
+        if matches!(
+            action,
+            A::FileDown(_)
+                | A::FileUp(_)
+                | A::FileTop
+                | A::FileBottom
+                | A::FileHalfDown
+                | A::FileHalfUp
+                | A::FileOpen
+                | A::FileCollapse
+                | A::FileExpand
+                | A::FileAll(_)
+                | A::ToggleFiles
+        ) {
+            self.files_unpin();
+        }
         match action {
             A::Back => return self.close_commit(),
             A::Reload => return self.reload_view(),

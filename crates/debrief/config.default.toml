@@ -29,6 +29,12 @@
 # sidebar_min_width = 16
 ## Also capped at 35% of the terminal width.
 # sidebar_max_width = 48
+## The log's commits under the file list's tree (<leader>E): the tree
+## takes the top 60%, the list the rest; C-j / C-k move between them,
+## Enter opens a commit and keeps the list focused. Hidden when the
+## terminal leaves the list area under 12 rows. Saved sessions don't
+## store it.
+# sidebar_commits = false
 ## The log's stats pane (<leader>e on the log).
 # stats = true
 ## hunks | full: the commit view shows the hunks or whole files (T).

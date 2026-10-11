@@ -93,6 +93,9 @@ pub struct ViewConfig {
     /// terminal).
     pub sidebar_min_width: u16,
     pub sidebar_max_width: u16,
+    /// The log's commits under the file list's tree (off by default;
+    /// `<leader>E` toggles).
+    pub sidebar_commits: bool,
     /// The log's stats pane at start (on by default; `<leader>e` toggles).
     pub stats: bool,
     /// The commit view's context at start: `"hunks"` (the default) or
@@ -269,6 +272,7 @@ impl Default for ViewConfig {
             sidebar_width: SidebarWidth::Auto,
             sidebar_min_width: 16,
             sidebar_max_width: 48,
+            sidebar_commits: false,
             stats: true,
             context: DiffContext::Default,
             layout: Layout::Unified,
@@ -419,6 +423,7 @@ impl Config {
             set(&mut c.view.sidebar_width, v.sidebar_width);
             set(&mut c.view.sidebar_min_width, v.sidebar_min_width);
             set(&mut c.view.sidebar_max_width, v.sidebar_max_width);
+            set(&mut c.view.sidebar_commits, v.sidebar_commits);
             set(&mut c.view.stats, v.stats);
             match v.context {
                 Some(RawContext::Hunks) => c.view.context = DiffContext::Default,
@@ -601,6 +606,7 @@ struct RawView {
     sidebar_width: Option<SidebarWidth>,
     sidebar_min_width: Option<u16>,
     sidebar_max_width: Option<u16>,
+    sidebar_commits: Option<bool>,
     stats: Option<bool>,
     context: Option<RawContext>,
     layout: Option<Layout>,
@@ -818,6 +824,15 @@ kinds = [
             );
         }
         assert!(Config::parse("[view]\nsidebar_side = \"top\"\n").is_err());
+    }
+
+    #[test]
+    fn view_sidebar_commits_defaults_off() {
+        assert!(!Config::defaults().view.sidebar_commits);
+        let c = |src: &str| Config::parse(src).map(|c| c.view.sidebar_commits);
+        assert_eq!(c("[view]\nsidebar_commits = true\n"), Ok(true));
+        assert_eq!(c("[view]\nsidebar_commits = false\n"), Ok(false));
+        assert!(c("[view]\nsidebar_commits = \"on\"\n").is_err());
     }
 
     #[test]

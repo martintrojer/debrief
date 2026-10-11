@@ -613,6 +613,24 @@ fn enter_keeps_the_focus_through_an_async_load() {
 }
 
 #[test]
+fn the_row_backgrounds_fill_the_whole_row() {
+    let f = fixture();
+    let mut app = f.open(&format!("{ON}sidebar_width = 40\n"), 2);
+    to_list(&mut app);
+    keys(&mut app, "j");
+    let buf = draw(&mut app, COLS, ROWS);
+    let c = app.commit_layout(area(ROWS)).commits.unwrap();
+    // The last column inside the border, right of a short summary.
+    let x = c.x + c.width - 2;
+    let open = &buf[(x, list_y(&app, 2))];
+    let cur = &buf[(x, list_y(&app, 3))];
+    assert_eq!(open.symbol(), " ");
+    assert_eq!(open.bg, palette::SURFACE, "the open row");
+    assert_eq!(cur.bg, palette::SURFACE, "the cursor row");
+    assert_eq!(buf[(x, list_y(&app, 4))].bg, Color::Reset);
+}
+
+#[test]
 fn enter_onto_a_commit_with_a_saved_session_keeps_the_list_focused() {
     let f = fixture();
     // Saved with the tree focused.

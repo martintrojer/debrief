@@ -135,6 +135,8 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
                 }
                 push(&r.info.summary, base, &mut spans);
             }
+            // The row's background runs to the border.
+            spans.push(Span::styled(" ".repeat(rest), base));
             Line::from(spans).style(base)
         })
         .collect();

@@ -256,8 +256,13 @@ impl App {
             KeyResult::Action(a) => {
                 self.count = None;
                 self.status.clear();
+                // Routed before it runs: Enter closes the prompt it
+                // routes by. The log's search leaves the open view as is.
+                let log = matches!(self.screen, Screen::Commit(_)) && self.list_search(a);
                 self.apply(a);
-                self.session_after(a);
+                if !log {
+                    self.session_after(a);
+                }
             }
             KeyResult::None => self.count = None,
         }

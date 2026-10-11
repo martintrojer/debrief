@@ -1101,6 +1101,29 @@ fn searching_the_list_leaves_the_open_session_clean() {
 }
 
 #[test]
+fn a_list_search_hidden_by_a_resize_leaves_the_open_session_clean() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    keys(&mut app, " ss");
+    assert!(
+        app.status().starts_with("Session saved"),
+        "{}",
+        app.status()
+    );
+    app.commit_list_select(0);
+    keys(&mut app, "/commit 3");
+    // Too short for the list: the keys go back to the tree.
+    app.event(AppEvent::Resize(COLS, 12));
+    assert_ne!(app.focus(), Focus::Commits);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(cursor_summary(&app), "commit 3", "still the list's search");
+    keys(&mut app, "q");
+    assert_eq!(app.screen(), Screen::Log);
+    keys(&mut app, "q");
+    assert!(app.should_quit(), "nothing unsaved: {}", app.status());
+}
+
+#[test]
 fn f_in_the_list_filters_and_brackets_step_the_filtered_rows() {
     let f = fixture_n(12);
     let mut app = f.open(ON, 5);
@@ -1184,8 +1207,22 @@ fn a_list_miss_says_more_is_not_loaded_and_loads_nothing() {
     assert!(status(&mut app).contains(NOT_LOADED));
     keys(&mut app, "fcommit 2");
     assert!(status(&mut app).contains(NOT_LOADED), "the filter too");
+    press(&mut app, KeyCode::Enter);
+    let s = status(&mut app);
+    assert!(s.contains("filter: commit 2 (0/5)"), "a kept filter: {s}");
+    assert!(s.contains(NOT_LOADED), "and its miss: {s}");
+    // A kept filter that matches shows its label alone.
+    keys(&mut app, "f");
+    press(&mut app, KeyCode::Backspace);
+    press(&mut app, KeyCode::Backspace);
+    press(&mut app, KeyCode::Enter);
+    let s = status(&mut app);
+    assert!(s.contains("filter: commit (5/5)"), "{s}");
+    assert!(!s.contains(NOT_LOADED), "{s}");
+    keys(&mut app, "f");
     press(&mut app, KeyCode::Esc);
     assert_eq!(app.rows().len(), 5, "nothing loaded");
+    assert!(!status(&mut app).contains("filter:"), "cleared");
     keys(&mut app, "/commit 9");
     assert!(!status(&mut app).contains(NOT_LOADED), "a hit says nothing");
 }

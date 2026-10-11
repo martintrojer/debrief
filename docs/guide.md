@@ -229,7 +229,8 @@ author, commit and change ID), the same pattern and the same filter, over
 the loaded commits. A search highlights its matches as you type and
 moves the list's cursor on `Enter`; the diff's own search is still `/`
 with the diff focused. The filter narrows the list and the log together,
-keeping the list's cursor and the open commit on their rows. If it hides
+keeping the list's cursor and the open commit on their rows; a kept
+filter shows on the commit screen's status line as on the log's. If it hides
 the open commit, the diff stays open, no row is marked as open, and `]]`
 / `[[` go to the nearest shown commit after / before it in the log. A
 miss while more history exists says `… more not loaded`.

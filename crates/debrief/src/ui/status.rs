@@ -110,7 +110,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
 
-/// The commit screen: mode, commit ID, loading/status message, position.
+/// The commit screen: mode, commit ID, a kept log filter, loading/status
+/// message, position.
 fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     let id = app.commit_id().unwrap_or("");
     let id = if app.commit_id() == Some(crate::app::WORKING_ID) {
@@ -126,6 +127,10 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
         ));
     }
     spans.push(Span::styled(format!(" {id}"), base.fg(palette::MAUVE)));
+    // A kept log filter narrows the commit list and `]]` / `[[` here too.
+    if let Some(f) = app.filter_label() {
+        spans.push(Span::styled(format!("  {f}"), base.fg(palette::SKY)));
+    }
     let preview = app.review_preview();
     let msg = if app.commit_loading() {
         "loading…"

@@ -456,18 +456,23 @@ impl App {
         if v.is_split() == want {
             return;
         }
+        // The rows that stay on their lines: a selection's anchor or a
+        // draft's rows, then a mouse drag's pressed row.
+        let mut keep = match (self.mode, &self.draft) {
+            (Mode::Visual, _) => vec![v.anchor],
+            (Mode::Comment, Some(d)) => vec![d.rows.0, d.rows.1],
+            _ => Vec::new(),
+        };
+        let mine = keep.len();
+        keep.extend(self.mouse.drag_anchor());
+        v.relayout(want, &mut keep);
         match (self.mode, &mut self.draft) {
-            (Mode::Visual, _) => {
-                let mut keep = [v.anchor];
-                v.relayout(want, &mut keep);
-                v.anchor = keep[0];
-            }
-            (Mode::Comment, Some(d)) => {
-                let mut keep = [d.rows.0, d.rows.1];
-                v.relayout(want, &mut keep);
-                d.rows = (keep[0].min(keep[1]), keep[0].max(keep[1]));
-            }
-            _ => v.relayout(want, &mut []),
+            (Mode::Visual, _) => v.anchor = keep[0],
+            (Mode::Comment, Some(d)) => d.rows = (keep[0].min(keep[1]), keep[0].max(keep[1])),
+            _ => {}
+        }
+        if let Some(&a) = keep.get(mine) {
+            self.mouse.set_drag_anchor(a);
         }
         if self.split && !want {
             self.set_status(format!("{}; unified for now", too_narrow(min, width)));

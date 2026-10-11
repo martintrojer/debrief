@@ -107,6 +107,20 @@ fn list_inner(r: Rect, side: SidebarSide) -> Rect {
     }
 }
 
+impl MouseState {
+    /// The diff row a drag in progress was pressed on.
+    pub(super) fn drag_anchor(&self) -> Option<usize> {
+        self.drag.map(|d| d.anchor)
+    }
+
+    /// The pressed row after a relayout moved its line.
+    pub(super) fn set_drag_anchor(&mut self, row: usize) {
+        if let Some(d) = &mut self.drag {
+            d.anchor = row;
+        }
+    }
+}
+
 impl App {
     /// The area above the status line.
     fn main_area(&self) -> Rect {

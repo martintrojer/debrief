@@ -658,6 +658,92 @@ fn a_drag_past_the_diff_edges_scrolls_it() {
     assert_eq!(app.selection_rows(), Some((1, 10)));
 }
 
+/// The text an OSC 52 sequence in `out` puts on the clipboard.
+fn clipboard(out: &[u8]) -> String {
+    let s = String::from_utf8(out.to_vec()).unwrap();
+    let b = s
+        .strip_prefix("\x1b]52;c;")
+        .and_then(|s| s.strip_suffix('\x07'))
+        .unwrap_or_else(|| panic!("not OSC 52: {s:?}"));
+    let val = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        _ => 63,
+    };
+    let mut out = Vec::new();
+    for chunk in b.as_bytes().chunks(4) {
+        let v: Vec<u8> = chunk
+            .iter()
+            .filter(|&&c| c != b'=')
+            .map(|&c| val(c))
+            .collect();
+        let n = v.iter().fold(0u32, |n, &d| n << 6 | d as u32) << (6 * (4 - v.len()));
+        out.extend(&[(n >> 16) as u8, (n >> 8) as u8, n as u8][..v.len() - 1]);
+    }
+    String::from_utf8(out).unwrap()
+}
+
+/// From side by side at 220 columns: press on `from`'s row, drag (once
+/// to the row below when `early`, before the resize), resize to
+/// `COLS` (unified: a change block's rows no longer pair), drag to
+/// `to`'s row and copy. Returns the copied lines.
+fn drag_across_a_relayout(f: &Fixture, early: bool, from: &str, to: &str) -> Vec<String> {
+    let mut app = f.open_sized("[view]\nlayout = \"split\"\n", 220);
+    assert!(app.commit_split());
+    let at = |app: &App, text: &str| {
+        app.commit_rows()
+            .iter()
+            .position(|r| r.text == text)
+            .unwrap_or_else(|| panic!("no row {text}"))
+    };
+    let t = Instant::now();
+    let (left, _) = app.split_panes(diff_rect(&app));
+    let x = left.x + 12;
+    let row = at(&app, from);
+    keys(&mut app, &format!("{}Gzz", row + 1));
+    draw(&mut app);
+    let y = diff_y(&app, row);
+    app.mouse(ev(MouseEventKind::Down(MouseButton::Left), x, y), t);
+    if early {
+        app.mouse(ev(MouseEventKind::Drag(MouseButton::Left), x, y + 1), t);
+        assert_eq!(app.mode(), Mode::Visual);
+    }
+    app.event(AppEvent::Resize(COLS, ROWS));
+    draw(&mut app);
+    assert!(!app.commit_split(), "unified below split_min_width");
+    let row = at(&app, to);
+    let y = diff_y(&app, row);
+    let d = diff_rect(&app);
+    assert!(
+        y > d.y && y < d.bottom(),
+        "{to} inside the diff, off its edges"
+    );
+    app.mouse(ev(MouseEventKind::Drag(MouseButton::Left), 30, y), t);
+    app.mouse(ev(MouseEventKind::Up(MouseButton::Left), 30, y), t);
+    app.take_output();
+    keys(&mut app, "y");
+    clipboard(&app.take_output())
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn a_drag_keeps_its_pressed_line_across_a_relayout() {
+    let f = fixture();
+    // Old-side lines; unified, the change blocks above them add rows.
+    for early in [true, false] {
+        let lines = drag_across_a_relayout(&f, early, "line 61", "line 63");
+        assert_eq!(
+            lines,
+            [" line 61", " line 62", " line 63"],
+            "dragged before the resize: {early}"
+        );
+    }
+}
+
 #[test]
 fn a_click_in_visual_mode_leaves_it() {
     let f = fixture();

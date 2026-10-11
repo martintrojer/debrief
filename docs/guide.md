@@ -103,6 +103,7 @@ left.
 | `/` `?` `n` `N` | search |
 | `v` `V`, then `y` | select rows, copy them as diff text (OSC 52) |
 | `<leader>e` | show / hide the file list (`sidebar = "auto"`: pin a hidden one) |
+| `<leader>E` | show / hide the commit list under the file list |
 | `C-h` / `C-l` (or `C-w h` / `C-w l`) | move between the file list and the diff |
 | `Enter` | on a `.md` file header: open it in ramble |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
@@ -180,6 +181,35 @@ session keeps tree or flat and the closed directories.
 | `` ` `` | tree / flat |
 | `Esc` | back to the diff |
 
+### The commit list
+
+`[view] sidebar_commits = true` (or `<leader>E`, for the run) splits the
+file list's area: the tree on top (60%), a rule, and the log's commits
+below, so you can flip between commits without going back to the log.
+It uses the same side and width as the file list, and hides when the
+area is under 12 rows. A row is the log's marker (`●` new, `◐` updated,
+`✎` the working copy), the short ID, the session marker and the
+summary, cut at the list's edge. The rows are the log's: a filter
+narrows them, git's working-copy row is there, and a reload keeps them
+in step, so the list, `]]` / `[[` and the log agree.
+
+The open commit's row has the cursor-row background. While the list has
+the keys, its own cursor is bold on that background; it starts on the
+open commit and comes back to it, centred, when a commit opens. `C-j`
+from the tree moves into the list and `C-k` back; `C-h` / `C-l` go
+between either half and the diff. With `sidebar = "auto"` a move into
+the list peeks the file list, and the peek stays open while you open
+commits from it. While a commit loads, or when it has no files, the
+tree half is empty and the list stays. Saved sessions don't store the
+setting; a session saved from the list restores focus to the tree.
+
+| Key in the commit list | Does |
+|---|---|
+| `j` `k` `gg` `G` `C-d` `C-u` | move the cursor (opens nothing, marks nothing seen) |
+| `Enter` | open the commit under it (as `]]`: marks it seen, restores its session); the list keeps the keys |
+| `Esc` | back to the diff |
+| `q` | back to the log |
+
 ## Panes and tmux
 
 `C-h` / `C-j` / `C-k` / `C-l` move to the pane left / below / above /
@@ -188,8 +218,9 @@ the diff, and side by side the diff's two halves: file list | old | new
 (on the right: old | new | file list). `C-w h` / `C-w l` do the same. The
 log's stats pane never takes the keys.
 
-Where there is no pane that way (the screen edge, `C-j` / `C-k`, the log)
-and debrief runs inside tmux, the move goes on to the tmux pane there, as
+With the commit list shown, `C-j` / `C-k` move between the tree and the
+list. Where there is no pane that way (the screen edge, `C-j` / `C-k`
+past the list or without it, the log) and debrief runs inside tmux, the move goes on to the tmux pane there, as
 [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator)
 does. In the comment box the keys stay text input: `C-j` is a new line.
 `[keys] pane_nav = false` unbinds them; the `C-w` keys stay.
@@ -353,6 +384,7 @@ session. The rows without a key are set only in the file.
 | the file list's width | — | `view.sidebar_width` | `"auto"` (or columns) |
 | narrowest auto file list | — | `view.sidebar_min_width` | `16` |
 | widest auto file list (also ≤ 35%) | — | `view.sidebar_max_width` | `48` |
+| commit list under the file list | `<leader>E` | `view.sidebar_commits` | `false` |
 | `C-h/j/k/l` move between panes (and tmux panes) | — | `keys.pane_nav` | `true` |
 | stats pane on the log | `<leader>e` | `view.stats` | `true` |
 | hunks / the full file | `T` | `view.context` | `"hunks"` (or `"full"`) |

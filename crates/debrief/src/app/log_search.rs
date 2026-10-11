@@ -7,13 +7,18 @@
 //! narrowed list, so the cursor, Enter, `m` and `]]` / `[[` act on what
 //! is shown.
 //!
+//! The commit list (focused, on the commit screen) uses the same search
+//! and filter: there the search moves the list's cursor and opens
+//! nothing, and the filter keeps the list's cursor and the open commit's
+//! index on their commits.
+//!
 //! Neither loads more commits. When one finds nothing among the loaded
 //! commits and more may exist, the prompt line and then the status line
 //! say so ([`NOT_LOADED`]).
 
-use super::log::NOT_LOADED;
+use super::log::{NOT_LOADED, RowKey};
 use super::search::find_all;
-use super::{App, Mode, Row};
+use super::{App, Mode, Row, Screen};
 
 /// Search and filter state of the log.
 #[derive(Debug, Clone, Default)]
@@ -32,6 +37,9 @@ pub(super) struct LogSearch {
     filtering: bool,
     /// The commit under the cursor when the filter prompt opened.
     anchor: Option<String>,
+    /// The commit under the commit list's cursor when the filter prompt
+    /// opened.
+    list_anchor: Option<RowKey>,
 }
 
 /// `pat` matches one of `r`'s fields.
@@ -100,8 +108,17 @@ impl App {
     }
 
     /// Narrow `rows` from `all_rows`; the cursor goes to `keep` when it is
-    /// still listed, else the first row.
+    /// still listed, else the first row. The commit list's cursor stays on
+    /// its commit (while typing the filter, the one it was on when the
+    /// prompt opened) and the open commit's index follows.
     pub(super) fn refilter(&mut self, keep: Option<String>) {
+        let listed = [
+            self.log_search
+                .list_anchor
+                .clone()
+                .filter(|_| self.log_search.filtering),
+            self.log_key(self.commit_list.cursor),
+        ];
         let pat = &self.log_search.filter;
         self.rows = self
             .all_rows
@@ -112,7 +129,39 @@ impl App {
         self.cursor = keep
             .and_then(|id| self.rows.iter().position(|r| r.info.commit == id))
             .unwrap_or(0);
+        if let Some(i) = listed.iter().flatten().find_map(|k| self.row_of(k)) {
+            self.commit_list.cursor = i;
+        }
+        self.commit_reindex();
         self.keep_visible();
+    }
+
+    /// Where `]]` (`forward`) / `[[` go while the filter hides the open
+    /// commit: the first shown row after (before) the open commit's place
+    /// in the unfiltered log, `Some(None)` when none is. `None` when the
+    /// open commit is shown or not loaded.
+    pub(super) fn step_past_hidden(&self, forward: bool) -> Option<Option<usize>> {
+        let v = self.commit.as_ref()?;
+        if self.view_index(v).is_some() {
+            return None;
+        }
+        let at = self.all_rows.iter().position(|r| {
+            if v.working {
+                r.working
+            } else {
+                r.info.commit == v.commit
+            }
+        })?;
+        let shown = |r: &Row| {
+            self.rows
+                .iter()
+                .position(|s| s.info.commit == r.info.commit)
+        };
+        Some(if forward {
+            self.all_rows[at + 1..].iter().find_map(shown)
+        } else {
+            self.all_rows[..at].iter().rev().find_map(shown)
+        })
     }
 
     fn cursor_id(&self) -> Option<String> {
@@ -122,6 +171,7 @@ impl App {
     /// `f`: open the filter prompt on the current filter.
     pub(super) fn filter_start(&mut self) {
         self.log_search.anchor = self.cursor_id();
+        self.log_search.list_anchor = self.log_key(self.commit_list.cursor);
         self.log_search.filtering = true;
         self.mode = Mode::Filter;
     }
@@ -145,6 +195,7 @@ impl App {
 
     /// Enter: keep the filter.
     pub(super) fn filter_commit(&mut self) {
+        self.log_search.list_anchor = None;
         self.log_search.filtering = false;
         self.mode = Mode::Normal;
     }
@@ -152,6 +203,7 @@ impl App {
     /// Esc: clear the filter, the cursor on the same commit.
     pub(super) fn filter_clear(&mut self) {
         let keep = self.cursor_id().or(self.log_search.anchor.take());
+        self.log_search.list_anchor = None;
         self.log_search.filtering = false;
         self.log_search.filter.clear();
         self.mode = Mode::Normal;
@@ -170,7 +222,12 @@ impl App {
         true
     }
 
-    /// `/` (forward) or `?` on the log.
+    /// The search prompt is open (on the log or the commit list).
+    pub(super) fn log_searching(&self) -> bool {
+        self.log_search.prompt.is_some()
+    }
+
+    /// `/` (forward) or `?` on the log or the commit list.
     pub(super) fn log_search_start(&mut self, forward: bool) {
         let s = &mut self.log_search;
         s.saved = Some(s.pattern.clone());
@@ -224,7 +281,8 @@ impl App {
         }
     }
 
-    /// `n` (`same`) / `N`, `count` times; wraps around the ends.
+    /// `n` (`same`) / `N`, `count` times; wraps around the ends. On the
+    /// commit screen it moves the commit list's cursor.
     pub(super) fn log_search_next(&mut self, same: bool, count: usize) {
         let pat = self.log_search.pattern.clone();
         if pat.is_empty() {
@@ -242,7 +300,12 @@ impl App {
             return self.set_status(format!("pattern not found: {pat}{more}"));
         };
         let forward = self.log_search.forward == same;
-        let mut cur = self.cursor;
+        let list = matches!(self.screen, Screen::Commit(_));
+        let mut cur = if list {
+            self.commit_list.cursor
+        } else {
+            self.cursor
+        };
         let mut wrapped = false;
         for _ in 0..count.max(1) {
             let next = if forward {
@@ -255,7 +318,12 @@ impl App {
                 if forward { &first } else { &last }
             });
         }
-        self.cursor = cur;
+        if list {
+            self.commit_list.cursor = cur;
+            self.commit_list_keep_visible();
+        } else {
+            self.cursor = cur;
+        }
         if wrapped {
             self.set_status(if forward {
                 "search hit BOTTOM, continuing at TOP"

@@ -530,7 +530,10 @@ impl App {
 
     /// An action ran: one that changes the open commit's view marks it.
     pub(super) fn session_after(&mut self, a: Action) {
-        if matches!(self.screen, Screen::Commit(_)) && touches_view(a) {
+        // The commit list's search moves only the list.
+        let list =
+            self.commits_focused() && matches!(a, Action::SearchNext(..) | Action::SearchCommit);
+        if matches!(self.screen, Screen::Commit(_)) && touches_view(a) && !list {
             self.session_touch_open();
         }
     }

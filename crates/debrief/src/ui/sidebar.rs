@@ -9,7 +9,8 @@
 //! then the log's rows as `<marker> <short id> [session] <summary>`,
 //! clipped to the width; the open commit's row on the cursor-row
 //! background, the list's cursor bold on it while the list has focus;
-//! the log's dim `… more` row ends it while more commits may exist.
+//! the log's dim `… more` row ends it while more commits may exist. The
+//! log's search and filter matches are marked as in the log.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -18,7 +19,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::log::{WORKING_MARKER, marker, more_line};
+use super::log::{WORKING_MARKER, hl, marker, more_line};
 use super::palette;
 use crate::app::config::SidebarSide;
 use crate::app::file_tree::clip_middle;
@@ -97,6 +98,7 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
     let open = app.commit_list_open_row();
     let cursor = app.commit_list_cursor();
     let width = list.width as usize;
+    let pats = app.log_patterns();
     let mut lines: Vec<Line> = app
         .rows()
         .iter()
@@ -120,7 +122,7 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
             let mut push = |text: &str, style: Style, spans: &mut Vec<Span<'static>>| {
                 let t = clip(text, rest);
                 rest -= t.width();
-                spans.push(Span::styled(t, style));
+                spans.extend(hl(t, style, &pats));
             };
             if r.info.commit == WORKING_ID {
                 push(&r.info.summary, base.fg(palette::YELLOW), &mut spans);

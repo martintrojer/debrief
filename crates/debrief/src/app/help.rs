@@ -266,6 +266,11 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("gg", CL, G::Commits, "first commit (or row {count})"),
         b("G", CL, G::Commits, "last commit (or row {count})"),
         b("Enter", CL, G::Commits, "open the commit (marks it seen)"),
+        b("/", CL, G::Commits, "search forward (opens nothing)"),
+        b("?", CL, G::Commits, "search backward (opens nothing)"),
+        b("n", CL, G::Commits, "next match in the list"),
+        b("N", CL, G::Commits, "previous match in the list"),
+        b("f", CL, G::Commits, "filter the log"),
         b("Esc", CL, G::Commits, "back to the diff"),
         b("q", CL, G::Commits, "back to the log"),
         b("{1-9}", CL, G::Commits, "count for the next motion"),
@@ -671,7 +676,7 @@ impl App {
     pub(super) fn ctx_shown(&self, ctx: Ctx) -> bool {
         match ctx {
             Ctx::Log => self.screen == Screen::Log,
-            Ctx::Filter => self.screen == Screen::Log,
+            Ctx::Filter => self.screen == Screen::Log || self.commit_list_visible(),
             Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }

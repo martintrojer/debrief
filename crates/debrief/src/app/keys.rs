@@ -530,6 +530,11 @@ impl App {
                 (_, Some('k')) | (KeyCode::Up, _) => A::CommitsUp(count),
                 (_, Some('G')) => A::CommitsBottom(count),
                 (KeyCode::Enter, _) => A::CommitsOpen,
+                (_, Some('/')) => A::SearchStart(true),
+                (_, Some('?')) => A::SearchStart(false),
+                (_, Some('n')) => A::SearchNext(true, count),
+                (_, Some('N')) => A::SearchNext(false, count),
+                (_, Some('f')) => A::FilterStart,
                 (KeyCode::Esc, _) => A::FocusDiff,
                 (_, Some('q')) => A::Back,
                 _ => return KeyResult::None,
@@ -607,7 +612,7 @@ impl App {
                 | A::SessionList
                 | A::QuitPrompt(_)
         );
-        if matches!(self.screen, Screen::Commit(_)) && !shared {
+        if matches!(self.screen, Screen::Commit(_)) && !shared && !self.list_search(action) {
             return self.apply_commit(action);
         }
         match action {
@@ -645,6 +650,25 @@ impl App {
             A::PaneNav(d) => self.pane_nav(d),
             A::StatScroll(down, c) => self.stat_scroll_by(if down { n(c) } else { -n(c) }),
             other => self.apply_commit(other),
+        }
+    }
+
+    /// On the commit screen, `action` goes to the log's search or filter:
+    /// the commit list's `/ ? n N f`, and the keys of a prompt opened
+    /// there. The diff's search keeps the rest.
+    fn list_search(&self, action: Action) -> bool {
+        use Action as A;
+        match action {
+            A::SearchStart(_) | A::SearchNext(..) => self.commits_focused(),
+            A::SearchInput(_) | A::SearchBackspace | A::SearchCommit | A::SearchCancel => {
+                self.log_searching()
+            }
+            A::FilterStart
+            | A::FilterInput(_)
+            | A::FilterBackspace
+            | A::FilterCommit
+            | A::FilterClear => true,
+            _ => false,
         }
     }
 

@@ -83,7 +83,7 @@ pub const NOT_LOADED: &str = "… more not loaded";
 
 /// A log row by identity: its commit ID, and whether it is the working
 /// copy's row.
-type RowKey = (String, bool);
+pub(super) type RowKey = (String, bool);
 
 /// The log's paging state, owned by [`App`].
 #[derive(Debug, Default)]
@@ -427,16 +427,9 @@ impl App {
         // A kept filter narrows the new list too; the caller places the
         // cursor. The commit list's cursor stays on its commit.
         let keep = self.rows.get(self.cursor).map(|r| r.info.commit.clone());
-        let listed = self
-            .rows
-            .get(self.commit_list.cursor)
-            .map(|r| (r.info.commit.clone(), r.working));
         let cursor = self.cursor;
         self.refilter(keep);
         self.cursor = cursor.min(self.rows.len().saturating_sub(1));
-        if let Some(i) = listed.and_then(|c| self.row_of(&c)) {
-            self.commit_list.cursor = i;
-        }
     }
 
     fn restatus(&mut self) {
@@ -487,7 +480,7 @@ impl App {
         }
     }
 
-    fn log_key(&self, i: usize) -> Option<RowKey> {
+    pub(super) fn log_key(&self, i: usize) -> Option<RowKey> {
         self.rows.get(i).map(|r| (r.info.commit.clone(), r.working))
     }
 
@@ -498,7 +491,7 @@ impl App {
     }
 
     /// The row of a commit ID, or of the working copy when `working`.
-    fn row_of(&self, (id, working): &RowKey) -> Option<usize> {
+    pub(super) fn row_of(&self, (id, working): &RowKey) -> Option<usize> {
         if *working {
             self.working_index()
         } else {

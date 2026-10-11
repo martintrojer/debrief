@@ -405,12 +405,15 @@ impl App {
 
     /// A bracketed paste: typed into the comment box with its newlines,
     /// or into the open prompt (`/` `?` search, the log's filter, picker
-    /// filter) as one line, newlines and tabs as spaces. Anywhere else it
-    /// is dropped, never replayed as keys.
+    /// filter) as one line, newlines and tabs as spaces; the commit
+    /// list's search prompt is the log's. Anywhere else it is dropped,
+    /// never replayed as keys.
     pub fn paste(&mut self, text: &str) {
         match self.mode {
             Mode::Comment => self.comment_paste(text),
-            Mode::Search if self.screen == Screen::Log => self.log_search_insert(&paste_line(text)),
+            Mode::Search if self.screen == Screen::Log || self.log_searching() => {
+                self.log_search_insert(&paste_line(text));
+            }
             Mode::Search => self.search_insert(&paste_line(text)),
             Mode::Filter => self.filter_insert(&paste_line(text)),
             Mode::Picker => self.picker_insert(&paste_line(text)),

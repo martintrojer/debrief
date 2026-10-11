@@ -39,7 +39,7 @@ fn now() -> i64 {
 }
 
 /// `text` in `style`, with the matches of `pats` marked as search hits.
-fn hl(text: String, style: Style, pats: &[&str]) -> Vec<Span<'static>> {
+pub(super) fn hl(text: String, style: Style, pats: &[&str]) -> Vec<Span<'static>> {
     let mut hits: Vec<std::ops::Range<usize>> =
         pats.iter().flat_map(|p| find_all(&text, p)).collect();
     if hits.is_empty() {

@@ -879,12 +879,15 @@ impl App {
         self.keep_visible();
     }
 
-    /// `]]` (`forward`, the next row in log order) / `[[`.
+    /// `]]` (`forward`, the next row in log order) / `[[`; with the open
+    /// commit filtered out, from its place in the unfiltered log.
     pub(super) fn step_commit(&mut self, forward: bool) {
         let Screen::Commit(i) = self.screen else {
             return;
         };
-        let to = if forward {
+        let to = if let Some(to) = self.step_past_hidden(forward) {
+            to
+        } else if forward {
             Some(i + 1).filter(|&j| j < self.rows.len())
         } else {
             i.checked_sub(1)

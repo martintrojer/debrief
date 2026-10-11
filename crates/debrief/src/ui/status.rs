@@ -40,7 +40,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         let x = area.x + Span::raw(p.as_str()).width() as u16;
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
         let mut spans = vec![Span::raw(p)];
-        if let Some(note) = app.log_prompt_note().filter(|_| app.screen() == Screen::Log) {
+        if let Some(note) = app.log_prompt_note() {
             spans.push(Span::styled(format!("  {note}"), base.fg(palette::YELLOW)));
         }
         frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);

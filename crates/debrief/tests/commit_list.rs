@@ -3,7 +3,8 @@
 //! and their highlights, the list's keys and focus moves, Enter opening
 //! through the log's path while the list keeps the keys (async loads,
 //! saved sessions, a commit without files), following a filter and a
-//! reload, and sessions that never store the setting.
+//! reload, searching and filtering from the list, and sessions that
+//! never store the setting.
 
 mod common;
 
@@ -16,7 +17,9 @@ use std::time::Duration;
 use common::{commit, ctrl, git, keys, press};
 use crossterm::event::KeyCode;
 use debrief::app::config::{Config, SidebarShow};
-use debrief::app::{App, AppEvent, Exit, Focus, HelpLine, Screen, StartOptions, short_id};
+use debrief::app::{
+    App, AppEvent, Exit, Focus, HelpLine, Mode, NOT_LOADED, Screen, StartOptions, short_id,
+};
 use debrief::seen::Status;
 use debrief::session::{Store, ViewFocus};
 use debrief::ui::palette;
@@ -908,6 +911,310 @@ fn a_remembered_width_keeps_the_cap_of_the_current_terminal() {
     app.event(AppEvent::Resize(100, ROWS));
     let narrow = Rect::new(0, 0, 100, ROWS - 1);
     assert_eq!(app.commit_layout(narrow).sidebar.unwrap().width, 36, "35%");
+}
+
+// --- search and filter from the list ------------------------------------
+
+/// The list's cursor on the row whose summary is `s`.
+fn cursor_summary(app: &App) -> String {
+    app.rows()[app.commit_list_cursor()].info.summary.clone()
+}
+
+#[test]
+fn search_moves_the_list_cursor_without_opening_or_marking_seen() {
+    let f = fixture();
+    drop(f.app(""));
+    for name in ["n1", "n2"] {
+        std::fs::write(f.root.join("a.txt"), format!("{name}\n")).unwrap();
+        commit(&f.root, name);
+    }
+    let mut app = f.open(ON, 3);
+    to_list(&mut app);
+    keys(&mut app, "?n1");
+    assert_eq!(app.search_prompt().as_deref(), Some("?n1"));
+    assert_eq!(app.commit_list_cursor(), 3, "typing moves nothing");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_list_cursor(), 1, "backwards to n1");
+    assert_eq!(app.screen(), Screen::Commit(3), "nothing opens");
+    assert_eq!(app.rows()[1].status, Status::New, "nothing marked seen");
+    assert_eq!(app.focus(), Focus::Commits, "the list keeps the keys");
+    assert_eq!(app.search_prompt(), None);
+    keys(&mut app, "gg/n1");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_list_cursor(), 1, "forwards from the top");
+    assert_eq!(app.rows()[0].status, Status::New);
+    assert!(
+        app.search_hits().is_empty(),
+        "the diff's search is untouched"
+    );
+}
+
+#[test]
+fn n_and_n_repeat_and_wrap_like_the_log() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "/commit");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_list_cursor(), 1);
+    keys(&mut app, "n");
+    assert_eq!(app.commit_list_cursor(), 2);
+    keys(&mut app, "2n");
+    assert_eq!(app.commit_list_cursor(), 4);
+    keys(&mut app, "n");
+    assert_eq!(app.commit_list_cursor(), 0);
+    assert_eq!(app.status(), "search hit BOTTOM, continuing at TOP");
+    keys(&mut app, "N");
+    assert_eq!(app.commit_list_cursor(), 4);
+    assert_eq!(app.status(), "search hit TOP, continuing at BOTTOM");
+    keys(&mut app, "/zzz");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.status(), "pattern not found: zzz");
+    assert_eq!(app.commit_list_cursor(), 4);
+    assert_eq!(app.screen(), Screen::Commit(0));
+}
+
+#[test]
+fn esc_in_the_list_search_keeps_the_cursor_and_the_last_pattern() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "/commit 3");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(cursor_summary(&app), "commit 3");
+    keys(&mut app, "/commit 1");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.focus(), Focus::Commits);
+    assert_eq!(cursor_summary(&app), "commit 3");
+    keys(&mut app, "gg");
+    keys(&mut app, "n");
+    assert_eq!(cursor_summary(&app), "commit 3", "the pattern before");
+}
+
+#[test]
+fn list_search_matches_the_author_and_the_commit_id() {
+    let f = fixture();
+    git(
+        &f.root,
+        &[
+            "commit",
+            "-q",
+            "--allow-empty",
+            "--author",
+            "Zed Q <z@z>",
+            "-m",
+            "other",
+        ],
+    );
+    let mut app = f.open(ON, 3);
+    to_list(&mut app);
+    keys(&mut app, "/Zed");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(cursor_summary(&app), "other");
+    let id = app.rows()[4].info.commit[20..30].to_string();
+    keys(&mut app, &format!("/{id}"));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_list_cursor(), 4, "the full commit ID");
+    assert_eq!(app.screen(), Screen::Commit(3));
+}
+
+#[test]
+fn a_list_search_match_far_down_is_scrolled_into_view() {
+    let f = fixture_n(30);
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "?commit 1");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(cursor_summary(&app), "commit 1");
+    let (cur, top) = (app.commit_list_cursor(), app.commit_list_offset());
+    assert!(top <= cur && cur < top + 12, "{top} {cur}");
+    assert_eq!(app.focus(), Focus::Commits);
+}
+
+#[test]
+fn a_paste_goes_to_the_list_search() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "/");
+    app.event(AppEvent::Paste("commit 2".into()));
+    assert_eq!(app.search_prompt().as_deref(), Some("/commit 2"));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(cursor_summary(&app), "commit 2");
+    assert!(app.search_hits().is_empty(), "not the diff's search");
+}
+
+#[test]
+fn the_diff_search_still_searches_the_diff_with_the_diff_focused() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    assert_eq!(app.focus(), Focus::Diff);
+    keys(&mut app, "/commit 3");
+    assert_eq!(app.search_prompt().as_deref(), Some("/commit 3"));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.commit_list_cursor(), 0, "the list stays");
+    assert!(app.log_patterns().is_empty());
+    keys(&mut app, "/5");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.search_hits().is_empty(), "the diff's search");
+    assert_eq!(app.commit_list_cursor(), 0);
+}
+
+#[test]
+fn list_search_matches_are_highlighted() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    let id = short_id(&app.rows()[2].info).to_string();
+    keys(&mut app, &format!("/{id}"));
+    let buf = draw(&mut app, COLS, ROWS);
+    let c = app.commit_layout(area(ROWS)).commits.unwrap();
+    // The short ID starts after the marker and its space.
+    let x = c.x + 2;
+    assert_eq!(
+        buf[(x, list_y(&app, 2))].bg,
+        palette::YELLOW,
+        "while typing"
+    );
+    assert_ne!(buf[(x, list_y(&app, 1))].bg, palette::YELLOW);
+}
+
+#[test]
+fn searching_the_list_leaves_the_open_session_clean() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    keys(&mut app, " ss");
+    assert!(
+        app.status().starts_with("Session saved"),
+        "{}",
+        app.status()
+    );
+    app.commit_list_select(0);
+    keys(&mut app, "/commit");
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, "n");
+    keys(&mut app, "q");
+    assert_eq!(app.screen(), Screen::Log);
+    keys(&mut app, "q");
+    assert!(app.should_quit(), "nothing unsaved: {}", app.status());
+}
+
+#[test]
+fn f_in_the_list_filters_and_brackets_step_the_filtered_rows() {
+    let f = fixture_n(12);
+    let mut app = f.open(ON, 5);
+    let open = app.rows()[5].info.commit.clone();
+    to_list(&mut app);
+    keys(&mut app, "3k");
+    assert_eq!(cursor_summary(&app), "commit 10");
+    keys(&mut app, "f");
+    assert_eq!(app.mode(), Mode::Filter);
+    assert_eq!(app.search_prompt().as_deref(), Some("filter: "));
+    keys(&mut app, "commit 1");
+    let shown: Vec<String> = app.rows().iter().map(|r| r.info.summary.clone()).collect();
+    assert_eq!(shown, ["commit 12", "commit 11", "commit 10", "commit 1"]);
+    assert_eq!(
+        cursor_summary(&app),
+        "commit 10",
+        "the cursor keeps its commit"
+    );
+    assert_eq!(app.commit_id(), Some(open.as_str()), "the diff stays open");
+    assert_eq!(app.commit_list_open_row(), None, "no row is the open one");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.focus(), Focus::Commits);
+    // The open commit sat between commit 10 and commit 1.
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "[[");
+    assert_eq!(app.screen(), Screen::Commit(2));
+    let msg = app.commit_diff().unwrap().message.clone();
+    assert_eq!(msg.lines().next(), Some("commit 10"));
+    keys(&mut app, "]]");
+    assert_eq!(app.screen(), Screen::Commit(3));
+    assert_eq!(app.commit_list_open_row(), Some(3));
+    // Esc in the filter prompt clears it; the open commit's row follows.
+    to_list(&mut app);
+    keys(&mut app, "f");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.rows().len(), 13);
+    assert_eq!(app.screen(), Screen::Commit(11));
+    assert_eq!(app.commit_list_open_row(), Some(11));
+    assert_eq!(app.focus(), Focus::Commits);
+}
+
+#[test]
+fn a_hidden_open_commit_with_nothing_after_it_has_no_next_commit() {
+    let f = fixture_n(12);
+    let mut app = f.open(ON, 5);
+    to_list(&mut app);
+    keys(&mut app, "fcommit 12");
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Esc);
+    keys(&mut app, "]]");
+    assert_eq!(app.status(), "no next commit");
+    assert_eq!(app.commit_list_open_row(), None);
+    keys(&mut app, "[[");
+    assert_eq!(app.screen(), Screen::Commit(0));
+    assert_eq!(app.commit_list_open_row(), Some(0));
+}
+
+#[test]
+fn a_list_miss_says_more_is_not_loaded_and_loads_nothing() {
+    let f = fixture_n(12);
+    let mut opts = StartOptions::new(f.cache.clone());
+    opts.config = Config::parse(ON).unwrap();
+    opts.limit = 5;
+    let mut app = App::new(
+        vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),
+        opts,
+    )
+    .unwrap();
+    app.event(AppEvent::Resize(COLS, ROWS));
+    open_row(&mut app, 0);
+    to_list(&mut app);
+    let status = |app: &mut App| {
+        let buf = draw(app, COLS, ROWS);
+        line(&buf, Rect::new(0, 0, COLS, ROWS), ROWS - 1)
+    };
+    keys(&mut app, "/commit 2");
+    assert!(status(&mut app).contains(NOT_LOADED), "while typing");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.status().contains(NOT_LOADED), "{}", app.status());
+    assert!(status(&mut app).contains(NOT_LOADED));
+    keys(&mut app, "fcommit 2");
+    assert!(status(&mut app).contains(NOT_LOADED), "the filter too");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.rows().len(), 5, "nothing loaded");
+    keys(&mut app, "/commit 9");
+    assert!(!status(&mut app).contains(NOT_LOADED), "a hit says nothing");
+}
+
+#[test]
+fn help_lists_search_and_filter_under_the_commit_list() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "g?");
+    let v = app.help_view().unwrap();
+    let lines = &v.lines;
+    let start = lines
+        .iter()
+        .position(|l| *l == HelpLine::Group("Commit list"))
+        .unwrap();
+    let group: Vec<&str> = lines[start + 1..]
+        .iter()
+        .map_while(|l| match l {
+            HelpLine::Item { keys, .. } => Some(keys.as_str()),
+            HelpLine::Group(_) => None,
+        })
+        .collect();
+    for k in ["/", "?", "n", "N", "f"] {
+        assert!(group.contains(&k), "{k} in {group:?}");
+    }
+    let filter_row =
+        |l: &HelpLine| matches!(l, HelpLine::Item { desc, .. } if desc == "in the filter: keep it");
+    assert!(lines.iter().any(filter_row), "the filter prompt's keys");
 }
 
 // --- the tree half ---------------------------------------------------------

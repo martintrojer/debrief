@@ -79,10 +79,13 @@ fn columns(
 
 impl App {
     /// The search prompt (`/foo` or `?foo`) while typing; on the log
-    /// also the filter prompt (`filter: foo`).
+    /// and the commit list also the filter prompt (`filter: foo`).
     pub fn search_prompt(&self) -> Option<String> {
         if self.screen == super::Screen::Log {
             return self.log_prompt();
+        }
+        if let Some(p) = self.log_prompt() {
+            return Some(p);
         }
         let s = &self.commit.as_ref()?.search;
         let p = s.prompt.as_ref()?;

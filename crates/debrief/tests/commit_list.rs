@@ -1227,6 +1227,32 @@ fn a_list_miss_says_more_is_not_loaded_and_loads_nothing() {
     assert!(!status(&mut app).contains(NOT_LOADED), "a hit says nothing");
 }
 
+/// At 80 columns a long kept filter is cut so the message and the
+/// position still show.
+#[test]
+fn a_long_kept_filter_leaves_room_for_the_message() {
+    let f = fixture();
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "f");
+    keys(&mut app, &"x".repeat(60));
+    press(&mut app, KeyCode::Enter);
+    // A search miss leaves a message on the status line.
+    keys(&mut app, "/zzzz");
+    press(&mut app, KeyCode::Enter);
+    let msg = app.status().to_string();
+    assert!(!msg.is_empty());
+    let buf = draw(&mut app, 80, ROWS);
+    let s = line(&buf, Rect::new(0, 0, 80, ROWS), ROWS - 1);
+    assert!(s.contains("filter: "), "{s}");
+    assert!(s.contains(&msg), "the message shows: {s}");
+    let pos = format!("/{} ", app.commit_rows().len());
+    assert!(
+        s.trim_end().ends_with(pos.trim_end()),
+        "the position shows: {s}"
+    );
+}
+
 #[test]
 fn help_lists_search_and_filter_under_the_commit_list() {
     let f = fixture();

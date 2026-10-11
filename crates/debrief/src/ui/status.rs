@@ -28,6 +28,18 @@ fn elide_left(s: &str, max: usize) -> String {
     format!("…{keep}")
 }
 
+/// `s` in at most `max` characters, cut from the right before `…`.
+fn elide_right(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let keep: String = s.chars().take(max - 1).collect();
+    format!("{keep}…")
+}
+
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
     // The quit prompt draws over a search or filter prompt it interrupted.
@@ -127,10 +139,7 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
         ));
     }
     spans.push(Span::styled(format!(" {id}"), base.fg(palette::MAUVE)));
-    // A kept log filter narrows the commit list and `]]` / `[[` here too.
-    if let Some(f) = app.filter_label() {
-        spans.push(Span::styled(format!("  {f}"), base.fg(palette::SKY)));
-    }
+    let filter = app.filter_label();
     let preview = app.review_preview();
     let msg = if app.commit_loading() {
         "loading…"
@@ -141,14 +150,32 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     } else {
         preview.as_deref().unwrap_or("")
     };
-    if !msg.is_empty() {
-        spans.push(Span::styled(format!("  {msg}"), base.fg(palette::YELLOW)));
-    }
     let n = app.commit_rows().len();
     let right = match n {
         0 => " ".to_string(),
         n => format!(" {}/{n} ", app.commit_cursor().row + 1),
     };
+    // A kept log filter narrows the commit list and `]]` / `[[` here too;
+    // it gets what the ID, the message and the position leave.
+    if let Some(f) = filter {
+        let used: usize = spans.iter().map(Span::width).sum::<usize>()
+            + if msg.is_empty() {
+                0
+            } else {
+                2 + Span::raw(msg).width()
+            }
+            + Span::raw(right.as_str()).width();
+        let room = (area.width as usize).saturating_sub(used + 2);
+        if room > 0 {
+            spans.push(Span::styled(
+                format!("  {}", elide_right(&f, room)),
+                base.fg(palette::SKY),
+            ));
+        }
+    }
+    if !msg.is_empty() {
+        spans.push(Span::styled(format!("  {msg}"), base.fg(palette::YELLOW)));
+    }
     let left_w: usize = spans.iter().map(Span::width).sum();
     let right_w = Span::raw(right.as_str()).width();
     let hint_w = HELP_HINT.len();

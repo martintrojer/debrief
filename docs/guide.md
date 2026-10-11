@@ -249,9 +249,11 @@ With `[mouse] enabled = true` (the default) debrief captures the mouse:
 | click outside a picker, help or the `K` popup | close it (the click does nothing else) |
 
 A double-click is two presses on the same cell within 400 ms. The wheel
-moves the log's and the diff's cursor only to keep it on screen; over
-the file list or the commit list it scrolls the list and leaves the
-selection and the diff alone. While you type (the comment box, a `/` `?`
+moves the log's, the diff's and the commit list's cursor only to keep it
+on screen (the commit list opens nothing). Over the file list it scrolls
+the list and leaves the selection and the diff alone, even with the
+selection scrolled out of view; a key in the list shows it again. Neither
+list's wheel moves the diff. While you type (the comment box, a `/` `?`
 search, the log's `f` filter, the help filter) the mouse does nothing;
 the picker takes it even with filter text typed.
 

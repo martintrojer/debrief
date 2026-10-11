@@ -232,6 +232,34 @@ Add debrief to its pattern in `~/.tmux.conf`, before TPM's `run` line:
 set -g @vim_navigator_pattern '(\S+/)?g?\.?(view|l?n?vim?x?|fzf|debrief|ramble)(diff)?(-wrapped)?'
 ```
 
+## Mouse
+
+With `[mouse] enabled = true` (the default) debrief captures the mouse:
+
+| Mouse | Does |
+|---|---|
+| click a log row | the cursor there; double-click opens it |
+| click a file-list row | focus the list and select it (the diff jumps to it); on a directory's arrow, open / close it; double-click acts as `Enter` |
+| click a commit-list row | focus the list, its cursor there; double-click opens the commit |
+| click in the diff | focus the diff, the cursor to that row and column (and side, side by side); closes an auto peek |
+| drag in the diff | select whole lines from the pressed row to the pointer, scrolling at the top and bottom edge; then `c` / `y` as in visual mode |
+| wheel | scroll the pane under the pointer 3 rows: the log, the stats pane, the file list, the commit list, the diff, help, the `K` popup |
+| wheel over a picker | move its selection a row a notch |
+| click a picker row | select it; double-click picks it, as `Enter` |
+| click outside a picker, help or the `K` popup | close it (the click does nothing else) |
+
+A double-click is two presses on the same cell within 400 ms. The wheel
+moves the log's and the diff's cursor only to keep it on screen; over
+the file list or the commit list it scrolls the list and leaves the
+selection and the diff alone. While you type (the comment box, a `/` `?`
+search, the log's `f` filter, the help filter) the mouse does nothing;
+the picker takes it even with filter text typed.
+
+Under capture the terminal's own selection still works with Shift held
+(Shift+drag in most terminals). `[mouse] enabled = false` turns capture
+off: the terminal keeps its selection and scrolling, and the wheel no
+longer scrolls the log's stats pane.
+
 ## Comments
 
 | Key | Does |
@@ -394,7 +422,7 @@ session. The rows without a key are set only in the file.
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |
 | the `<leader>` key | — | `keys.leader` | `" "` |
-| mouse clicks, drags and wheel | — | `mouse.enabled` | `true` |
+| mouse clicks, drags and wheel (see [Mouse](#mouse)) | — | `mouse.enabled` | `true` |
 | comment kinds Tab cycles through | — | `review.kinds` | issue, suggestion, question, nit |
 
 

@@ -165,7 +165,7 @@ impl App {
         self.stat.max_scroll.set(n);
     }
 
-    /// `J` / `K`: scroll the stats pane `by` lines.
+    /// `J` / `K` and the wheel: scroll the stats pane `by` lines.
     pub(super) fn stat_scroll_by(&mut self, by: isize) {
         let Some(id) = self.rows.get(self.cursor).map(|r| r.info.commit.clone()) else {
             return;
@@ -178,19 +178,6 @@ impl App {
             .saturating_add_signed(by)
             .min(self.stat.max_scroll.get());
         self.stat.scroll = Some((id, n));
-    }
-
-    /// The mouse wheel at (`col`, `row`): scrolls the stats pane when over it.
-    pub fn stat_wheel(&mut self, col: u16, row: u16, down: bool) {
-        let (w, h) = self.size;
-        let main = Rect::new(0, 0, w, h.saturating_sub(1));
-        let over = self
-            .log_layout(main)
-            .stats
-            .is_some_and(|p| p.contains(ratatui::layout::Position::new(col, row)));
-        if over {
-            self.stat_scroll_by(if down { 3 } else { -3 });
-        }
     }
 
     /// The commit under the log cursor ([`WORKING_ID`] on git's

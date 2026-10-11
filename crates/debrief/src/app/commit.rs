@@ -276,6 +276,9 @@ pub struct CommitView {
     pub(super) side_sel: usize,
     /// The file list as a tree (else flat, in git's order).
     pub(super) tree: bool,
+    /// The file list's first drawn row after a wheel scroll or a click,
+    /// and the row it was following then (see [`App::files_skip`]).
+    pub(super) files_top: Option<(FilesFollow, usize)>,
     /// The file list's entries, every directory expanded.
     pub(super) entries: Vec<FileEntry>,
     /// The diff's file order: the files of `entries`, top to bottom.
@@ -306,6 +309,10 @@ pub struct CommitView {
 
 pub(super) use crate::session::Anchor;
 
+/// The file-list row its view keeps on screen: the selection while the
+/// list has the keys (`true`), else the diff cursor's file.
+pub(super) type FilesFollow = (bool, Option<usize>);
+
 impl CommitView {
     fn new(commit: String, request: u64) -> Self {
         CommitView {
@@ -327,6 +334,7 @@ impl CommitView {
             search: Search::default(),
             anchor: 0,
             side_sel: 0,
+            files_top: None,
             tree: true,
             entries: Vec::new(),
             order: Vec::new(),

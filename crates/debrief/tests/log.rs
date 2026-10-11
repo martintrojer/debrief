@@ -674,18 +674,22 @@ fn stats_pane_shows_files_first_and_scrolls_with_j_k() {
     // The wheel scrolls the pane when over it, not over the log.
     key(&mut app, 'j');
     key(&mut app, 'k');
-    use debrief::app::AppEvent::Wheel;
-    app.event(Wheel {
-        col: 5,
-        row: 2,
-        down: true,
-    });
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let wheel = |kind, row| {
+        debrief::app::AppEvent::Mouse(MouseEvent {
+            kind,
+            column: 5,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    app.event(wheel(MouseEventKind::ScrollDown, 2));
     assert_eq!(app.stat_scroll(), 0, "over the log");
-    app.event(Wheel {
-        col: 5,
-        row: 15,
-        down: true,
-    });
+    app.event(wheel(MouseEventKind::ScrollDown, 15));
+    assert_eq!(app.stat_scroll(), 3);
+    app.event(wheel(MouseEventKind::ScrollUp, 15));
+    assert_eq!(app.stat_scroll(), 0);
+    app.event(wheel(MouseEventKind::ScrollDown, 15));
     assert_eq!(app.stat_scroll(), 3);
     // Moving to another commit resets the scroll.
     key(&mut app, 'j');

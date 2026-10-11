@@ -769,6 +769,11 @@ impl App {
         })
     }
 
+    /// Typing the help overlay's filter.
+    pub(super) fn help_filtering(&self) -> bool {
+        self.mode == Mode::Help && self.help.filtering
+    }
+
     fn help_page(&self) -> usize {
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
         help_list_rows(help_rect(area))

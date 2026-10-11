@@ -87,6 +87,14 @@ pub struct PickerView<'a> {
     pub footer: &'static str,
 }
 
+impl PickerView<'_> {
+    /// The first item drawn in a list `h` rows tall: the least that
+    /// shows the selection.
+    pub fn skip(&self, h: usize) -> usize {
+        (self.selected + 1).saturating_sub(h)
+    }
+}
+
 impl Picker {
     fn refilter(&mut self) {
         let q = self.input.to_lowercase();
@@ -227,6 +235,20 @@ impl App {
         if let Some(p) = &mut self.picker {
             p.items = items;
             p.refilter();
+        }
+    }
+
+    /// Select item `i` of the filtered list (clamped).
+    pub(super) fn picker_select(&mut self, i: usize) {
+        if let Some(p) = &mut self.picker {
+            p.selected = i.min(p.filtered.len().saturating_sub(1));
+        }
+    }
+
+    /// Move the selection `delta` items, stopping at the ends.
+    pub(super) fn picker_step(&mut self, delta: isize) {
+        if let Some(p) = &self.picker {
+            self.picker_select(p.selected.saturating_add_signed(delta));
         }
     }
 

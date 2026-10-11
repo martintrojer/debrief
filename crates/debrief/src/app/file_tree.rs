@@ -477,17 +477,57 @@ impl App {
 }
 
 impl App {
-    /// The file list's first drawn row in a list `h` rows tall: the
-    /// least that shows the selection while the list has the keys, else
-    /// the diff cursor's file.
+    fn files_follow(&self, l: &FileList) -> super::commit::FilesFollow {
+        if self.focus == super::Focus::Files {
+            (true, Some(l.selected))
+        } else {
+            (false, l.current)
+        }
+    }
+
+    /// The file list's first drawn row in a list `h` rows tall. It keeps
+    /// the selection on screen while the list has the keys, else the diff
+    /// cursor's file: the least scroll that does, or, after a wheel scroll
+    /// or a click, the least move from the row left there (none while
+    /// what it follows hasn't changed since).
     pub fn files_skip(&self, h: usize) -> usize {
         let Some(l) = self.file_list() else { return 0 };
-        let follow = if self.focus == super::Focus::Files {
-            Some(l.selected)
-        } else {
-            l.current
+        let follow = self.files_follow(&l);
+        let max = l.visible.rows.len().saturating_sub(h);
+        let top = match self.commit.as_ref().and_then(|v| v.files_top) {
+            Some((at, top)) if at == follow => return top.min(max),
+            Some((_, top)) => top,
+            None => 0,
         };
-        follow.map_or(0, |r| (r + 1).saturating_sub(h))
+        let top = match follow.1 {
+            Some(r) if r < top => r,
+            Some(r) if r >= top + h => r + 1 - h,
+            _ => top,
+        };
+        top.min(max)
+    }
+
+    /// Leave the file list's first row at `top` until what it follows
+    /// changes.
+    pub(super) fn files_pin(&mut self, top: usize) {
+        let Some(l) = self.file_list() else { return };
+        let follow = self.files_follow(&l);
+        if let Some(v) = &mut self.commit {
+            v.files_top = Some((follow, top));
+        }
+    }
+
+    /// Scroll the file list's view, `h` rows tall, `delta` rows (down
+    /// when positive); the selection and the diff stay.
+    pub(super) fn files_wheel(&mut self, delta: isize, h: usize) {
+        let Some(len) = self.file_list().map(|l| l.visible.rows.len()) else {
+            return;
+        };
+        let top = self
+            .files_skip(h)
+            .saturating_add_signed(delta)
+            .min(len.saturating_sub(h));
+        self.files_pin(top);
     }
 
     /// Rows `C-d` / `C-u` move in the file list: half its tree's height.

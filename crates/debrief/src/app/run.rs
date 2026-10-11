@@ -6,9 +6,13 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event,
+};
 use ratatui::DefaultTerminal;
 
+use super::config::Config;
 use super::{App, AppEvent};
 
 /// How long one loop iteration waits for terminal input.
@@ -16,31 +20,52 @@ const POLL: Duration = Duration::from_millis(100);
 
 /// Run the interactive TUI until the user quits.
 pub fn run(mut app: App) -> anyhow::Result<()> {
+    let mouse = capture_wanted(app.config());
     // Installs a panic hook that restores the terminal before unwinding.
     let mut terminal = ratatui::try_init().context("initialising terminal")?;
-    paste_on()?;
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = paste_off();
+        let _ = input_off(mouse);
         hook(info);
     }));
-    let result = event_loop(&mut terminal, &mut app);
-    let _ = paste_off();
+    let result = input_on(mouse)
+        .map_err(anyhow::Error::from)
+        .and_then(|()| event_loop(&mut terminal, &mut app, mouse));
+    let _ = input_off(mouse);
     ratatui::restore();
     result
 }
 
-/// Bracketed paste: a paste arrives as one [`Event::Paste`], not as keys
-/// (a pasted newline would otherwise be Enter).
-fn paste_on() -> std::io::Result<()> {
-    crossterm::execute!(std::io::stdout(), EnableBracketedPaste)
+/// Capture the mouse (clicks, drags, the wheel arrive as
+/// [`Event::Mouse`]): `[mouse] enabled`. Off, the terminal keeps its own
+/// selection and scrolling.
+pub fn capture_wanted(cfg: &Config) -> bool {
+    cfg.mouse.enabled
 }
 
-fn paste_off() -> std::io::Result<()> {
-    crossterm::execute!(std::io::stdout(), DisableBracketedPaste)
+/// Bracketed paste (a paste arrives as one [`Event::Paste`], not as keys:
+/// a pasted newline would otherwise be Enter), and mouse capture when
+/// `mouse`.
+fn input_on(mouse: bool) -> std::io::Result<()> {
+    crossterm::execute!(std::io::stdout(), EnableBracketedPaste)?;
+    if mouse {
+        crossterm::execute!(std::io::stdout(), EnableMouseCapture)?;
+    }
+    Ok(())
 }
 
-fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<()> {
+/// Undo [`input_on`]; both are turned off even when one fails.
+fn input_off(mouse: bool) -> std::io::Result<()> {
+    let capture = if mouse {
+        crossterm::execute!(std::io::stdout(), DisableMouseCapture)
+    } else {
+        Ok(())
+    };
+    crossterm::execute!(std::io::stdout(), DisableBracketedPaste)?;
+    capture
+}
+
+fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, mouse: bool) -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel::<AppEvent>();
     app.set_sender(tx);
     if let Err(e) = app.start_watcher() {
@@ -48,7 +73,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
     }
     while !app.should_quit() {
         if app.pending_effect().is_some() {
-            suspend_and_run(terminal, || app.run_pending_effect())?;
+            suspend_and_run(terminal, mouse, || app.run_pending_effect())?;
         }
         terminal.draw(|f| app.render(f))?;
         if event::poll(POLL)? {
@@ -56,21 +81,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
                 Event::Key(key) => app.event(AppEvent::Key(key)),
                 Event::Resize(cols, rows) => app.event(AppEvent::Resize(cols, rows)),
                 Event::Paste(text) => app.event(AppEvent::Paste(text)),
-                Event::Mouse(m) => {
-                    use crossterm::event::MouseEventKind as K;
-                    let down = match m.kind {
-                        K::ScrollDown => Some(true),
-                        K::ScrollUp => Some(false),
-                        _ => None,
-                    };
-                    if let Some(down) = down {
-                        app.event(AppEvent::Wheel {
-                            col: m.column,
-                            row: m.row,
-                            down,
-                        });
-                    }
-                }
+                Event::Mouse(m) => app.event(AppEvent::Mouse(m)),
                 _ => {}
             }
         }
@@ -97,20 +108,21 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<(
     Ok(())
 }
 
-/// Leave raw mode, bracketed paste and the alternate screen, run `f`
-/// (which may use the terminal), then re-enter and clear so the next draw
-/// repaints fully (ramble's `suspend_and_run`; debrief captures no mouse).
+/// Leave raw mode, bracketed paste, mouse capture (when `mouse`) and the
+/// alternate screen, run `f` (which may use the terminal), then re-enter
+/// and clear so the next draw repaints fully (ramble's `suspend_and_run`).
 pub fn suspend_and_run<R>(
     terminal: &mut DefaultTerminal,
+    mouse: bool,
     f: impl FnOnce() -> R,
 ) -> anyhow::Result<R> {
-    paste_off()?;
+    input_off(mouse)?;
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     let r = f();
     crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
     crossterm::terminal::enable_raw_mode()?;
-    paste_on()?;
+    input_on(mouse)?;
     terminal.clear()?;
     Ok(r)
 }

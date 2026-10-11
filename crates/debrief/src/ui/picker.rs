@@ -37,7 +37,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     frame.set_cursor_position((x.min(query.right().saturating_sub(1)), query.y));
     frame.render_widget(Paragraph::new(q).style(base.fg(palette::BLUE)), query);
     let h = list.height as usize;
-    let skip = (view.selected + 1).saturating_sub(h);
+    let skip = view.skip(h);
     let lines: Vec<Line> = if view.items.is_empty() {
         let empty = match view.kind {
             crate::app::PickerKind::Comments => "No comments",

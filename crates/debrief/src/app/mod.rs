@@ -16,6 +16,7 @@ pub mod launch;
 mod log;
 mod log_search;
 mod motion;
+pub mod mouse;
 pub mod pane_nav;
 pub mod picker;
 pub mod review;
@@ -33,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::Frame;
 
 use crate::seen::{Seen, Status};
@@ -48,6 +49,7 @@ pub use keys::{LEADER, TOGGLES};
 pub use launch::{Effect, Exit, LaunchCommand};
 pub use log::{WORKING_ID, age, is_zero_id, short_id};
 pub use motion::Cursor;
+pub use mouse::{Hit, MULTI_CLICK, WHEEL_ROWS};
 pub use picker::{PickerAction, PickerItem, PickerKind, PickerView};
 pub use session::QuitChoice;
 pub use stat::{LogLayout, StatPane};
@@ -117,13 +119,9 @@ pub enum AppEvent {
         request: u64,
         spans: highlight::DiffSpans,
     },
-    /// The mouse wheel at (column, row), down or up (only arrives when
-    /// the mouse is captured).
-    Wheel {
-        col: u16,
-        row: u16,
-        down: bool,
-    },
+    /// A click, drag or wheel notch (only arrives when the mouse is
+    /// captured, `[mouse] enabled`).
+    Mouse(MouseEvent),
     /// A commit's stat for the log's stats pane, tagged with its request.
     Stat {
         request: u64,
@@ -264,6 +262,8 @@ pub struct App {
     popup_scroll: usize,
     /// The `<leader>rl` picker.
     picker: Option<picker::Picker>,
+    /// The last click and a drag in progress.
+    mouse: mouse::MouseState,
     /// Test hook between a send's export and its removal.
     after_export: Option<Box<dyn FnMut()>>,
     /// Writes and flushes bytes to the terminal (stdout; a send's OSC 52
@@ -339,6 +339,7 @@ impl App {
             popup: None,
             popup_scroll: 0,
             picker: None,
+            mouse: mouse::MouseState::default(),
             after_export: None,
             terminal: Box::new(stdout_write),
             sessions: session::Sessions::new(crate::session::Store::new(&opts_state, &root)),
@@ -387,11 +388,7 @@ impl App {
             AppEvent::WorkingRow { request, result } => self.working_row_loaded(request, result),
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
-            AppEvent::Wheel { col, row, down } if self.screen == Screen::Log => {
-                self.stat_follow();
-                self.stat_wheel(col, row, down);
-            }
-            AppEvent::Wheel { .. } => {}
+            AppEvent::Mouse(m) => self.mouse(m, Instant::now()),
         }
     }
 
@@ -437,6 +434,11 @@ impl App {
     /// The config in effect.
     pub fn config(&self) -> &config::Config {
         &self.config
+    }
+
+    /// The terminal size (columns, rows), from the last resize or draw.
+    pub fn size(&self) -> (u16, u16) {
+        self.size
     }
 
     pub fn should_quit(&self) -> bool {

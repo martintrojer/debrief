@@ -187,10 +187,23 @@ mod tests {
     #[test]
     fn every_pending_prefix_has_clue_rows() {
         use crate::app::help::{Ctx, tests::in_ctx};
-        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Visual] {
+        for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Commits, Ctx::Visual] {
             let (_t, a) = in_ctx(ctx);
             pending_prefixes_have_clue_rows(&a);
         }
+    }
+
+    #[test]
+    fn the_commit_list_clue_lists_its_g_keys() {
+        use crate::app::help::{Ctx, tests::in_ctx};
+        let (_t, mut a) = in_ctx(Ctx::Commits);
+        a.key(ch('g'));
+        let rows = a.clue_rows();
+        let got: Vec<_> = rows
+            .iter()
+            .map(|r| (r.key.as_str(), r.desc.as_str()))
+            .collect();
+        assert_eq!(got, [("?", "help"), ("g", "first commit (or row {count})")]);
     }
 
     #[test]

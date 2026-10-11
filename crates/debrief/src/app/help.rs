@@ -22,6 +22,8 @@ pub(crate) enum Ctx {
     Commit,
     /// The commit screen's file list has focus.
     Files,
+    /// The commit list under the file list's tree has focus.
+    Commits,
     /// Visual mode in the commit view.
     Visual,
     /// Typing a search pattern (commit view or log).
@@ -48,6 +50,7 @@ pub(crate) enum Group {
     Log,
     Commit,
     Files,
+    Commits,
     Search,
     Visual,
     Review,
@@ -56,12 +59,13 @@ pub(crate) enum Group {
 }
 
 impl Group {
-    const ALL: [Group; 10] = [
+    const ALL: [Group; 11] = [
         Group::General,
         Group::Motions,
         Group::Log,
         Group::Commit,
         Group::Files,
+        Group::Commits,
         Group::Search,
         Group::Visual,
         Group::Review,
@@ -76,6 +80,7 @@ impl Group {
             Group::Log => "Log",
             Group::Commit => "Commit",
             Group::Files => "File list",
+            Group::Commits => "Commit list",
             Group::Search => "Search",
             Group::Visual => "Visual",
             Group::Review => "Review",
@@ -109,8 +114,8 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 /// Every key binding, as the help overlay and the key clue list them.
 pub(crate) const BINDINGS: &[Binding] = {
     use Ctx::{
-        Comment as P, Commit as C, Files as F, Filter as Fl, Help as H, Log as L, Picker as R,
-        Popup as K, Quit as Q, Search as S, Visual as V,
+        Comment as P, Commit as C, Commits as CL, Files as F, Filter as Fl, Help as H, Log as L,
+        Picker as R, Popup as K, Quit as Q, Search as S, Visual as V,
     };
     use Group as G;
     &[
@@ -138,6 +143,7 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("m", L, G::Log, "mark every listed commit seen"),
         b("r", L, G::Log, "reload the log"),
         b("<leader>e", L, G::Log, "show or hide the stats pane"),
+        b("<leader>E", L, G::Log, COMMIT_LIST_TOGGLE),
         b("J", L, G::Log, "scroll the stats pane down"),
         b("K", L, G::Log, "scroll the stats pane up"),
         b("/", L, G::Log, "search forward"),
@@ -246,6 +252,23 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Esc", F, G::Files, "back to the diff"),
         b("q", F, G::Files, "back to the log"),
         b("{1-9}", F, G::Files, "count for the next motion"),
+        b("<leader>E", C, G::Files, COMMIT_LIST_TOGGLE),
+        b("<leader>E", F, G::Files, COMMIT_LIST_TOGGLE),
+        b("<leader>E", CL, G::Commits, COMMIT_LIST_TOGGLE),
+        b("<leader>e", CL, G::Commits, FILE_LIST_TOGGLE),
+        b("C-w h", CL, G::Commits, "to the pane on the left"),
+        b("C-w l", CL, G::Commits, "to the pane on the right"),
+        b("g?", CL, G::General, "help"),
+        b("j, Down", CL, G::Commits, "next commit (opens nothing)"),
+        b("k, Up", CL, G::Commits, "previous commit (opens nothing)"),
+        b("C-d", CL, G::Commits, "half a page down"),
+        b("C-u", CL, G::Commits, "half a page up"),
+        b("gg", CL, G::Commits, "first commit (or row {count})"),
+        b("G", CL, G::Commits, "last commit (or row {count})"),
+        b("Enter", CL, G::Commits, "open the commit (marks it seen)"),
+        b("Esc", CL, G::Commits, "back to the diff"),
+        b("q", CL, G::Commits, "back to the log"),
+        b("{1-9}", CL, G::Commits, "count for the next motion"),
         b("Enter", S, G::Search, "in search: jump to the match"),
         b("Esc", S, G::Search, "in search: cancel"),
         b("Backspace", S, G::Search, "in search: delete a character"),
@@ -291,6 +314,8 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("<leader>rr", C, G::Review, "send the review"),
         b("<leader>rl", F, G::Review, "list the review comments"),
         b("<leader>rr", F, G::Review, "send the review"),
+        b("<leader>rl", CL, G::Review, "list the review comments"),
+        b("<leader>rr", CL, G::Review, "send the review"),
         b(
             "<leader>ss",
             L,
@@ -312,6 +337,18 @@ pub(crate) const BINDINGS: &[Binding] = {
             "save this commit's review session",
         ),
         b("<leader>rs", F, G::Review, "list the saved review sessions"),
+        b(
+            "<leader>ss",
+            CL,
+            G::Review,
+            "save this commit's review session",
+        ),
+        b(
+            "<leader>rs",
+            CL,
+            G::Review,
+            "list the saved review sessions",
+        ),
         b(
             "Enter",
             R,
@@ -369,10 +406,12 @@ pub(crate) const BINDINGS: &[Binding] = {
 
 /// `<leader>e` on the commit screen; in auto it says it pins the list.
 const FILE_LIST_TOGGLE: &str = "show or hide the file list";
+/// `<leader>E`.
+const COMMIT_LIST_TOGGLE: &str = "show or hide the commit list under the files";
 
 /// `C-h/j/k/l` (`[keys] pane_nav`): the panes, then tmux's past the edge.
 const PANE_NAV: &[Binding] = {
-    use Ctx::{Commit as C, Files as F, Log as L};
+    use Ctx::{Commit as C, Commits as CL, Files as F, Log as L};
     use Group as G;
     &[
         b("C-h", C, G::Files, "as C-w h (at the edge: tmux)"),
@@ -381,6 +420,10 @@ const PANE_NAV: &[Binding] = {
         b("C-h", F, G::Files, "as C-w h (at the edge: tmux)"),
         b("C-l", F, G::Files, "as C-w l (at the edge: tmux)"),
         b("C-j, C-k", F, G::Files, "the tmux pane below, above"),
+        b("C-h", CL, G::Commits, "as C-w h (at the edge: tmux)"),
+        b("C-l", CL, G::Commits, "as C-w l (at the edge: tmux)"),
+        b("C-j", CL, G::Commits, "the tmux pane below"),
+        b("C-k", CL, G::Commits, "to the file tree (none: tmux)"),
         b(
             "C-h, C-j, C-k, C-l",
             L,
@@ -405,6 +448,13 @@ impl App {
         }
         if self.config.keys.pane_nav {
             out.extend_from_slice(PANE_NAV);
+            if self.commit_list.on {
+                for b in out.iter_mut().filter(|b| b.context == Ctx::Files) {
+                    if b.keys == "C-j, C-k" {
+                        b.desc = Cow::Borrowed("C-j to the commit list (hidden: tmux); C-k tmux");
+                    }
+                }
+            }
         }
         if self.has_comment_kinds() {
             out.push(b(
@@ -422,7 +472,7 @@ impl App {
             } else {
                 format!("run launcher {}", l.name)
             };
-            for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files] {
+            for ctx in [Ctx::Log, Ctx::Commit, Ctx::Files, Ctx::Commits] {
                 out.push(Binding {
                     keys: Cow::Owned(key.clone()),
                     context: ctx,
@@ -625,6 +675,7 @@ impl App {
             Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }
+            Ctx::Commits => matches!(self.screen, Screen::Commit(_)) && self.commit_list_visible(),
             Ctx::Search | Ctx::Picker | Ctx::Quit | Ctx::Help => true,
         }
     }
@@ -635,9 +686,13 @@ impl App {
         match ctx {
             Ctx::Log => self.screen == Screen::Log && self.mode == Mode::Normal,
             Ctx::Commit => {
-                commit && !self.files_focused() && matches!(self.mode, Mode::Normal | Mode::Visual)
+                commit
+                    && !self.files_focused()
+                    && !self.commits_focused()
+                    && matches!(self.mode, Mode::Normal | Mode::Visual)
             }
             Ctx::Files => commit && self.files_focused() && self.mode == Mode::Normal,
+            Ctx::Commits => commit && self.commits_focused() && self.mode == Mode::Normal,
             Ctx::Visual => commit && self.mode == Mode::Visual,
             Ctx::Search => self.mode == Mode::Search,
             Ctx::Filter => self.mode == Mode::Filter,
@@ -794,6 +849,11 @@ pub(super) mod tests {
         match ctx {
             Ctx::Help => a.help_action(HelpAction::Open),
             Ctx::Files => a.focus_pane(crate::app::Focus::Files),
+            Ctx::Commits => {
+                a.commit_list.on = true;
+                a.focus_pane(crate::app::Focus::Commits);
+                assert_eq!(a.focus, crate::app::Focus::Commits);
+            }
             Ctx::Visual => a.visual_start(),
             Ctx::Search => a.search_start(true),
             // The keymaps depend only on the mode.
@@ -813,6 +873,7 @@ pub(super) mod tests {
             Ctx::Log,
             Ctx::Commit,
             Ctx::Files,
+            Ctx::Commits,
             Ctx::Visual,
             Ctx::Search,
             Ctx::Filter,
@@ -845,6 +906,7 @@ pub(super) mod tests {
             Ctx::Log,
             Ctx::Commit,
             Ctx::Files,
+            Ctx::Commits,
             Ctx::Visual,
             Ctx::Popup,
             Ctx::Quit,
@@ -896,6 +958,22 @@ pub(super) mod tests {
                 _ => {}
             }
         }
+    }
+
+    #[test]
+    fn the_commit_list_rows_show_while_it_does() {
+        let groups = |a: &App| -> Vec<HelpLine> {
+            a.help_lines()
+                .into_iter()
+                .filter(|l| matches!(l, HelpLine::Group(_)))
+                .collect()
+        };
+        let (_t, a) = in_ctx(Ctx::Commit);
+        assert!(!groups(&a).contains(&HelpLine::Group("Commit list")));
+        let (_t, a) = in_ctx(Ctx::Commits);
+        assert!(groups(&a).contains(&HelpLine::Group("Commit list")));
+        assert!(a.ctx_active(Ctx::Commits));
+        assert!(!a.ctx_active(Ctx::Commit) && !a.ctx_active(Ctx::Files));
     }
 
     #[test]

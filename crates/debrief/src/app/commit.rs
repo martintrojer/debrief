@@ -236,7 +236,10 @@ pub fn diff_text(r: &Row) -> String {
 pub enum Focus {
     #[default]
     Diff,
+    /// The file list's tree.
     Files,
+    /// The commit list under the tree (`[view] sidebar_commits`).
+    Commits,
 }
 
 /// The open commit.
@@ -538,16 +541,21 @@ impl App {
     }
 
     /// Switch to the commit screen on log row `i` with a fresh view;
-    /// returns its request number.
+    /// returns its request number. Opened from the commit list, the list
+    /// keeps the keys and an auto peek stays open.
     fn enter_view(&mut self, i: usize) -> u64 {
         // The view being left is remembered for its session.
         self.session_capture();
+        let from_list = self.commit_list.opening;
         let id = self.rows[i].info.commit.clone();
         self.mark_row(i);
         self.cursor = i;
         self.screen = Screen::Commit(i);
         self.mode = Mode::Normal;
-        self.set_focus(Focus::Diff);
+        if !from_list {
+            self.set_focus(Focus::Diff);
+        }
+        self.commit_list_centre(i);
         self.next_request += 1;
         let request = self.next_request;
         // The session's layout follows once the diff (and the file list
@@ -558,6 +566,11 @@ impl App {
         let tree = self.files_tree;
         if let Some(v) = &mut self.commit {
             v.tree = tree;
+        }
+        if from_list {
+            // A saved session's file list setting closes a peek.
+            self.peek_open();
+            self.commit_list_refocus();
         }
         request
     }
@@ -880,7 +893,7 @@ impl App {
     }
 
     /// The log row of view `v`: the working copy's row, else its commit's.
-    fn view_index(&self, v: &CommitView) -> Option<usize> {
+    pub(super) fn view_index(&self, v: &CommitView) -> Option<usize> {
         if v.working {
             return self.working_index();
         }
@@ -962,7 +975,9 @@ impl App {
 
     /// Size the diff view from the layout and keep the cursor in it.
     pub(super) fn commit_follow(&mut self) {
+        self.commit_list_keep_visible();
         let area = Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
+        self.sidebar_remember_width();
         let diff = self.commit_layout(area).diff;
         self.layout_sync(diff.width);
         let marks = self.review_gutter();

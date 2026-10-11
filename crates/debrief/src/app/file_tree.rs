@@ -477,9 +477,13 @@ impl App {
 }
 
 impl App {
-    /// Rows `C-d` / `C-u` move in the file list: half its height.
+    /// Rows `C-d` / `C-u` move in the file list: half its tree's height.
     pub(super) fn files_half(&self) -> usize {
-        self.commit.as_ref().map_or(1, |v| (v.view_h / 2).max(1))
+        let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1.saturating_sub(1));
+        match self.commit_layout(area).sidebar {
+            Some(tree) => (tree.height as usize / 2).max(1),
+            None => self.commit.as_ref().map_or(1, |v| (v.view_h / 2).max(1)),
+        }
     }
 }
 

@@ -4,6 +4,11 @@
 //! toward the diff, `▎` on the file holding the diff cursor (or the
 //! collapsed directory hiding it). Names too long are clipped in the
 //! middle, keeping the extension.
+//!
+//! Under the tree, the commit list (`[view] sidebar_commits`): a rule,
+//! then the log's rows as `<marker> <short id> [session] <summary>`,
+//! clipped to the width; the open commit's row on the cursor-row
+//! background, the list's cursor bold on it while the list has focus.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -12,12 +17,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+use super::log::{WORKING_MARKER, marker};
 use super::palette;
 use crate::app::config::SidebarSide;
 use crate::app::file_tree::{clip_middle, indent};
 use crate::app::sidebar::STATUS_COLS;
 use crate::app::sidebar::counts_label;
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, WORKING_ID, short_id};
 use crate::vcs::FileStatus;
 
 /// The current-file marker, drawn in the left gutter.
@@ -39,8 +45,10 @@ pub fn status_color(s: FileStatus) -> Color {
 pub const OPEN: &str = "▾";
 pub const CLOSED: &str = "▸";
 
-pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
-    // Over the diff (a peek), nothing of it shows through.
+/// The file list's border, on its edge toward the diff; `area` cleared
+/// first (over the diff, a peek, nothing of it shows through). Returns
+/// the area inside it.
+fn bordered(frame: &mut Frame, app: &App, area: Rect) -> Rect {
     frame.render_widget(Clear, area);
     let border = match app.config().view.sidebar_side {
         SidebarSide::Left => Borders::RIGHT,
@@ -51,6 +59,90 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::new().fg(palette::OVERLAY));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    inner
+}
+
+/// `s` cut to `w` columns.
+fn clip(s: &str, w: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if used + cw > w {
+            break;
+        }
+        used += cw;
+        out.push(c);
+    }
+    out
+}
+
+/// The commit list: a rule on the top row of `area`, then the rows.
+pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
+    let inner = bordered(frame, app, area);
+    if inner.height == 0 {
+        return;
+    }
+    let rule = "─".repeat(inner.width as usize);
+    frame.render_widget(
+        Paragraph::new(rule).style(Style::new().fg(palette::OVERLAY)),
+        Rect { height: 1, ..inner },
+    );
+    let list = Rect {
+        y: inner.y + 1,
+        height: inner.height - 1,
+        ..inner
+    };
+    let focused = app.focus() == Focus::Commits;
+    let open = app.commit_list_open_row();
+    let cursor = app.commit_list_cursor();
+    let width = list.width as usize;
+    let lines: Vec<Line> = app
+        .rows()
+        .iter()
+        .enumerate()
+        .skip(app.commit_list_offset())
+        .take(list.height as usize)
+        .map(|(i, r)| {
+            let mut base = Style::new().fg(palette::TEXT);
+            if open == Some(i) || (focused && i == cursor) {
+                base = base.bg(palette::SURFACE);
+            }
+            if focused && i == cursor {
+                base = base.add_modifier(Modifier::BOLD);
+            }
+            let (mut m, mut mc) = marker(r.status);
+            if r.working {
+                (m, mc) = (WORKING_MARKER, palette::YELLOW);
+            }
+            let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
+            let mut rest = width.saturating_sub(2);
+            let mut push = |text: &str, style: Style, spans: &mut Vec<Span<'static>>| {
+                let t = clip(text, rest);
+                rest -= t.width();
+                spans.push(Span::styled(t, style));
+            };
+            if r.info.commit == WORKING_ID {
+                push(&r.info.summary, base.fg(palette::YELLOW), &mut spans);
+            } else {
+                push(
+                    &format!("{} ", short_id(&r.info)),
+                    base.fg(palette::MAUVE),
+                    &mut spans,
+                );
+                if let Some(s) = app.session_marker(r) {
+                    push(&format!("{s} "), base.fg(palette::TEAL), &mut spans);
+                }
+                push(&r.info.summary, base, &mut spans);
+            }
+            Line::from(spans).style(base)
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), list);
+}
+
+pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    let inner = bordered(frame, app, area);
     let (Some(diff), Some(list)) = (app.commit_diff(), app.file_list()) else {
         return;
     };

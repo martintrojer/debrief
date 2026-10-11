@@ -169,11 +169,18 @@ impl App {
         }));
         self.all_rows = rows;
         // A kept filter narrows the new list too; the caller places the
-        // cursor.
+        // cursor. The commit list's cursor stays on its commit.
         let keep = self.rows.get(self.cursor).map(|r| r.info.commit.clone());
+        let listed = self
+            .rows
+            .get(self.commit_list.cursor)
+            .map(|r| (r.info.commit.clone(), r.working));
         let cursor = self.cursor;
         self.refilter(keep);
         self.cursor = cursor.min(self.rows.len().saturating_sub(1));
+        if let Some(i) = listed.and_then(|c| self.row_of(&c)) {
+            self.commit_list.cursor = i;
+        }
     }
 
     fn restatus(&mut self) {
@@ -223,14 +230,17 @@ impl App {
     }
 
     fn cursor_to(&mut self, current: Option<(String, bool)>) {
-        let Some((id, working)) = current else { return };
-        let i = if working {
+        if let Some(i) = current.and_then(|c| self.row_of(&c)) {
+            self.cursor = i;
+        }
+    }
+
+    /// The row of a commit ID, or of the working copy when `working`.
+    fn row_of(&self, (id, working): &(String, bool)) -> Option<usize> {
+        if *working {
             self.working_index()
         } else {
-            self.rows.iter().position(|r| r.info.commit == id)
-        };
-        if let Some(i) = i {
-            self.cursor = i;
+            self.rows.iter().position(|r| r.info.commit == *id)
         }
     }
 

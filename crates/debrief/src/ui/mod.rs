@@ -79,6 +79,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             if let Some(side) = l.sidebar {
                 sidebar::draw(frame, app, side);
             }
+            if let Some(list) = l.commits {
+                sidebar::draw_commits(frame, app, list);
+            }
             // Side by side, the box sits on the cursor's half, by its rows.
             comment_box::draw(frame, app, app.side_pane(l.diff));
         }

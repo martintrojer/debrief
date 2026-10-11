@@ -5,6 +5,7 @@
 mod clue;
 pub mod comment;
 pub mod commit;
+pub mod commit_list;
 pub mod config;
 pub mod display;
 pub mod file_tree;
@@ -228,6 +229,8 @@ pub struct App {
     focus: Focus,
     /// The file list: always / never / auto, pin and peek.
     sidebar: sidebar::SidebarState,
+    /// The commit list under the file list's tree.
+    commit_list: commit_list::CommitListState,
     /// `T`: hunks or the full file, for every commit opened this session.
     context: crate::vcs::Context,
     /// `t`: side by side wanted for this session (shown when the diff pane
@@ -319,6 +322,7 @@ impl App {
             next_request: 0,
             focus: Focus::Diff,
             sidebar: sidebar::SidebarState::default(),
+            commit_list: commit_list::CommitListState::default(),
             context: crate::vcs::Context::Default,
             split: false,
             files_tree: true,
@@ -342,6 +346,7 @@ impl App {
         app.review_open();
         app.config = app.opts.config.clone();
         app.sidebar.show = app.config.view.sidebar;
+        app.commit_list.on = app.config.view.sidebar_commits;
         app.stat.on = app.config.view.stats;
         app.context = app.config.view.context;
         app.split = app.config.view.layout == config::Layout::Split;
@@ -371,6 +376,7 @@ impl App {
             AppEvent::Resize(c, r) => {
                 self.sidebar_resized(c);
                 self.size = (c, r);
+                self.commit_list_refocus();
                 self.commit_follow();
             }
             AppEvent::Paste(text) => self.paste(&text),

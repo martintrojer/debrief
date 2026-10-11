@@ -23,8 +23,12 @@ pub const STATUS_COLS: usize = 2;
 /// Where the commit screen's panes go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitLayout {
-    /// The file list, border included (on its edge toward the diff).
+    /// The file list's tree, border included (on its edge toward the
+    /// diff); the top of the file-list area when the commit list shows.
     pub sidebar: Option<Rect>,
+    /// The commit list under the tree, its rule (the top row) and border
+    /// included.
+    pub commits: Option<Rect>,
     pub diff: Rect,
     /// The file list is drawn over the diff (an auto peek without room
     /// beside it); `diff` is then the whole area.
@@ -47,6 +51,9 @@ pub(super) struct SidebarState {
     /// A `<leader>e` choice made below `sidebar_auto_hide_below`; it
     /// holds until the terminal width changes.
     pub(super) narrow_override: Option<bool>,
+    /// The auto width of the last file list shown, kept while the next
+    /// commit loads (or has no files) under the commit list.
+    pub(super) last_auto: Option<u16>,
 }
 
 /// A pane of the commit screen, left to right on screen.
@@ -87,10 +94,17 @@ impl App {
         below > 0 && self.size.0 < below
     }
 
-    /// A loaded commit with files is on screen: there is a list to show.
+    /// A loaded commit with files is on screen, or the commit list fits:
+    /// there is a list to show (with the commit list, the tree may be
+    /// empty while a commit loads or when it has no files).
     fn sidebar_has_files(&self) -> bool {
         matches!(self.screen, Screen::Commit(_))
-            && self.commit.as_ref().is_some_and(|v| v.file_count() > 0)
+            && (self.tree_has_files() || self.commit_list_fits())
+    }
+
+    /// The open commit has files for the tree.
+    pub(super) fn tree_has_files(&self) -> bool {
+        self.commit.as_ref().is_some_and(|v| v.file_count() > 0)
     }
 
     /// `[view] sidebar` as the session has it now (`<leader>e` flips
@@ -223,7 +237,7 @@ impl App {
     }
 
     /// Open an auto peek (focus is the caller's).
-    fn peek_open(&mut self) {
+    pub(super) fn peek_open(&mut self) {
         if self.peek_could_open() {
             self.sidebar.peeked = true;
             self.sidebar.overlay = !self.peek_fits_beside();
@@ -243,12 +257,21 @@ impl App {
         self.focus == Focus::Files && self.sidebar_visible()
     }
 
-    /// Focus the file list (opening an auto peek) or the diff.
+    /// Focus the file list's tree or commit list (opening an auto peek),
+    /// or the diff. An empty tree sends the keys on to the commit list.
     pub(super) fn focus_pane(&mut self, f: Focus) {
-        if f == Focus::Files {
+        let mut f = f;
+        if matches!(f, Focus::Files | Focus::Commits) {
             self.peek_open();
             if !self.sidebar_visible() {
                 self.set_status("no file list");
+                return;
+            }
+            if f == Focus::Files && !self.tree_has_files() && self.commit_list_visible() {
+                f = Focus::Commits;
+            }
+            if f == Focus::Commits && !self.commit_list_visible() {
+                self.set_status("no commit list");
                 return;
             }
         }
@@ -287,7 +310,7 @@ impl App {
         if !matches!(self.screen, Screen::Commit(_)) {
             return None;
         }
-        Some(if self.files_focused() {
+        Some(if self.files_focused() || self.commits_focused() {
             Pane::Files
         } else {
             match self.split_side() {
@@ -298,11 +321,19 @@ impl App {
     }
 
     /// Move to the pane toward `dir`; false when there is none (the
-    /// screen edge, or up / down: debrief stacks no panes).
+    /// screen edge, or up / down outside the file list's two halves).
     pub(super) fn pane_move(&mut self, dir: Dir) -> bool {
         let step: isize = match dir {
             Dir::Left => -1,
             Dir::Right => 1,
+            Dir::Down if self.files_focused() && self.commit_list_visible() => {
+                self.set_focus(Focus::Commits);
+                return true;
+            }
+            Dir::Up if self.commits_focused() && self.tree_has_files() => {
+                self.set_focus(Focus::Files);
+                return true;
+            }
             Dir::Up | Dir::Down => return false,
         };
         let panes = self.panes();
@@ -338,7 +369,7 @@ impl App {
             (dir, self.config.view.sidebar_side),
             (Dir::Left, SidebarSide::Left) | (Dir::Right, SidebarSide::Right)
         );
-        if toward_list && !self.files_focused() {
+        if toward_list && !self.files_focused() && !self.commits_focused() {
             self.set_status("no file list");
         }
     }
@@ -375,15 +406,23 @@ impl App {
     fn sidebar_cols(&self, cols: u16) -> u16 {
         let v = &self.config.view;
         let w = match v.sidebar_width {
-            SidebarWidth::Auto => sidebar_width(
-                &self.sidebar_needs(),
-                cols,
-                v.sidebar_min_width,
-                v.sidebar_max_width,
-            ),
+            SidebarWidth::Auto => match self.sidebar_needs() {
+                need if need.is_empty() && self.commit_list_fits() => {
+                    self.sidebar.last_auto.unwrap_or(v.sidebar_min_width)
+                }
+                need => sidebar_width(&need, cols, v.sidebar_min_width, v.sidebar_max_width),
+            },
             SidebarWidth::Fixed(n) => n,
         };
         w.min(cols.saturating_sub(1))
+    }
+
+    /// Remember the auto width of a file list with rows, for the commits
+    /// that follow it under the commit list.
+    pub(super) fn sidebar_remember_width(&mut self) {
+        if !self.sidebar_needs().is_empty() {
+            self.sidebar.last_auto = Some(self.sidebar_cols(self.size.0));
+        }
     }
 
     /// Split the main area (above the status line) into the file list
@@ -393,6 +432,7 @@ impl App {
         if !self.sidebar_visible() {
             return CommitLayout {
                 sidebar: None,
+                commits: None,
                 diff: area,
                 overlay: false,
             };
@@ -410,8 +450,16 @@ impl App {
                 Rect::new(area.x, area.y, rest, area.height),
             ),
         };
+        let (tree, commits) = match super::commit_list::split_rows(side.height) {
+            Some((t, l)) if self.commit_list_fits() => (
+                Rect { height: t, ..side },
+                Some(Rect::new(side.x, side.y + t, side.width, l)),
+            ),
+            _ => (side, None),
+        };
         CommitLayout {
-            sidebar: Some(side),
+            sidebar: Some(tree),
+            commits,
             diff: if overlay { area } else { diff },
             overlay,
         }

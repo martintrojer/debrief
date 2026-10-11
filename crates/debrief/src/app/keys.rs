@@ -29,6 +29,7 @@ pub const LEADER: char = ' ';
 pub const TOGGLES: &[(Action, &str, &str)] = &[
     (Action::ToggleSidebar, "<leader>e", "view.sidebar"),
     (Action::ToggleSidebar, "<leader>e", "view.stats"),
+    (Action::ToggleCommits, "<leader>E", "view.sidebar_commits"),
     (Action::ToggleContext, "T", "view.context"),
     (Action::ToggleLayout, "t", "view.layout"),
     (Action::ToggleFiles, "`", "view.files"),
@@ -141,6 +142,20 @@ pub enum Action {
     FileAll(bool),
     /// File list `` ` ``: tree / flat.
     ToggleFiles,
+    /// `<leader>E`: the commit list under the file list's tree.
+    ToggleCommits,
+    /// Commit list: the cursor down / up a row (a count of rows).
+    CommitsDown(Option<usize>),
+    CommitsUp(Option<usize>),
+    /// Commit list `gg`: row `count` (1-based), else the first.
+    CommitsTop(Option<usize>),
+    /// Commit list `G`: row `count` (1-based), else the last.
+    CommitsBottom(Option<usize>),
+    /// Commit list `C-d` / `C-u`: half the list's height.
+    CommitsHalfDown,
+    CommitsHalfUp,
+    /// Commit list Enter: open the commit under the cursor.
+    CommitsOpen,
     /// A `[[launch]]` key: run launcher `i` of the config.
     Launch(usize),
     /// Enter in the diff: a `.md` file header goes to ramble.
@@ -283,6 +298,9 @@ impl App {
             (Mode::Comment, Screen::Commit(_)) => super::comment::comment_keymap(keys),
             (Mode::Popup, Screen::Commit(_)) => popup_keymap(keys),
             (Mode::Visual, Screen::Commit(_)) => self.visual_keymap(keys),
+            (Mode::Normal, Screen::Commit(_)) if self.commits_focused() => {
+                self.commits_keymap(keys)
+            }
             (Mode::Normal, Screen::Commit(_)) if self.files_focused() => self.files_keymap(keys),
             (Mode::Normal, Screen::Commit(_)) => self.commit_keymap(keys),
         }
@@ -319,8 +337,9 @@ impl App {
 
     /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
     /// prefix waits for more keys), then the built-ins (`e` on the commit
-    /// screen, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
-    /// the commit screen and the stats pane on the log.
+    /// screen, `E`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
+    /// the commit screen and the stats pane on the log; `E` the commit
+    /// list under the file list's tree.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
         let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
             return KeyResult::None;
@@ -332,6 +351,7 @@ impl App {
             LeaderMatch::NoMapping => match typed.as_slice() {
                 [] | ['r'] | ['s'] => KeyResult::Pending,
                 ['e'] => KeyResult::Action(Action::ToggleSidebar),
+                ['E'] => KeyResult::Action(Action::ToggleCommits),
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
                 ['r', 's'] => KeyResult::Action(Action::SessionList),
@@ -478,6 +498,38 @@ impl App {
                 (_, Some('-')) => A::FileAll(true),
                 (_, Some('=')) => A::FileAll(false),
                 (_, Some('`')) => A::ToggleFiles,
+                (KeyCode::Esc, _) => A::FocusDiff,
+                (_, Some('q')) => A::Back,
+                _ => return KeyResult::None,
+            }),
+            _ => KeyResult::None,
+        }
+    }
+
+    /// The commit list under the file list's tree.
+    fn commits_keymap(&self, keys: &[KeyEvent]) -> KeyResult {
+        use Action as A;
+        if let Some(r) = self.pane_keymap(keys) {
+            return r;
+        }
+        let count = self.count;
+        match keys {
+            [a, b] if plain(a) == Some('g') && plain(b) == Some('g') => {
+                KeyResult::Action(A::CommitsTop(count))
+            }
+            [k] if k.modifiers.contains(KeyModifiers::CONTROL) => match k.code {
+                KeyCode::Char('d') => KeyResult::Action(A::CommitsHalfDown),
+                KeyCode::Char('u') => KeyResult::Action(A::CommitsHalfUp),
+                _ => KeyResult::None,
+            },
+            [k] => KeyResult::Action(match (k.code, plain(k)) {
+                (_, Some(c @ '1'..='9')) => return KeyResult::Count(c as usize - '0' as usize),
+                (_, Some('0')) if count.is_some() => return KeyResult::Count(0),
+                (_, Some('g')) => return KeyResult::Pending,
+                (_, Some('j')) | (KeyCode::Down, _) => A::CommitsDown(count),
+                (_, Some('k')) | (KeyCode::Up, _) => A::CommitsUp(count),
+                (_, Some('G')) => A::CommitsBottom(count),
+                (KeyCode::Enter, _) => A::CommitsOpen,
                 (KeyCode::Esc, _) => A::FocusDiff,
                 (_, Some('q')) => A::Back,
                 _ => return KeyResult::None,
@@ -653,6 +705,16 @@ impl App {
             A::FileExpand => return self.refitting(Self::file_expand),
             A::FileAll(collapse) => return self.refitting(|a| a.file_all(collapse)),
             A::ToggleFiles => return self.refitting(Self::toggle_files),
+            A::ToggleCommits => return self.toggle_commits(),
+            A::CommitsDown(c) => return self.commit_list_move(n(c) as isize),
+            A::CommitsUp(c) => return self.commit_list_move(-(n(c) as isize)),
+            A::CommitsTop(c) => return self.commit_list_goto(c.map_or(0, |c| c.saturating_sub(1))),
+            A::CommitsBottom(c) => {
+                return self.commit_list_goto(c.map_or(usize::MAX, |c| c.saturating_sub(1)));
+            }
+            A::CommitsHalfDown => return self.commit_list_move(self.commit_list_half()),
+            A::CommitsHalfUp => return self.commit_list_move(-self.commit_list_half()),
+            A::CommitsOpen => return self.commit_list_open(),
             _ => {}
         }
         let full = self.context == crate::vcs::Context::Full;
@@ -729,6 +791,8 @@ fn visual_ok(a: Action) -> bool {
             | A::SwitchSide
             | A::ToggleSidebar
             | A::ToggleFiles
+            | A::ToggleCommits
+            | A::CommitsOpen
             | A::FocusDiff
             | A::Window(_)
             | A::PaneNav(_)

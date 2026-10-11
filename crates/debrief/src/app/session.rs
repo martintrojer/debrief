@@ -322,7 +322,8 @@ impl App {
             focus: match (&v.restore, self.focus) {
                 (Some(r), _) if v.diff.is_none() => r.focus,
                 (_, Focus::Diff) => ViewFocus::Diff,
-                (_, Focus::Files) => ViewFocus::Files,
+                // The commit list is part of the file list's pane.
+                (_, Focus::Files | Focus::Commits) => ViewFocus::Files,
             },
             ..prev.cloned().unwrap_or_default()
         };
@@ -509,8 +510,9 @@ impl App {
             v.center_cursor();
         }
         self.refresh_search();
-        // An auto list peeks for a saved file-list focus.
-        if r.focus == ViewFocus::Files && self.files_reachable() {
+        // An auto list peeks for a saved file-list focus; browsing the
+        // commit list keeps the keys there.
+        if r.focus == ViewFocus::Files && self.files_reachable() && self.focus != Focus::Commits {
             self.focus_pane(Focus::Files);
         }
         if let Some(msg) = r.status {

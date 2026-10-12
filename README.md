@@ -47,12 +47,13 @@ agent as one markdown review.
 
 ## Install
 
-Prebuilt binaries for macOS (Apple silicon) and Linux (x86_64) are on the
-[releases page](https://github.com/martintrojer/debrief/releases), or:
-
 ```sh
-cargo install --path crates/debrief
+cargo install debrief
 ```
+
+Prebuilt binaries for macOS (Apple silicon) and Linux (x86_64) are on the
+[releases page](https://github.com/martintrojer/debrief/releases). From a
+checkout: `cargo install --path crates/debrief`.
 
 You need `git` or `jj` on `PATH`. The log's session marker is a Nerd Font
 glyph.

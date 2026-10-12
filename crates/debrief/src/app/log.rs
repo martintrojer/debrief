@@ -538,6 +538,37 @@ impl App {
         }
     }
 
+    /// `w`: the watermark at log row `i`. That commit and every loaded
+    /// commit older than it are seen, every newer one is new again, so
+    /// the next start puts the cursor just above it. Positions come from
+    /// the whole log, not the filtered rows; git's working-copy row is
+    /// skipped (on it, everything loaded is seen).
+    pub fn set_watermark(&mut self, i: usize) {
+        let Some(row) = self.rows.get(i) else { return };
+        let at = if row.info.commit == WORKING_ID {
+            0
+        } else {
+            let id = &row.info.commit;
+            match self.all_rows.iter().position(|r| r.info.commit == *id) {
+                Some(at) => at,
+                None => return,
+            }
+        };
+        let unseen = infos(&self.all_rows[..at]);
+        let seen = infos(&self.all_rows[at..]);
+        match self.seen.set_watermark(&seen, &unseen) {
+            Ok(()) => {
+                self.restatus();
+                self.set_status(format!(
+                    "watermark set: {} newer unseen, {} seen",
+                    unseen.len(),
+                    seen.len()
+                ));
+            }
+            Err(e) => self.set_status(format!("cannot write seen state: {e}")),
+        }
+    }
+
     /// Mark one row seen.
     pub fn mark_row(&mut self, i: usize) {
         let Some(info) = self.rows.get(i).map(|r| r.info.clone()) else {

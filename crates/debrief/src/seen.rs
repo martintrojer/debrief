@@ -121,6 +121,18 @@ impl Seen {
         Ok(())
     }
 
+    /// The watermark: `seen` and their changes are seen, `unseen` and
+    /// their changes are not (`New` again). One write.
+    pub fn set_watermark(&mut self, seen: &[CommitInfo], unseen: &[CommitInfo]) -> io::Result<()> {
+        for c in unseen {
+            self.data.commits.remove(&c.commit);
+            if let Some(ch) = &c.change {
+                self.data.changes.remove(ch);
+            }
+        }
+        self.mark_all(seen)
+    }
+
     fn write(&self) -> io::Result<()> {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir)?;

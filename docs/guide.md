@@ -32,7 +32,11 @@ The log lists the newest commits first. `●` marks a new commit, `◐` an
 updated one (jj: you saw the change, but it has been rewritten since). The
 cursor starts on the oldest unseen commit. The first run on a repo marks
 everything seen. Opening a commit marks it seen, and `m` marks the whole
-list seen. The log reloads when the repo changes.
+list seen. `w` sets the watermark at the cursor: that commit and every
+loaded commit older than it become seen, every newer one new (`●`)
+again, so the next start lands just above it. It counts the whole loaded
+log, not just the filtered rows; on git's working-copy row it marks
+everything seen. The log reloads when the repo changes.
 
 The log loads `--limit` commits (`[log] limit`, 200 by default). While
 more may exist, a dim `… more` row ends the log. Moving past the last row
@@ -46,6 +50,7 @@ many have loaded. The commit list pages the same way.
 | `j` `k` `gg` `G` `C-d` `C-u` | move (with counts) |
 | `Enter` | open the commit |
 | `m` | mark every listed commit seen |
+| `w` | watermark here: this commit and older seen, newer ones new |
 | `r` | reload (jj: snapshot first) |
 | `<leader>e` | show / hide the stats pane |
 | `J` `K` | scroll the stats pane |
@@ -219,6 +224,7 @@ setting; a session saved from the list restores focus to the tree.
 |---|---|
 | `j` `k` `gg` `G` `C-d` `C-u` | move the cursor (opens nothing, marks nothing seen) |
 | `Enter` | open the commit under it (as `]]`: marks it seen, restores its session); the list keeps the keys |
+| `w` | watermark at the cursor, as on the log |
 | `/` `?` `n` `N` | search the rows, as on the log (moves the cursor, opens nothing) |
 | `f` | the log's filter; `Enter` keeps it, `Esc` clears it |
 | `Esc` | back to the diff |

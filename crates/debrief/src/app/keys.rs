@@ -51,6 +51,8 @@ pub enum Action {
     Open,
     /// `m`: mark every listed commit seen.
     MarkAll,
+    /// `w`: the seen watermark at the log's cursor.
+    Watermark,
     /// `r`: re-read the log.
     Reload,
     /// `g?` opens the help overlay; its own keys.
@@ -156,6 +158,8 @@ pub enum Action {
     CommitsHalfUp,
     /// Commit list Enter: open the commit under the cursor.
     CommitsOpen,
+    /// Commit list `w`: the seen watermark at the list's cursor.
+    CommitsWatermark,
     /// A `[[launch]]` key: run launcher `i` of the config.
     Launch(usize),
     /// Enter in the diff: a `.md` file header goes to ramble.
@@ -535,6 +539,7 @@ impl App {
                 (_, Some('k')) | (KeyCode::Up, _) => A::CommitsUp(count),
                 (_, Some('G')) => A::CommitsBottom(count),
                 (KeyCode::Enter, _) => A::CommitsOpen,
+                (_, Some('w')) => A::CommitsWatermark,
                 (_, Some('/')) => A::SearchStart(true),
                 (_, Some('?')) => A::SearchStart(false),
                 (_, Some('n')) => A::SearchNext(true, count),
@@ -587,6 +592,7 @@ impl App {
             KeyCode::Char('G') => A::GotoBottom(count),
             KeyCode::Enter => A::Open,
             KeyCode::Char('m') => A::MarkAll,
+            KeyCode::Char('w') => A::Watermark,
             KeyCode::Char('r') => A::Reload,
             KeyCode::Char('/') => A::SearchStart(true),
             KeyCode::Char('?') => A::SearchStart(false),
@@ -633,6 +639,7 @@ impl App {
             A::HalfPageUp => self.half_page(false),
             A::Open => self.open_commit(),
             A::MarkAll => self.mark_all(),
+            A::Watermark => self.set_watermark(self.cursor),
             A::Reload => self.reload(true),
             A::Help(a) => self.help_action(a),
             A::Launch(i) => self.launch_index(i),
@@ -758,6 +765,7 @@ impl App {
             A::CommitsHalfDown => return self.commit_list_move(self.commit_list_half()),
             A::CommitsHalfUp => return self.commit_list_move(-self.commit_list_half()),
             A::CommitsOpen => return self.commit_list_open(),
+            A::CommitsWatermark => return self.set_watermark(self.commit_list.cursor),
             _ => {}
         }
         let full = self.context == crate::vcs::Context::Full;
@@ -836,6 +844,7 @@ fn visual_ok(a: Action) -> bool {
             | A::ToggleFiles
             | A::ToggleCommits
             | A::CommitsOpen
+            | A::CommitsWatermark
             | A::FocusDiff
             | A::Window(_)
             | A::PaneNav(_)

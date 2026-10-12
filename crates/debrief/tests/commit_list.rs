@@ -1387,3 +1387,18 @@ fn help_lists_the_list_keys_while_it_has_them() {
             .any(|l| matches!(l, HelpLine::Item { keys, .. } if keys == "<leader>E"))
     );
 }
+
+#[test]
+fn w_in_the_list_sets_the_watermark_at_its_cursor() {
+    let f = fixture();
+    // Rows: commit 5 .. commit 1, base. Open commit 5, list on commit 3.
+    let mut app = f.open(ON, 0);
+    to_list(&mut app);
+    keys(&mut app, "3gg");
+    assert_eq!(app.commit_list_cursor(), 2);
+    keys(&mut app, "w");
+    use Status::{New, Seen};
+    let marks: Vec<Status> = app.rows().iter().map(|r| r.status).collect();
+    assert_eq!(marks, [New, New, Seen, Seen, Seen, Seen]);
+    assert_eq!(app.focus(), Focus::Commits, "the list keeps the keys");
+}

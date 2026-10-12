@@ -786,3 +786,46 @@ fn stats_pane_message_is_whole_when_it_fits_and_every_line_is_reachable() {
         failing.len()
     );
 }
+
+#[test]
+fn w_sets_the_watermark_and_the_next_start_lands_above_it() {
+    let (tmp, root) = git_repo(5);
+    let cache = tmp.path().join("cache");
+    let mut app = open(&root, &cache);
+    assert_eq!(markers(&app), [Status::Seen; 5]);
+    // Rows: commit 4 .. commit 0. The watermark on commit 2.
+    keys(&mut app, "3G");
+    key(&mut app, 'w');
+    use Status::{New, Seen};
+    assert_eq!(markers(&app), [New, New, Seen, Seen, Seen]);
+    assert!(app.status().contains("2 newer unseen"), "{}", app.status());
+    drop(app);
+    let mut app = open(&root, &cache);
+    assert_eq!(markers(&app), [New, New, Seen, Seen, Seen]);
+    assert_eq!(app.cursor(), 1, "just above the watermark");
+    // Lower it: commit 0 (the oldest). Higher rows are new again.
+    key(&mut app, 'G');
+    key(&mut app, 'w');
+    assert_eq!(markers(&app), [New, New, New, New, Seen]);
+    // Raise it to the top: everything seen.
+    keys(&mut app, "gg");
+    key(&mut app, 'w');
+    assert_eq!(markers(&app), [Seen; 5]);
+}
+
+#[test]
+fn w_under_a_filter_counts_the_whole_log() {
+    let (tmp, root) = git_repo(5);
+    let cache = tmp.path().join("cache");
+    let mut app = open(&root, &cache);
+    // Filter to commit 2 alone; the watermark there makes 3 and 4 new.
+    key(&mut app, 'f');
+    keys(&mut app, "commit 2");
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.rows().len(), 1);
+    key(&mut app, 'w');
+    app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.rows().len(), 5);
+    use Status::{New, Seen};
+    assert_eq!(markers(&app), [New, New, Seen, Seen, Seen]);
+}

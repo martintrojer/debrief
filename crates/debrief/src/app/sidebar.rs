@@ -81,7 +81,7 @@ pub fn sidebar_width(need: &[u16], cols: u16, min: u16, max: u16) -> u16 {
 
 /// The 90th percentile of `need` (the maximum under 10 rows) plus one
 /// column of padding.
-fn fit_width(need: &[u16]) -> u16 {
+pub(super) fn fit_width(need: &[u16]) -> u16 {
     let mut sorted = need.to_vec();
     sorted.sort_unstable();
     let fit = match sorted.len() {

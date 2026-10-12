@@ -467,6 +467,22 @@ fn stats_pane_side_by_side_at_120_columns_stacked_at_119() {
 }
 
 #[test]
+fn a_wide_terminal_gives_the_stats_pane_what_the_log_doesnt_need() {
+    let (tmp, root) = git_repo(3);
+    let mut app = open_with_stats(&root, &tmp.path().join("cache"));
+    settle(&mut app);
+    // Short summaries: the log keeps its 72-column floor, the pane the rest.
+    let s = screen_at(&mut app, 250, 20);
+    assert_eq!(s[0].chars().nth(72), Some('│'), "{s:#?}");
+    // A long summary widens the log, up to 60% (150 of 250).
+    std::fs::write(root.join("long.txt"), "x\n").unwrap();
+    commit(&root, &"long subject ".repeat(20));
+    key(&mut app, 'r');
+    let s = screen_at(&mut app, 250, 20);
+    assert_eq!(s[0].chars().nth(150), Some('│'), "{s:#?}");
+}
+
+#[test]
 fn stats_load_after_the_cursor_rests_and_stale_answers_drop() {
     use debrief::app::AppEvent;
     use debrief::app::stat::STAT_DELAY;

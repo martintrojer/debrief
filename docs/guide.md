@@ -66,7 +66,10 @@ its ID (and jj change ID), author and date, the message (cut at half the
 pane when there are files; `J` scrolls to the rest), a `path | N ++--` row
 per file (renames as `old → new`, binary files as `Bin`) and a summary
 line. It sits beside the log from 120 columns and below it on narrower
-terminals, and loads once the cursor rests on a commit.
+terminals, and loads once the cursor rests on a commit. Beside the log,
+the log is as wide as most of its rows need (at least 72 columns, at most
+60%) and the pane gets the rest, so a wide or zoomed terminal goes to the
+stats. Below it, the pane takes 40% of the rows, half from 40 rows.
 
 Search and filter match the summary, the author, the commit ID and the jj
 change ID as substrings, case-insensitive unless the pattern has a

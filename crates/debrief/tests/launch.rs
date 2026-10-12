@@ -323,18 +323,48 @@ fn enter_on_a_md_header_runs_the_md_launcher() {
     let f = fixture();
     let mut c = Config::defaults();
     let md = c.launch.iter_mut().find(|l| l.name == "md").unwrap();
-    md.command = vec![f.script.display().to_string(), "${file}".into()];
+    md.command = vec![
+        f.script.display().to_string(),
+        "${line}".into(),
+        "${file}".into(),
+    ];
     let mut app = f.app_with(c);
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
     goto(&mut app, header("notes.md"));
     press(&mut app, KeyCode::Enter);
     assert!(matches!(app.pending_effect(), Some(Effect::Launch(l)) if l.name == "md"));
-    assert_eq!(f.run(&mut app), [f.file("notes.md")]);
-    // Not .md: nothing runs.
+    assert_eq!(f.run(&mut app), ["1", &f.file("notes.md")]);
+    // Not .md: nothing runs, from the header or a line.
     goto(&mut app, header("e.txt"));
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.pending_effect(), None);
+    goto(&mut app, |a, i| a.commit_rows()[i].text == "e8 edited");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.pending_effect(), None);
+    assert_eq!(app.status(), "", "a line of another file says nothing");
+}
+
+#[test]
+fn enter_on_a_md_line_opens_ramble_at_that_line() {
+    let f = fixture();
+    std::fs::write(f.root.join("plan.md"), "# plan\n\none\n").unwrap();
+    commit(&f.root, "plan");
+    std::fs::write(f.root.join("plan.md"), "# plan\n\none\ntwo\nthree\n").unwrap();
+    commit(&f.root, "more plan");
+    let mut c = Config::defaults();
+    let md = c.launch.iter_mut().find(|l| l.name == "md").unwrap();
+    md.command[0] = f.script.display().to_string();
+    let mut app = f.app_with(c);
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    goto(&mut app, |a, i| {
+        a.commit_rows()[i].text == "three"
+            && a.commit_rows()[i].kind == RowKind::Line(LineKind::Added)
+    });
+    press(&mut app, KeyCode::Enter);
+    // The default md launcher: ramble --line ${line} ${file}.
+    assert_eq!(f.run(&mut app), ["--line", "5", &f.file("plan.md")]);
 }
 
 #[test]

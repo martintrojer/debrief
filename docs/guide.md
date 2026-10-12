@@ -125,7 +125,7 @@ left.
 | `<leader>e` | show / hide the file list (`sidebar = "auto"`: pin a hidden one) |
 | `<leader>E` | show / hide the commit list under the file list |
 | `C-h` / `C-l` (or `C-w h` / `C-w l`) | move between the file list and the diff |
-| `Enter` | on a `.md` file header: open it in ramble |
+| `Enter` | in a `.md` file: open it in ramble at this line (the header: line 1) |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
 | `<leader>ss` | save this commit's review session |
 | `<leader>rs` | list the saved review sessions |
@@ -415,7 +415,7 @@ under a lock, so you can comment on a plan in ramble and on its commit in
 debrief, then send both from either tool. ramble shows its working-copy
 comments in its gutter and lists debrief's diff comments in its
 `<leader>rl`; debrief lists ramble's, and `Enter` on one in an existing
-`.md` file opens it in ramble (on any other working-copy comment it shows
+`.md` file opens it in ramble at its line (on any other working-copy comment it shows
 the path and line).
 
 Both tools must use the same cache dir: if you move it, set
@@ -476,8 +476,8 @@ session. The rows without a key are set only in the file.
 A launcher runs a command with the TUI suspended, then reloads. Arguments
 are not passed through a shell. Variables: `${file}` `${line}` `${root}`
 `${editor}` (`$VISUAL`, `$EDITOR` or `vi`). The defaults are `edit`
-(`<leader>o`, the editor) and `md` (`Enter` on a `.md` file header,
-ramble). A `key` is `<leader>` followed by plain characters. Entries
+(`<leader>o`, the editor) and `md` (`Enter` in a `.md` file's diff,
+ramble at that line; it needs ramble 0.3.2 or later for `--line`). A `key` is `<leader>` followed by plain characters. Entries
 merge into the defaults by name; `disabled = true` drops one. A launcher
 key wins over a built-in `<leader>` key it shares a
 prefix with.

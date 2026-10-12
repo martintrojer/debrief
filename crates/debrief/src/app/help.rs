@@ -214,7 +214,7 @@ pub(crate) const BINDINGS: &[Binding] = {
             "Enter",
             C,
             G::Launch,
-            "on a .md file header: open it in ramble",
+            "in a .md file: open it in ramble at this line",
         ),
         b("<leader>e", C, G::Files, FILE_LIST_TOGGLE),
         b("C-w h", C, G::Files, "to the pane on the left"),

@@ -385,9 +385,10 @@ impl App {
         }
     }
 
-    /// Hand the working-copy markdown file `path` (repo-relative) to the
-    /// `md` launcher, if it exists and belongs to this review root.
-    pub(super) fn launch_md(&mut self, path: &str) {
+    /// Hand the working-copy markdown file `path` (repo-relative) at
+    /// `line` to the `md` launcher, if it exists and belongs to this
+    /// review root.
+    pub(super) fn launch_md(&mut self, path: &str, line: u32) {
         let abs = self.vcs.root().join(path);
         if !abs.is_file() {
             return self.set_status("Not in the working copy");
@@ -399,29 +400,31 @@ impl App {
         let Some(l) = self.config.launch.iter().find(|l| l.name == MD).cloned() else {
             return self.set_status(format!("No launcher named {MD}"));
         };
-        self.queue_launch(&l, Ok((abs, 1)));
+        self.queue_launch(&l, Ok((abs, line.max(1))));
     }
 
-    /// Enter in the diff: a `.md` file header goes to ramble.
+    /// Enter in the diff of a `.md` file: ramble at the row's line in the
+    /// working copy, as `<leader>o` picks it (the file header: line 1).
     pub(super) fn diff_enter(&mut self) {
         let Some(v) = &self.commit else { return };
         let (Some(r), Some(diff)) = (v.rows.get(v.cur.row), v.diff.as_ref()) else {
             return;
         };
-        if r.kind != RowKind::FileHeader {
-            return;
-        }
-        let Some(f) = r.file.and_then(|i| diff.files.get(i)) else {
+        let Some((file, line)) = row_line(diff, v, v.cur.row) else {
             return;
         };
+        let f = &diff.files[file];
         let path = super::commit::file_path(f).to_string();
         if !path.ends_with(".md") {
-            return self.set_status("Enter opens .md files in ramble");
+            if r.kind == RowKind::FileHeader {
+                self.set_status("Enter opens .md files in ramble");
+            }
+            return;
         }
         if f.new_path.is_none() {
             return self.set_status("Not in the working copy");
         }
-        self.launch_md(&path);
+        self.launch_md(&path, line);
     }
 
     /// Run a launcher command (TUI already suspended).

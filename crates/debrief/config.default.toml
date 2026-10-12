@@ -136,10 +136,12 @@
 ##   name = "edit"
 ##   disabled = true
 
-## Enter on a .md file header; no key.
+## Enter in a .md file's diff (its header: line 1), and on a .md comment
+## in the review list; no key. ${line} is the row's working-copy line, as
+## <leader>o's (ramble 0.3.2 or later reads --line).
 # [[launch]]
 # name = "md"
-# command = ["ramble", "${file}"]
+# command = ["ramble", "--line", "${line}", "${file}"]
 
 # [[launch]]
 # name = "edit"

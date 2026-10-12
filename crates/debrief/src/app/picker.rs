@@ -343,7 +343,7 @@ impl App {
     }
 
     /// Enter in the picker. A working-copy comment on an existing
-    /// `.md` file goes to ramble; other working-copy comments only say
+    /// `.md` file goes to ramble at its first line; other working-copy comments only say
     /// where they are. A diff comment opens its exact commit at its first
     /// line, if that commit is in the log; another version of the change
     /// is never substituted.
@@ -358,7 +358,7 @@ impl App {
         };
         let Some(rev) = &c.rev else {
             if c.path.ends_with(".md") && self.vcs.root().join(&c.path).is_file() {
-                return self.launch_md(&c.path);
+                return self.launch_md(&c.path, c.lines.0);
             }
             return self.set_status(format!("Working-copy comment: {}:{}", c.path, c.lines.0));
         };

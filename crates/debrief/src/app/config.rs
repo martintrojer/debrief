@@ -374,7 +374,7 @@ impl Config {
                 Launcher {
                     name: MD.into(),
                     key: None,
-                    command: strings(&["ramble", "${file}"]),
+                    command: strings(&["ramble", "--line", "${line}", "${file}"]),
                 },
                 Launcher {
                     name: EDIT.into(),

@@ -567,7 +567,7 @@ fn picker_enter_on_a_ramble_md_comment_hands_it_to_ramble() {
     let f = fixture();
     std::fs::write(f.root.join("plan.md"), "# plan\n").unwrap();
     f.review()
-        .add(Comment::on_file("plan.md", 1..=1, "# plan", "tighten"))
+        .add(Comment::on_file("plan.md", 3..=4, "# plan", "tighten"))
         .unwrap();
     let mut app = f.open();
     keys(&mut app, " rl");
@@ -579,6 +579,8 @@ fn picker_enter_on_a_ramble_md_comment_hands_it_to_ramble() {
                 l.argv,
                 [
                     "ramble".to_string(),
+                    "--line".to_string(),
+                    "3".to_string(),
                     f.root.join("plan.md").display().to_string()
                 ]
             );

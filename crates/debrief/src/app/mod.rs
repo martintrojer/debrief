@@ -29,6 +29,7 @@ pub mod stat;
 pub mod textbox;
 mod visual;
 pub mod watch;
+pub mod zoom;
 
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;

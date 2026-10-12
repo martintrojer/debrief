@@ -256,6 +256,13 @@ past the list or without it, the log) and debrief runs inside tmux, the move goe
 does. In the comment box the keys stay text input: `C-j` is a new line.
 `[keys] pane_nav = false` unbinds them; the `C-w` keys stay.
 
+With `[view] tmux_zoom = true`, debrief zooms its tmux pane at start
+(as `PREFIX z`) and unzooms it when it exits, so full diffs get the whole
+window. A window that was already zoomed is left zoomed, and one you
+unzoomed meanwhile (`PREFIX z`, or a `C-h/j/k/l` move to another pane,
+which tmux unzooms on) is not zoomed back. A window with one pane has
+nothing to zoom.
+
 vim-tmux-navigator only forwards these keys to panes it thinks run vim.
 Add debrief to its pattern in `~/.tmux.conf`, before TPM's `run` line:
 
@@ -453,6 +460,7 @@ session. The rows without a key are set only in the file.
 | unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
 | the file list as a tree / flat paths | `` ` `` | `view.files` | `"tree"` (or `"flat"`) |
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
+| zoom the tmux pane while debrief runs (see [Panes and tmux](#panes-and-tmux)) | — | `view.tmux_zoom` | `false` |
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |
 | the `<leader>` key | — | `keys.leader` | `" "` |

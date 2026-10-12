@@ -92,6 +92,20 @@ fn start_with(
     env: &str,
     flags: &str,
 ) -> Option<Tmux> {
+    start_in(repo, cache, status_file, env, flags, false)
+}
+
+/// [`start_with`]; with `beside`, debrief runs in a second pane split
+/// off an idle one (a window of one pane can't zoom), and is the active
+/// pane `-t e2e` addresses.
+fn start_in(
+    repo: &Path,
+    cache: &Path,
+    status_file: &Path,
+    env: &str,
+    flags: &str,
+    beside: bool,
+) -> Option<Tmux> {
     if Command::new("tmux").arg("-V").output().is_err() {
         eprintln!("skipping tui_e2e: tmux not found on PATH");
         return None;
@@ -113,6 +127,7 @@ fn start_with(
         quote(&cache.join("state")),
         quote(status_file)
     );
+    let first = if beside { "sleep 600" } else { &shell_cmd };
     let out = tmux.cmd(&[
         "-f",
         "/dev/null",
@@ -124,9 +139,16 @@ fn start_with(
         "100",
         "-y",
         "20",
-        &shell_cmd,
+        first,
     ]);
     assert!(out.status.success(), "tmux new-session: {out:?}");
+    if beside {
+        // The pane outlives debrief: closing it would unzoom the window
+        // on its own.
+        let held = format!("{shell_cmd}; sleep 600");
+        let out = tmux.cmd(&["split-window", "-t", "e2e", &held]);
+        assert!(out.status.success(), "tmux split-window: {out:?}");
+    }
     Some(tmux)
 }
 
@@ -361,4 +383,50 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
         if p.is_dir() { walk(&p) } else { vec![p] }
     })
     .collect()
+}
+
+#[test]
+fn tmux_zoom_zooms_the_pane_and_unzooms_on_quit() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    commit(&root, "first");
+    let cache = dir.path().join("cache");
+    let cfg = cache.join("config/debrief");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(cfg.join("config.toml"), "[view]\ntmux_zoom = true\n").unwrap();
+    let status = dir.path().join("status");
+    let Some(tmux) = start_in(&root, &cache, &status, "", "", true) else {
+        return;
+    };
+    let zoomed = || {
+        let out = tmux.cmd(&[
+            "display-message",
+            "-p",
+            "-t",
+            "e2e",
+            "#{window_zoomed_flag}",
+        ]);
+        String::from_utf8_lossy(&out.stdout).trim() == "1"
+    };
+    tmux.wait_for("the log", |s| s.contains("first"));
+    assert!(zoomed(), "zoomed while debrief runs");
+    let panes = tmux.cmd(&["display-message", "-p", "-t", "e2e", "#{window_panes}"]);
+    assert_eq!(String::from_utf8_lossy(&panes.stdout).trim(), "2");
+    tmux.keys(&["q"]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !status.exists() {
+        assert!(Instant::now() < deadline, "debrief did not quit on q");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(std::fs::read_to_string(&status).unwrap().trim(), "0");
+    let panes = tmux.cmd(&["display-message", "-p", "-t", "e2e", "#{window_panes}"]);
+    assert_eq!(
+        String::from_utf8_lossy(&panes.stdout).trim(),
+        "2",
+        "the pane is still there"
+    );
+    assert!(!zoomed(), "unzoomed after quit");
 }

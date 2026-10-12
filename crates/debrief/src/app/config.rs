@@ -149,6 +149,9 @@ pub struct ViewConfig {
     /// The narrowest diff pane (not counting the file list) side by side
     /// shows in; below it the view is unified.
     pub split_min_width: u16,
+    /// Inside tmux, zoom debrief's pane at start and unzoom it on exit
+    /// (off by default).
+    pub tmux_zoom: bool,
 }
 
 /// The default `[view] split_min_width`.
@@ -317,6 +320,7 @@ impl Default for ViewConfig {
             layout: Layout::Unified,
             files: FilesLayout::Tree,
             split_min_width: SPLIT_MIN_WIDTH,
+            tmux_zoom: false,
         }
     }
 }
@@ -483,6 +487,7 @@ impl Config {
             set(&mut c.view.layout, v.layout);
             set(&mut c.view.files, v.files);
             set(&mut c.view.split_min_width, v.split_min_width);
+            set(&mut c.view.tmux_zoom, v.tmux_zoom);
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
@@ -687,6 +692,7 @@ struct RawView {
     layout: Option<Layout>,
     files: Option<FilesLayout>,
     split_min_width: Option<u16>,
+    tmux_zoom: Option<bool>,
 }
 
 /// `[view] context`.
@@ -1061,6 +1067,18 @@ kinds = [
         );
         assert!(Config::parse("[view]\nlayout = \"side\"\n").is_err());
         assert!(Config::parse("[view]\nsplit_min_width = -1\n").is_err());
+    }
+
+    #[test]
+    fn view_tmux_zoom_defaults_off() {
+        assert!(!Config::defaults().view.tmux_zoom);
+        assert!(
+            Config::parse("[view]\ntmux_zoom = true\n")
+                .unwrap()
+                .view
+                .tmux_zoom
+        );
+        assert!(Config::parse("[view]\ntmux_zoom = \"yes\"\n").is_err());
     }
 
     #[test]

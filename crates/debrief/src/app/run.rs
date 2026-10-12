@@ -13,7 +13,7 @@ use crossterm::event::{
 use ratatui::DefaultTerminal;
 
 use super::config::Config;
-use super::{App, AppEvent};
+use super::{App, AppEvent, zoom};
 
 /// How long one loop iteration waits for terminal input.
 const POLL: Duration = Duration::from_millis(100);
@@ -21,11 +21,23 @@ const POLL: Duration = Duration::from_millis(100);
 /// Run the interactive TUI until the user quits.
 pub fn run(mut app: App) -> anyhow::Result<()> {
     let mouse = capture_wanted(app.config());
+    // `[view] tmux_zoom`: zoom before the terminal is set up, so the first
+    // draw already has the whole window.
+    let zoom = zoom::wanted(app.config().view.tmux_zoom, |k| std::env::var(k).ok())
+        .and_then(|pane| zoom::zoom_in(&mut zoom::tmux, &pane));
     // Installs a panic hook that restores the terminal before unwinding.
-    let mut terminal = ratatui::try_init().context("initialising terminal")?;
+    let mut terminal = match ratatui::try_init().context("initialising terminal") {
+        Ok(t) => t,
+        Err(e) => {
+            unzoom(zoom.as_ref());
+            return Err(e);
+        }
+    };
     let hook = std::panic::take_hook();
+    let panic_zoom = zoom.clone();
     std::panic::set_hook(Box::new(move |info| {
         let _ = input_off(mouse);
+        unzoom(panic_zoom.as_ref());
         hook(info);
     }));
     let result = input_on(mouse)
@@ -33,7 +45,14 @@ pub fn run(mut app: App) -> anyhow::Result<()> {
         .and_then(|()| event_loop(&mut terminal, &mut app, mouse));
     let _ = input_off(mouse);
     ratatui::restore();
+    unzoom(zoom.as_ref());
     result
+}
+
+fn unzoom(zoom: Option<&zoom::Zoom>) {
+    if let Some(z) = zoom {
+        z.zoom_out(&mut zoom::tmux);
+    }
 }
 
 /// Capture the mouse (clicks, drags, the wheel arrive as

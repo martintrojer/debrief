@@ -366,6 +366,8 @@ impl Fixture {
     fn app(&self, toml: &str, width: u16) -> App {
         let mut opts = StartOptions::new(self.cache.clone());
         opts.config = Config::parse(toml).unwrap();
+        // These tests place panes from row 0: no header row.
+        opts.config.view.header = false;
         let mut app = App::new(
             vcs::open(&self.root, vcs::OpenOptions::default()).unwrap(),
             opts,

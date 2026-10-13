@@ -51,11 +51,10 @@ fn repo() -> (tempfile::TempDir, PathBuf, PathBuf) {
 }
 
 fn open(root: &Path, cache: &Path) -> App {
-    App::new(
-        vcs::open(root, vcs::OpenOptions::default()).unwrap(),
-        StartOptions::new(cache.to_path_buf()),
-    )
-    .unwrap()
+    let mut opts = StartOptions::new(cache.to_path_buf());
+    // These tests read the screen from row 0: no header row.
+    opts.config.view.header = false;
+    App::new(vcs::open(root, vcs::OpenOptions::default()).unwrap(), opts).unwrap()
 }
 
 fn press(app: &mut App, code: KeyCode) {

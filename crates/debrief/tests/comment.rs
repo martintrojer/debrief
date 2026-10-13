@@ -1031,9 +1031,10 @@ fn draw_box(app: &mut App, w: u16, h: u16) -> (Vec<String>, Option<CommentBox>, 
     (lines, app.comment_box(pane), (pos.x, pos.y))
 }
 
-/// Screen row of diff row `row`.
+/// Screen row of diff row `row` (below the header row while it shows).
 fn on_screen(app: &App, row: usize) -> u16 {
-    (row - app.commit_scroll().0) as u16
+    let top = u16::from(app.config().view.header);
+    top + (row - app.commit_scroll().0) as u16
 }
 
 #[test]
@@ -1192,7 +1193,7 @@ fn a_selection_taller_than_the_screen_shows_its_last_rows_above_the_box() {
     let bx = bx.unwrap();
     let pane = app.commit_layout(Rect::new(0, 0, 60, 11)).diff;
     assert!(off_the_rows(&app, &bx, a, b, pane.y), "{:?}", bx.rect);
-    let y = pane.y + on_screen(&app, b);
+    let y = on_screen(&app, b);
     assert_eq!(bx.rect.y, y + 1, "the last row just above the box");
     assert!(lines[y as usize].contains("g50"), "{}", lines[y as usize]);
     // The box grows; the rows move up out of its way.
@@ -1232,7 +1233,7 @@ fn a_one_row_comment_at_heights_6_and_8_never_covers_its_row() {
                     bx.rect,
                     app.commit_scroll().0
                 );
-                let y = pane.y + on_screen(&app, r);
+                let y = on_screen(&app, r);
                 let text = &app.commit_rows()[r].text;
                 assert!(lines[y as usize].contains(text.as_str()));
                 press(&mut app, KeyCode::Esc);
@@ -1260,8 +1261,10 @@ fn page_keys_scroll_the_diff_behind_the_box_which_follows_its_rows() {
     assert!(after > r, "scrolled past the row: {before} -> {after}");
     let (lines, bx, _) = draw_box(&mut app, 60, 12);
     let bx = bx.unwrap();
-    assert_eq!(bx.rect.y, 0, "pinned to the top edge");
-    assert!(lines[1].contains("draft"), "{}", lines[1]);
+    let top = app.commit_layout(Rect::new(0, 0, 60, 11)).diff.y;
+    assert_eq!(bx.rect.y, top, "pinned to the top edge");
+    let l = &lines[top as usize + 1];
+    assert!(l.contains("draft"), "{l}");
     // Back up: the box is beside its row again, the text kept.
     press(&mut app, KeyCode::PageUp);
     let (_, bx, _) = draw_box(&mut app, 60, 12);

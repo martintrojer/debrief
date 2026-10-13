@@ -57,6 +57,8 @@ impl Fixture {
     fn open(&self, toml: &str) -> App {
         let mut opts = StartOptions::new(self.cache.clone());
         opts.config = Config::parse(toml).unwrap();
+        // These tests place panes from row 0: no header row.
+        opts.config.view.header = false;
         let mut app = App::new(
             vcs::open(&self.root, vcs::OpenOptions::default()).unwrap(),
             opts,
@@ -389,7 +391,7 @@ fn long_names_are_clipped_in_the_middle() {
     .unwrap();
     commit(&root, "long");
     let mut opts = StartOptions::new(tmp.path().join("cache"));
-    opts.config = Config::parse("[view]\nsidebar_width = 24\n").unwrap();
+    opts.config = Config::parse("[view]\nsidebar_width = 24\nheader = false\n").unwrap();
     let mut app = App::new(
         vcs::open(&root.canonicalize().unwrap(), vcs::OpenOptions::default()).unwrap(),
         opts,

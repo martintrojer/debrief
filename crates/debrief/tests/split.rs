@@ -49,6 +49,9 @@ impl Fixture {
     fn app_with(&self, toml: &str) -> App {
         let mut opts = StartOptions::new(self.cache.clone());
         opts.config = Config::parse(toml).unwrap();
+        // These tests search the screen for short texts a commit ID in
+        // the header row could contain: no header row.
+        opts.config.view.header = false;
         let mut app = App::new(
             vcs::open(&self.root, vcs::OpenOptions::default()).unwrap(),
             opts,

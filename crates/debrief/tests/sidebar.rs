@@ -54,6 +54,8 @@ impl Fixture {
     fn app(&self, toml: &str, cols: u16) -> App {
         let mut opts = StartOptions::new(self.cache.clone());
         opts.config = Config::parse(toml).unwrap();
+        // These tests place panes from row 0: no header row.
+        opts.config.view.header = false;
         // The widths here are measured on flat rows (`LONG`'s whole
         // path); tests/file_tree.rs covers the tree's.
         opts.config.view.files = FilesLayout::Flat;

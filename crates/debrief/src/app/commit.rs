@@ -962,6 +962,30 @@ impl App {
         self.commit.as_ref().map(|v| v.commit.as_str())
     }
 
+    /// The header row's commit: its short ID (as the log shows it) and
+    /// subject, from its log row, else the first line of the loaded
+    /// message. `None` with no subject (git's working copy, a jj change
+    /// without a description): the header row hides.
+    pub fn commit_header(&self) -> Option<(String, Subject<'_>)> {
+        let v = self.commit.as_ref()?;
+        // git's working-copy row has a made-up summary, not a subject.
+        let row = self
+            .view_index(v)
+            .and_then(|i| self.rows.get(i))
+            .filter(|r| r.info.commit != super::WORKING_ID);
+        let id = match row {
+            Some(r) => super::short_id(&r.info).to_string(),
+            None => v.commit.get(..8).unwrap_or(&v.commit).to_string(),
+        };
+        let line = row
+            .map(|r| r.info.summary.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| v.diff.as_ref()?.message.lines().next())
+            .unwrap_or("");
+        let subject = Subject::parse(line);
+        (!subject.text.is_empty()).then_some((id, subject))
+    }
+
     /// Whether the open commit's diff is still loading.
     pub fn commit_loading(&self) -> bool {
         self.commit.as_ref().is_some_and(|v| v.loading)
@@ -1020,10 +1044,85 @@ impl App {
     }
 }
 
+/// A commit subject, split as a conventional commit's
+/// `type(scope)!: description` when it is one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Subject<'a> {
+    /// `type(scope)!`, without the colon; `None` when the subject is not
+    /// a conventional commit.
+    pub kind: Option<&'a str>,
+    /// The type alone, lowercase ASCII as written (`feat`).
+    pub ty: &'a str,
+    /// The rest: the description, or the whole subject.
+    pub text: &'a str,
+}
+
+impl<'a> Subject<'a> {
+    pub fn parse(line: &'a str) -> Self {
+        let line = line.trim();
+        let plain = Subject {
+            kind: None,
+            ty: "",
+            text: line,
+        };
+        let Some((head, rest)) = line.split_once(": ") else {
+            return plain;
+        };
+        let ty_end = head.find(['(', '!']).unwrap_or(head.len());
+        let (ty, tail) = head.split_at(ty_end);
+        let tail = tail.strip_suffix('!').unwrap_or(tail);
+        let scope_ok = tail.is_empty()
+            || (tail.starts_with('(')
+                && tail.ends_with(')')
+                && tail.len() > 2
+                && !tail[1..tail.len() - 1].contains(['(', ')']));
+        let ty_ok = !ty.is_empty()
+            && ty.len() <= 16
+            && ty.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-')
+            && ty.bytes().next().is_some_and(|b| b.is_ascii_lowercase());
+        if !(ty_ok && scope_ok) || rest.trim().is_empty() {
+            return plain;
+        }
+        Subject {
+            kind: Some(head),
+            ty,
+            text: rest.trim(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::vcs::{DiffLine, Hunk};
+
+    #[test]
+    fn subjects() {
+        let s = Subject::parse("feat(launch): Enter opens ramble");
+        assert_eq!(
+            (s.kind, s.ty, s.text),
+            (Some("feat(launch)"), "feat", "Enter opens ramble")
+        );
+        let s = Subject::parse("fix!: drop the old flag");
+        assert_eq!(
+            (s.kind, s.ty, s.text),
+            (Some("fix!"), "fix", "drop the old flag")
+        );
+        let s = Subject::parse("refactor(ui)!: split");
+        assert_eq!((s.kind, s.ty), (Some("refactor(ui)!"), "refactor"));
+        for plain in [
+            "Fix the thing",
+            "Note: not a type",
+            "see http://x: y",
+            "feat(: broken",
+            "feat(): empty scope",
+            "feat: ",
+            "",
+        ] {
+            let s = Subject::parse(plain);
+            assert_eq!((s.kind, s.text), (None, plain.trim()), "{plain:?}");
+        }
+    }
 
     fn line(kind: LineKind, text: &str, no_newline: bool) -> DiffLine {
         DiffLine {

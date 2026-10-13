@@ -108,7 +108,11 @@ Uncommitted changes show in the log and take comments like any commit.
 ## The commit view
 
 The message, then every file's diff in one stream, with a file list on the
-left.
+left. A header row on top keeps the commit's short ID and subject in view
+while you scroll; a conventional-commit type (`feat:`, `fix(ui):`) shows
+as a coloured badge. A commit with no subject (git's working copy, a jj
+change without a description) has no header. `[view] header = false`
+hides it.
 
 | Key | Does |
 |---|---|
@@ -463,6 +467,7 @@ session. The rows without a key are set only in the file.
 | unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
 | the file list as a tree / flat paths | `` ` `` | `view.files` | `"tree"` (or `"flat"`) |
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
+| header row (short ID and subject) on the commit screen | — | `view.header` | `true` |
 | zoom the tmux pane while debrief runs (see [Panes and tmux](#panes-and-tmux)) | — | `view.tmux_zoom` | `false` |
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |

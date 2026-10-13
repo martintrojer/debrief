@@ -152,6 +152,8 @@ pub struct ViewConfig {
     /// Inside tmux, zoom debrief's pane at start and unzoom it on exit
     /// (off by default).
     pub tmux_zoom: bool,
+    /// The commit view's header row: short ID and subject (on by default).
+    pub header: bool,
 }
 
 /// The default `[view] split_min_width`.
@@ -321,6 +323,7 @@ impl Default for ViewConfig {
             files: FilesLayout::Tree,
             split_min_width: SPLIT_MIN_WIDTH,
             tmux_zoom: false,
+            header: true,
         }
     }
 }
@@ -488,6 +491,7 @@ impl Config {
             set(&mut c.view.files, v.files);
             set(&mut c.view.split_min_width, v.split_min_width);
             set(&mut c.view.tmux_zoom, v.tmux_zoom);
+            set(&mut c.view.header, v.header);
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
@@ -693,6 +697,7 @@ struct RawView {
     files: Option<FilesLayout>,
     split_min_width: Option<u16>,
     tmux_zoom: Option<bool>,
+    header: Option<bool>,
 }
 
 /// `[view] context`.
@@ -1079,6 +1084,18 @@ kinds = [
                 .tmux_zoom
         );
         assert!(Config::parse("[view]\ntmux_zoom = \"yes\"\n").is_err());
+    }
+
+    #[test]
+    fn view_header_defaults_on() {
+        assert!(Config::defaults().view.header);
+        assert!(
+            !Config::parse("[view]\nheader = false\n")
+                .unwrap()
+                .view
+                .header
+        );
+        assert!(Config::parse("[view]\nheader = 1\n").is_err());
     }
 
     #[test]

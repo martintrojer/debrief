@@ -53,6 +53,7 @@ fn open(root: &Path, cache: &Path, limit: usize, toml: &str) -> App {
     let mut opts = StartOptions::new(cache.to_path_buf());
     opts.config = Config::parse(toml).unwrap();
     opts.config.view.stats = false;
+    opts.config.view.header = false;
     opts.limit = limit;
     App::new(vcs::open(root, vcs::OpenOptions::default()).unwrap(), opts).unwrap()
 }
@@ -259,6 +260,7 @@ fn with_a_sender_the_ui_thread_never_reads_the_page() {
     };
     let mut opts = StartOptions::new(tmp.path().join("cache"));
     opts.config.view.stats = false;
+    opts.config.view.header = false;
     opts.limit = 5;
     let mut app = App::new(Box::new(v), opts).unwrap();
     let (tx, rx) = mpsc::channel();

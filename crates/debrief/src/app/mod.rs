@@ -43,7 +43,7 @@ use crate::vcs::{CommitDiff, CommitInfo, CommitStat, Kind, Vcs, WorkingCopy, Wor
 
 pub use clue::{CLUE_DELAY, ClueRow};
 pub use comment::{CommentAction, CommentBox, Draft};
-pub use commit::{Focus, Row as DiffRow, RowKind};
+pub use commit::{Focus, Row as DiffRow, RowKind, Subject};
 pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::{Action, KeyResult};
 pub use keys::{LEADER, TOGGLES};

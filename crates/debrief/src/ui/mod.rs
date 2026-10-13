@@ -4,6 +4,7 @@
 pub mod clue;
 mod comment_box;
 mod commit;
+mod header;
 mod help;
 mod log;
 mod picker;
@@ -74,6 +75,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
         Screen::Commit(_) => {
             let l = app.commit_layout(main);
+            if let Some(h) = l.header {
+                header::draw(frame, app, h);
+            }
             // The diff first: an overlaid file list is drawn over it.
             commit::draw(frame, app, l.diff);
             if let Some(side) = l.sidebar {

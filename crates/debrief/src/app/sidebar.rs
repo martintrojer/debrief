@@ -24,6 +24,9 @@ pub const STATUS_COLS: usize = 2;
 /// Where the commit screen's panes go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitLayout {
+    /// The header row across the top (`[view] header`): the open commit's
+    /// short ID and subject.
+    pub header: Option<Rect>,
     /// The file list's tree, border included (on its edge toward the
     /// diff); the top of the file-list area when the commit list shows.
     pub sidebar: Option<Rect>,
@@ -474,12 +477,28 @@ impl App {
         }
     }
 
-    /// Split the main area (above the status line) into the file list
-    /// (on `[view] sidebar_side`) and the diff; an overlay leaves the
-    /// diff the whole area.
+    /// Split the main area (above the status line) into the header row
+    /// (`[view] header`, while the commit has a subject and a row is left
+    /// under it), the file list (on
+    /// `[view] sidebar_side`) and the diff; an overlay leaves the diff
+    /// the rest.
     pub fn commit_layout(&self, area: Rect) -> CommitLayout {
+        let (header, area) =
+            if self.config.view.header && area.height > 1 && self.commit_header().is_some() {
+                (
+                    Some(Rect { height: 1, ..area }),
+                    Rect {
+                        y: area.y + 1,
+                        height: area.height - 1,
+                        ..area
+                    },
+                )
+            } else {
+                (None, area)
+            };
         if !self.sidebar_visible() {
             return CommitLayout {
+                header,
                 sidebar: None,
                 commits: None,
                 diff: area,
@@ -507,6 +526,7 @@ impl App {
             _ => (side, None),
         };
         CommitLayout {
+            header,
             sidebar: Some(tree),
             commits,
             diff: if overlay { area } else { diff },

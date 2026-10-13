@@ -77,6 +77,8 @@ impl Fixture {
     fn app_sized(&self, toml: &str, cols: u16, rows: u16) -> (App, Ran) {
         let mut opts = StartOptions::new(self.cache.clone());
         opts.config = Config::parse(toml).unwrap();
+        // These tests place panes from row 0: no header row.
+        opts.config.view.header = false;
         let ran: Ran = Rc::default();
         let r = ran.clone();
         let mut app = App::new(
@@ -1187,6 +1189,7 @@ fn a_list_miss_says_more_is_not_loaded_and_loads_nothing() {
     let f = fixture_n(12);
     let mut opts = StartOptions::new(f.cache.clone());
     opts.config = Config::parse(ON).unwrap();
+    opts.config.view.header = false;
     opts.limit = 5;
     let mut app = App::new(
         vcs::open(&f.root, vcs::OpenOptions::default()).unwrap(),

@@ -51,6 +51,9 @@
 ## full diffs need, and unzoom it on exit. A window already zoomed at
 ## start, or unzoomed meanwhile, is left as it is.
 # tmux_zoom = false
+## The commit view's header row: the short ID and the subject, a
+## conventional-commit type (feat, fix(ui), ...) as a coloured badge.
+# header = true
 
 ## ---------------------------------------------------------------------------
 ## Which commits load

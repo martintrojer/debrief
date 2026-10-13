@@ -19,6 +19,7 @@ use ratatui::style::Modifier;
 struct Fake {
     root: PathBuf,
     diff: CommitDiff,
+    summary: String,
 }
 
 impl Vcs for Fake {
@@ -37,7 +38,7 @@ impl Vcs for Fake {
             change: None,
             author: "t".into(),
             time: 0,
-            summary: "s".into(),
+            summary: self.summary.clone(),
             parents: vec![],
         }])
     }
@@ -94,6 +95,16 @@ fn open(files: Vec<FileDiff>) -> (tempfile::TempDir, App) {
 
 /// [`open`] with `[render] highlight` set to `highlight`.
 fn open_with(files: Vec<FileDiff>, highlight: bool) -> (tempfile::TempDir, App) {
+    open_full(files, highlight, "s", false)
+}
+
+/// The fake commit with log summary `summary`, `[view] header` = `header`.
+fn open_full(
+    files: Vec<FileDiff>,
+    highlight: bool,
+    summary: &str,
+    header: bool,
+) -> (tempfile::TempDir, App) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
     std::fs::create_dir(&root).unwrap();
@@ -103,9 +114,11 @@ fn open_with(files: Vec<FileDiff>, highlight: bool) -> (tempfile::TempDir, App) 
             message: String::new(),
             files,
         },
+        summary: summary.into(),
     };
     let mut opts = StartOptions::new(tmp.path().join("cache"));
     opts.config.render.highlight = highlight;
+    opts.config.view.header = header;
     let mut app = App::new(Box::new(fake), opts).unwrap();
     app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(app.screen(), Screen::Commit(_)));
@@ -530,4 +543,63 @@ fn highlight_false_and_unknown_extensions_render_plain() {
         let xd = text_x(&buf, del, "fn old");
         assert_eq!(buf[(xd, del)].style().fg, Some(palette::RED), "{path}");
     }
+}
+
+fn header_file() -> Vec<FileDiff> {
+    vec![file(
+        Some("a.txt"),
+        Some("a.txt"),
+        vec![line(LineKind::Added, 1, "x")],
+    )]
+}
+
+#[test]
+fn the_header_centres_a_type_badge_and_the_subject_with_the_id_right() {
+    let (_tmp, mut app) = open_full(header_file(), false, "feat(ui): a header row", true);
+    let buf = draw(&mut app, 80, 10);
+    let top = text(&buf, 0);
+    assert!(top.ends_with(" c0ffee00"), "{top:?}");
+    let x = top.find("feat(ui)").expect("badge") as u16;
+    assert_eq!(
+        buf[(x, 0)].style().bg,
+        Some(palette::GREEN),
+        "feat is green"
+    );
+    let mid = top
+        .find(" feat(ui)  a header row")
+        .expect("badge then subject");
+    let len = " feat(ui)  a header row ".len();
+    assert!(
+        (mid as i64 - (80 - len as i64) / 2).abs() <= 1,
+        "centred: {top:?}"
+    );
+    // The diff starts under it.
+    assert_eq!(row_of(&buf, "a.txt"), 1);
+}
+
+#[test]
+fn a_plain_subject_has_no_badge_and_a_long_one_is_cut() {
+    let (_tmp, mut app) = open_full(header_file(), false, "Fix: no, this is plain", true);
+    let top = text(&draw(&mut app, 80, 10), 0);
+    assert!(top.contains("Fix: no, this is plain"), "{top:?}");
+    let long = "x".repeat(200);
+    let (_tmp, mut app) = open_full(header_file(), false, &long, true);
+    let top = text(&draw(&mut app, 60, 10), 0);
+    assert!(top.contains('…') && top.ends_with(" c0ffee00"), "{top:?}");
+}
+
+#[test]
+fn view_header_false_hides_the_header() {
+    let (_tmp, mut app) = open_full(header_file(), false, "feat: x", false);
+    let buf = draw(&mut app, 80, 10);
+    assert!(!text(&buf, 0).contains("c0ffee00"));
+    assert_eq!(row_of(&buf, "a.txt"), 0);
+}
+
+#[test]
+fn an_empty_subject_hides_the_header() {
+    let (_tmp, mut app) = open_full(header_file(), false, "  ", true);
+    let buf = draw(&mut app, 80, 10);
+    assert!(!text(&buf, 0).contains("c0ffee00"));
+    assert_eq!(row_of(&buf, "a.txt"), 0, "the diff takes the row");
 }

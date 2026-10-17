@@ -68,6 +68,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     match app.screen() {
         Screen::Log => {
             let l = app.log_layout(main);
+            if let Some(chip) = l.chip {
+                log::draw_chip(frame, app, chip);
+            }
             log::draw(frame, app, l.log);
             if let Some(pane) = l.stats {
                 stat::draw(frame, app, pane, l.side_by_side);

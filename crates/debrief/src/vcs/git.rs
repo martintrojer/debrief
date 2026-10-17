@@ -215,6 +215,12 @@ fn added_hunk(lines: Vec<String>, no_newline: bool) -> Hunk {
     }
 }
 
+/// A repo-relative path as a literal pathspec from the top: a file, or
+/// everything under a directory, whatever the cwd and glob characters.
+fn pathspec(path: &str) -> String {
+    format!(":(top,literal){path}")
+}
+
 /// `-U<n>` for a full-file diff; nothing (git's default) for hunks.
 fn context_flag(context: DiffContext) -> Option<String> {
     (context == DiffContext::Full).then(|| format!("-U{FULL_CONTEXT}"))
@@ -249,6 +255,15 @@ impl Vcs for Git {
     }
 
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {
+        self.log_in(revset, None, limit)
+    }
+
+    fn log_in(
+        &self,
+        revset: Option<&str>,
+        path: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
         // Before the first commit the default log is empty; a named
         // revision still has to exist.
         if revset.is_none() && self.head().is_none() {
@@ -256,7 +271,8 @@ impl Vcs for Git {
         }
         let limit = limit.to_string();
         let rev = revset.unwrap_or("HEAD");
-        let out = self.git(&[
+        let spec = path.map(pathspec);
+        let mut args = vec![
             "log",
             "-z",
             "--no-color",
@@ -266,7 +282,9 @@ impl Vcs for Git {
             "--end-of-options",
             rev,
             "--",
-        ])?;
+        ];
+        args.extend(spec.as_deref());
+        let out = self.git(&args)?;
         out.split('\0')
             .filter(|r| !r.trim().is_empty())
             .map(parse_record)
@@ -312,6 +330,10 @@ impl Vcs for Git {
     }
 
     fn working_status(&self) -> Result<Option<WorkingStatus>> {
+        self.working_status_in(None)
+    }
+
+    fn working_status_in(&self, path: Option<&str>) -> Result<Option<WorkingStatus>> {
         let head = self.head();
         let against = self.against(head.as_deref())?;
         // `--numstat`, not `--name-only`: it compares contents, so a file
@@ -319,7 +341,20 @@ impl Vcs for Git {
         let mut args = vec!["diff-index", "--numstat", "-z", "-M"];
         args.extend_from_slice(DIFF_FLAGS);
         args.extend_from_slice(&[&against, "--"]);
-        let files = numstat_files(&self.git(&args)?) + self.untracked()?.len();
+        let changed = numstat_paths(&self.git(&args)?);
+        let untracked = self.untracked()?;
+        let files = changed.len() + untracked.len();
+        if let Some(p) = path {
+            // Either side of a rename counts.
+            let touched = changed
+                .iter()
+                .flatten()
+                .chain(&untracked)
+                .any(|f| super::under(f, p));
+            if !touched {
+                return Ok(None);
+            }
+        }
         if files == 0 {
             return Ok(None);
         }
@@ -358,23 +393,24 @@ impl Vcs for Git {
     }
 }
 
-/// The number of files in `--numstat -z` output with no header: records
-/// `added TAB removed TAB path NUL`, or for a rename `added TAB removed
-/// TAB NUL old NUL new NUL`.
-fn numstat_files(out: &str) -> usize {
+/// The files in `--numstat -z` output with no header, each as its
+/// paths (one, or a rename's old and new): records `added TAB removed TAB
+/// path NUL`, or for a rename `added TAB removed TAB NUL old NUL new NUL`.
+fn numstat_paths(out: &str) -> Vec<Vec<String>> {
     let mut fields = out.split('\0');
-    let mut n = 0;
+    let mut files = Vec::new();
     while let Some(rec) = fields.next() {
         if rec.is_empty() {
             continue;
         }
-        n += 1;
-        if rec.ends_with('\t') {
-            fields.next();
-            fields.next();
-        }
+        let path = rec.splitn(3, '\t').nth(2).unwrap_or("");
+        files.push(if path.is_empty() {
+            fields.by_ref().take(2).map(str::to_string).collect()
+        } else {
+            vec![path.to_string()]
+        });
     }
-    n
+    files
 }
 
 /// `git show --numstat -z` with the format `%an NUL %ae NUL %at NUL %B

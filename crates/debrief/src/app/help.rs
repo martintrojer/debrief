@@ -30,6 +30,8 @@ pub(crate) enum Ctx {
     Search,
     /// Typing the log's filter.
     Filter,
+    /// Typing the log's path filter.
+    PathFilter,
     /// Typing a comment.
     Comment,
     /// The `K` popup is open.
@@ -115,7 +117,7 @@ const fn b(keys: &'static str, context: Ctx, group: Group, desc: &'static str) -
 pub(crate) const BINDINGS: &[Binding] = {
     use Ctx::{
         Comment as P, Commit as C, Commits as CL, Files as F, Filter as Fl, Help as H, Log as L,
-        Picker as R, Popup as K, Quit as Q, Search as S, Visual as V,
+        PathFilter as Pf, Picker as R, Popup as K, Quit as Q, Search as S, Visual as V,
     };
     use Group as G;
     &[
@@ -156,6 +158,22 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Enter", Fl, G::Log, "in the filter: keep it"),
         b("Esc", Fl, G::Log, "in the filter: clear it"),
         b("Backspace", Fl, G::Log, "in the filter: delete a character"),
+        b("F", L, G::Log, PATH_FILTER),
+        b("<leader>F", L, G::Log, FILTERS_CLEAR),
+        b(
+            "Enter",
+            Pf,
+            G::Log,
+            "in the path filter: apply it (empty: remove it)",
+        ),
+        b("Esc", Pf, G::Log, "in the path filter: keep the old path"),
+        b(
+            "Backspace",
+            Pf,
+            G::Log,
+            "in the path filter: delete a character",
+        ),
+        b("C-u", Pf, G::Log, "in the path filter: clear the path"),
         b("q, Esc", C, G::General, "back to the log"),
         b(
             "C-c",
@@ -278,6 +296,10 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("n", CL, G::Commits, "next match in the list"),
         b("N", CL, G::Commits, "previous match in the list"),
         b("f", CL, G::Commits, "filter the log"),
+        b("F", CL, G::Commits, PATH_FILTER),
+        b("<leader>F", CL, G::Commits, FILTERS_CLEAR),
+        b("<leader>F", C, G::Commit, FILTERS_CLEAR),
+        b("<leader>F", F, G::Files, FILTERS_CLEAR),
         b("Esc", CL, G::Commits, "back to the diff"),
         b("q", CL, G::Commits, "back to the log"),
         b("{1-9}", CL, G::Commits, "count for the next motion"),
@@ -418,6 +440,10 @@ pub(crate) const BINDINGS: &[Binding] = {
 
 /// `<leader>e` on the commit screen; in auto it says it pins the list.
 const FILE_LIST_TOGGLE: &str = "show or hide the file list";
+/// `F`.
+const PATH_FILTER: &str = "filter the log by a file or directory";
+/// `<leader>F`.
+const FILTERS_CLEAR: &str = "clear the path and text filters";
 /// `<leader>E`.
 const COMMIT_LIST_TOGGLE: &str = "show or hide the commit list under the files";
 
@@ -683,7 +709,9 @@ impl App {
     pub(super) fn ctx_shown(&self, ctx: Ctx) -> bool {
         match ctx {
             Ctx::Log => self.screen == Screen::Log,
-            Ctx::Filter => self.screen == Screen::Log || self.commit_list_visible(),
+            Ctx::Filter | Ctx::PathFilter => {
+                self.screen == Screen::Log || self.commit_list_visible()
+            }
             Ctx::Commit | Ctx::Files | Ctx::Visual | Ctx::Comment | Ctx::Popup => {
                 matches!(self.screen, Screen::Commit(_))
             }
@@ -708,6 +736,7 @@ impl App {
             Ctx::Visual => commit && self.mode == Mode::Visual,
             Ctx::Search => self.mode == Mode::Search,
             Ctx::Filter => self.mode == Mode::Filter,
+            Ctx::PathFilter => self.mode == Mode::PathFilter,
             Ctx::Comment => commit && self.mode == Mode::Comment,
             Ctx::Popup => commit && self.mode == Mode::Popup,
             Ctx::Picker => self.mode == Mode::Picker,
@@ -858,7 +887,7 @@ pub(super) mod tests {
         let (t, mut a) = app();
         if !matches!(
             ctx,
-            Ctx::Log | Ctx::Help | Ctx::Picker | Ctx::Filter | Ctx::Quit
+            Ctx::Log | Ctx::Help | Ctx::Picker | Ctx::Filter | Ctx::PathFilter | Ctx::Quit
         ) {
             a.open_index(0);
             assert!(!a.commit_rows().is_empty());
@@ -879,6 +908,7 @@ pub(super) mod tests {
             Ctx::Picker => a.picker_open(),
             Ctx::Quit => a.mode = Mode::QuitPrompt,
             Ctx::Filter => a.filter_start(),
+            Ctx::PathFilter => a.path_start(),
             Ctx::Log | Ctx::Commit => {}
         }
         (t, a)
@@ -894,6 +924,7 @@ pub(super) mod tests {
             Ctx::Visual,
             Ctx::Search,
             Ctx::Filter,
+            Ctx::PathFilter,
             Ctx::Comment,
             Ctx::Popup,
             Ctx::Picker,

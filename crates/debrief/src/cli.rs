@@ -16,7 +16,9 @@ use crate::vcs::OpenOptions;
     about = "Catch up with what the agents committed, and answer back"
 )]
 pub struct Cli {
-    /// A path inside the git or jj repository (default: the working directory).
+    /// A path inside the git or jj repository (default: the working
+    /// directory). A file or directory below the repository's root also
+    /// filters the log to the commits touching it.
     pub path: Option<PathBuf>,
     /// Revset (jj) or revision range (git) to list instead of `[log]
     /// revset`, else the current commit and its ancestors.
@@ -57,6 +59,15 @@ impl Cli {
         self.path.clone().unwrap_or_else(|| PathBuf::from("."))
     }
 
+    /// The log's path filter for a repository at `root`: `PATH` relative
+    /// to it, `None` without a `PATH` or when it is the root.
+    pub fn path_filter(&self, root: &std::path::Path) -> Result<Option<String>, StartError> {
+        match &self.path {
+            None => Ok(None),
+            Some(p) => crate::vcs::path_in(root, p).map_err(|e| open_error(&e)),
+        }
+    }
+
     /// How to open the repository.
     pub fn open_options(&self) -> OpenOptions {
         OpenOptions {
@@ -87,6 +98,7 @@ impl Cli {
             cache_dir,
             state_dir,
             revset: self.revset.clone().or_else(|| config.log.revset.clone()),
+            path: None,
             limit: self.limit.unwrap_or(config.log.limit),
             config,
         })

@@ -194,6 +194,18 @@ pub enum Action {
     FilterCommit,
     /// Esc in the filter prompt, or on the log: clear the filter.
     FilterClear,
+    /// Log `F`: open the path filter prompt.
+    PathStart,
+    PathInput(char),
+    PathBackspace,
+    /// `C-u` in the path prompt: clear the typed path.
+    PathKill,
+    /// Enter in the path prompt: apply it (empty: remove it).
+    PathCommit,
+    /// Esc in the path prompt: keep the old path.
+    PathCancel,
+    /// `<leader>F`: clear the path and the text filter.
+    FiltersClear,
     /// Log `J` (true) / `K`: scroll the stats pane a line.
     StatScroll(bool, Option<usize>),
 }
@@ -301,6 +313,7 @@ impl App {
             (Mode::Help, _) => super::help::help_keymap(self, keys),
             (Mode::Picker, _) => super::picker::picker_keymap(keys),
             (Mode::Filter, _) => filter_keymap(keys),
+            (Mode::PathFilter, _) => path_keymap(keys),
             (Mode::Search, Screen::Log) => search_keymap(keys),
             (_, Screen::Log) => self.log_keymap(keys),
             (Mode::Search, Screen::Commit(_)) => search_keymap(keys),
@@ -346,7 +359,7 @@ impl App {
 
     /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
     /// prefix waits for more keys), then the built-ins (`e` on the commit
-    /// screen, `E`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
+    /// screen, `E`, `F`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
     /// the commit screen and the stats pane on the log; `E` the commit
     /// list under the file list's tree.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
@@ -361,6 +374,7 @@ impl App {
                 [] | ['r'] | ['s'] => KeyResult::Pending,
                 ['e'] => KeyResult::Action(Action::ToggleSidebar),
                 ['E'] => KeyResult::Action(Action::ToggleCommits),
+                ['F'] => KeyResult::Action(Action::FiltersClear),
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
                 ['r', 's'] => KeyResult::Action(Action::SessionList),
@@ -545,6 +559,7 @@ impl App {
                 (_, Some('n')) => A::SearchNext(true, count),
                 (_, Some('N')) => A::SearchNext(false, count),
                 (_, Some('f')) => A::FilterStart,
+                (_, Some('F')) => A::PathStart,
                 (KeyCode::Esc, _) => A::FocusDiff,
                 (_, Some('q')) => A::Back,
                 _ => return KeyResult::None,
@@ -599,6 +614,7 @@ impl App {
             KeyCode::Char('n') => A::SearchNext(true, count),
             KeyCode::Char('N') => A::SearchNext(false, count),
             KeyCode::Char('f') => A::FilterStart,
+            KeyCode::Char('F') => A::PathStart,
             KeyCode::Char('J') => A::StatScroll(true, count),
             KeyCode::Char('K') => A::StatScroll(false, count),
             KeyCode::Esc => A::FilterClear,
@@ -657,6 +673,13 @@ impl App {
             A::FilterBackspace => self.filter_edit(None),
             A::FilterCommit => self.filter_commit(),
             A::FilterClear => self.filter_clear(),
+            A::PathStart => self.path_start(),
+            A::PathInput(c) => self.path_type(Some(c)),
+            A::PathBackspace => self.path_type(None),
+            A::PathKill => self.path_kill(),
+            A::PathCommit => self.path_commit(),
+            A::PathCancel => self.path_cancel(),
+            A::FiltersClear => self.filters_clear(),
             A::ToggleSidebar => self.toggle_stats(),
             // The log has no panes to move between: tmux's, if any.
             A::PaneNav(d) => self.pane_nav(d),
@@ -665,9 +688,9 @@ impl App {
         }
     }
 
-    /// On the commit screen, `action` goes to the log's search or filter:
-    /// the commit list's `/ ? n N f`, and the keys of a prompt opened
-    /// there. The diff's search keeps the rest.
+    /// On the commit screen, `action` goes to the log's search or filters:
+    /// the commit list's `/ ? n N f F`, `<leader>F`, and the keys of a
+    /// prompt opened there. The diff's search keeps the rest.
     fn list_search(&self, action: Action) -> bool {
         use Action as A;
         match action {
@@ -679,7 +702,14 @@ impl App {
             | A::FilterInput(_)
             | A::FilterBackspace
             | A::FilterCommit
-            | A::FilterClear => true,
+            | A::FilterClear
+            | A::PathStart
+            | A::PathInput(_)
+            | A::PathBackspace
+            | A::PathKill
+            | A::PathCommit
+            | A::PathCancel
+            | A::FiltersClear => true,
             _ => false,
         }
     }
@@ -859,6 +889,7 @@ fn visual_ok(a: Action) -> bool {
             | A::ReviewSend
             | A::SessionSave
             | A::SessionList
+            | A::FiltersClear
     )
 }
 
@@ -888,6 +919,23 @@ fn filter_keymap(keys: &[KeyEvent]) -> KeyResult {
         KeyCode::Esc => A::FilterClear,
         KeyCode::Backspace => A::FilterBackspace,
         KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => A::FilterInput(c),
+        _ => return KeyResult::None,
+    })
+}
+
+/// Typing the log's path filter: every plain key is input; `C-u` clears.
+fn path_keymap(keys: &[KeyEvent]) -> KeyResult {
+    use Action as A;
+    let Some(k) = keys.last() else {
+        return KeyResult::None;
+    };
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    KeyResult::Action(match k.code {
+        KeyCode::Enter => A::PathCommit,
+        KeyCode::Esc => A::PathCancel,
+        KeyCode::Backspace => A::PathBackspace,
+        KeyCode::Char('u') if ctrl => A::PathKill,
+        KeyCode::Char(c) if !ctrl => A::PathInput(c),
         _ => return KeyResult::None,
     })
 }

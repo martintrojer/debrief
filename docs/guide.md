@@ -9,6 +9,7 @@ What debrief does and how to drive it. For in-app key help, see
 ```sh
 debrief                    # the repo holding the working directory
 debrief path/to/repo       # or any path inside a repo
+debrief src/app            # below the root: only commits touching it (a path filter)
 debrief --revset 'main..'  # jj revset, or git revision range ([log] revset)
 debrief --limit 500        # commits to load at first and per page ([log] limit, default 200)
 debrief --no-snapshot      # jj: don't snapshot; @ as of the last jj command
@@ -20,6 +21,10 @@ current commit and its ancestors by default: jj `::@` (not jj's own
 `revsets.log`), git `HEAD`. `[log] revset` and `[log] limit` in the
 [config file](#config) change the defaults; `--revset` and `--limit`
 override them.
+
+A `PATH` below the repo's root (a file, or a directory) also sets the
+log's [path filter](#path-filter); the root itself, or no `PATH`, lists
+every commit. A symlink outside the repo names what it points at.
 
 debrief keeps seen state and the review batch in the user cache dir
 (`--cache-dir` or `$DEBRIEF_CACHE_DIR` moves it), and saved sessions in
@@ -56,6 +61,8 @@ many have loaded. The commit list pages the same way.
 | `J` `K` | scroll the stats pane |
 | `/` `?` `n` `N` | search |
 | `f` | filter; `Enter` keeps it, `Esc` clears it |
+| `F` | path filter: commits touching a file or directory |
+| `<leader>F` | clear the path and text filters |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `<leader>rs` | list the saved review sessions |
@@ -78,6 +85,35 @@ matches and more may exist, the prompt and then the status line say
 `… more not loaded`. The filter narrows the list as you type,
 and the status line shows `filter: x (12/200)`. `m`, `Enter` and `]]` /
 `[[` act on the filtered list, and `r` keeps the filter.
+
+### Path filter
+
+The path filter lists only the commits touching a file, or anything
+under a directory, given relative to the repo's root. `debrief PATH`
+sets it; `F` opens a `path: …` prompt holding the current one. `Enter`
+applies the typed path and reloads the log (an empty one removes the
+filter), `C-u` clears the prompt, and `Esc` closes it, the old path
+kept. `<leader>F` clears it and the text filter together. The path is
+relative to the root, or absolute inside it; `..` is refused. It
+needn't exist (a deleted file still has history); glob characters are
+literal, and renames are not followed. If the log can't be read with
+the new path, the old one stays and the status line says why.
+
+It is part of the query, not a narrowing of what loaded: `--limit` and
+paging count matching commits, and the `f` filter narrows those. While
+it is set a `⌕ path` row tops the log (and the commit list's rule), and
+the status line shows `path: src/app` before the counts, as in `path:
+src/app  2 new  filter: fix (3/41)`; when the line runs short the text
+filter is cut first, then the path from the left. `r` and the watchers
+keep it; a saved session doesn't store it.
+
+Opening a commit puts the cursor on the first file under the path,
+unless a saved session puts it elsewhere. A new path that drops the open
+commit from the log leaves it open; `]]` and `[[` go to the nearest
+shown commit around its old place. git's working-copy row shows only
+while something under the path is changed or untracked. `m` and `w` act
+on the loaded, matching commits. The first run on a repo marks the
+matching commits and the unfiltered log's first page seen.
 
 ## The working copy
 
@@ -132,6 +168,7 @@ hides it.
 | `Enter` | in a `.md` file: open it in ramble at this line (the header: line 1) |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
 | `<leader>ss` | save this commit's review session |
+| `<leader>F` | clear the log's path and text filters |
 | `<leader>rs` | list the saved review sessions |
 | `q` `Esc` | back to the log |
 
@@ -234,6 +271,8 @@ setting; a session saved from the list restores focus to the tree.
 | `w` | watermark at the cursor, as on the log |
 | `/` `?` `n` `N` | search the rows, as on the log (moves the cursor, opens nothing) |
 | `f` | the log's filter; `Enter` keeps it, `Esc` clears it |
+| `F` | the log's [path filter](#path-filter) |
+| `<leader>F` | clear the path and text filters |
 | `Esc` | back to the diff |
 | `q` | back to the log |
 
@@ -299,8 +338,8 @@ on screen (the commit list opens nothing). Over the file list it scrolls
 the list and leaves the selection and the diff alone, even with the
 selection scrolled out of view; a key in the list shows it again. Neither
 list's wheel moves the diff. While you type (the comment box, a `/` `?`
-search, the log's `f` filter, the help filter) the mouse does nothing;
-the picker takes it even with filter text typed.
+search, the log's `f` filter or `F` path, the help filter) the mouse
+does nothing; the picker takes it even with filter text typed.
 
 Under capture the terminal's own selection still works with Shift held
 (Shift+drag in most terminals). `[mouse] enabled = false` turns capture
@@ -347,8 +386,8 @@ gutter. `Enter` in the list opens a comment's own commit at its line, if
 that commit is in the log.
 
 **Pasting** types into the comment box with its newlines, or into a
-search prompt or filter as one line. A paste anywhere else is ignored,
-never run as keys.
+search prompt, filter or path prompt as one line. A paste anywhere else
+is ignored, never run as keys.
 
 ## Review sessions
 

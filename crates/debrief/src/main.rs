@@ -34,11 +34,12 @@ fn main() -> ExitCode {
 }
 
 fn start(cli: &Cli) -> Result<App, StartError> {
-    let opts = cli.start_options(
+    let mut opts = cli.start_options(
         debrief_review::cache_dir(),
         debrief::session::state_dir(),
         debrief::app::config::Config::default_path(),
     )?;
     let vcs = debrief::vcs::open(&cli.path(), cli.open_options()).map_err(|e| open_error(&e))?;
+    opts.path = cli.path_filter(vcs.root())?;
     App::new(vcs, opts).map_err(|e| open_error(&e))
 }

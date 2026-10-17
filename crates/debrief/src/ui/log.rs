@@ -3,7 +3,8 @@
 //! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker. A
 //! commit with a saved review session shows `` (`3`: three unsent
 //! comments) before its summary; git's working-copy row ends with it.
-//! While more commits may exist, a dim `… more` row ends the list.
+//! While more commits may exist, a dim `… more` row ends the list. A
+//! path filter's `⌕ path` row tops the log.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -140,6 +141,29 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(more_line());
     }
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// The path filter's marker before its path.
+pub const PATH_MARKER: &str = "⌕";
+
+/// The path filter as one line: `⌕ src/app` (left-elided to `width`
+/// columns).
+pub fn path_chip(path: &str, width: usize) -> String {
+    let room = width.saturating_sub(PATH_MARKER.chars().count() + 1);
+    format!("{PATH_MARKER} {}", super::status::elide_left(path, room))
+}
+
+/// The path filter's row over the log.
+pub(super) fn draw_chip(frame: &mut Frame, app: &App, area: Rect) {
+    let Some(path) = app.path_filter() else {
+        return;
+    };
+    let text = format!(
+        " {}",
+        path_chip(path, (area.width as usize).saturating_sub(1))
+    );
+    let style = Style::new().fg(palette::PEACH).bg(palette::MANTLE);
+    frame.render_widget(Paragraph::new(text).style(style), area);
 }
 
 /// The dim row ending the log and the commit list while more commits may

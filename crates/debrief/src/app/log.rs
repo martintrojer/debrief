@@ -2,7 +2,8 @@
 //! motions, and marking commits seen.
 //!
 //! The working copy: git gets a synthetic row on
-//! top while the tree is dirty, never seen or new; jj marks the row of
+//! top while the tree is dirty (under a path filter, while something
+//! under the path is), never seen or new; jj marks the row of
 //! this workspace's `@`. Loading snapshots jj first; a snapshot
 //! error goes to the status line and the log loads from the last pin.
 //!
@@ -62,13 +63,13 @@ pub fn age(now: i64, then: i64) -> String {
 /// Read git's working-copy row on a worker thread, as
 /// [`App::load_working`] does without a sender.
 fn spawn_working_status(
-    (root, opts): (std::path::PathBuf, OpenOptions),
+    (root, opts, path): (std::path::PathBuf, OpenOptions, Option<String>),
     request: u64,
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, None)
-            .and_then(|v| v.working_status())
+            .and_then(|v| v.working_status_in(path.as_deref()))
             .map_err(|e| format!("{e:#}"));
         let _ = tx.send(AppEvent::WorkingRow { request, result });
     });
@@ -142,13 +143,13 @@ struct Moved {
 /// does without a sender.
 fn spawn_page(
     (root, opts, pin): (std::path::PathBuf, OpenOptions, Option<String>),
-    revset: Option<String>,
+    (revset, path): (Option<String>, Option<String>),
     (request, limit): (u64, usize),
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
-            .and_then(|v| v.log(revset.as_deref(), limit))
+            .and_then(|v| v.log_in(revset.as_deref(), path.as_deref(), limit))
             .map_err(|e| format!("{e:#}"));
         let _ = tx.send(AppEvent::LogPage { request, result });
     });
@@ -171,7 +172,11 @@ impl App {
             self.set_status(format!("{e:#}"));
         }
         let limit = self.page.limit;
-        let commits = self.vcs.log(self.opts.revset.as_deref(), limit)?;
+        let commits = self.vcs.log_in(
+            self.opts.revset.as_deref(),
+            self.opts.path.as_deref(),
+            limit,
+        )?;
         let commits = self.trim(commits, limit);
         match self.vcs.kind() {
             Kind::Git => self.load_working(),
@@ -196,6 +201,14 @@ impl App {
             c.parents.retain(|p| !is_zero_id(p));
         }
         commits
+    }
+
+    /// Back to the first page's size (a new query), dropping a page
+    /// being loaded.
+    pub(super) fn page_reset(&mut self) {
+        self.page.request += 1;
+        self.page.pending = None;
+        self.page.limit = self.page.page;
     }
 
     /// More commits may exist past the loaded ones.
@@ -245,12 +258,17 @@ impl App {
                     self.vcs.open_options(),
                     self.vcs.pinned_op(),
                 );
-                spawn_page(at, self.opts.revset.clone(), (request, limit), tx);
+                let q = (self.opts.revset.clone(), self.opts.path.clone());
+                spawn_page(at, q, (request, limit), tx);
             }
             None => {
                 let result = self
                     .vcs
-                    .log(self.opts.revset.as_deref(), limit)
+                    .log_in(
+                        self.opts.revset.as_deref(),
+                        self.opts.path.as_deref(),
+                        limit,
+                    )
                     .map_err(|e| format!("{e:#}"));
                 self.page_loaded(request, result);
             }
@@ -361,11 +379,18 @@ impl App {
         let request = self.working_request;
         match self.sender.clone() {
             Some(tx) => {
-                let at = (self.vcs.root().to_path_buf(), self.vcs.open_options());
+                let at = (
+                    self.vcs.root().to_path_buf(),
+                    self.vcs.open_options(),
+                    self.opts.path.clone(),
+                );
                 spawn_working_status(at, request, tx);
             }
             None => {
-                let result = self.vcs.working_status().map_err(|e| format!("{e:#}"));
+                let result = self
+                    .vcs
+                    .working_status_in(self.opts.path.as_deref())
+                    .map_err(|e| format!("{e:#}"));
                 self.set_working(result);
             }
         }
@@ -464,20 +489,39 @@ impl App {
     /// still listed (on the working copy when it was there).
     /// A page loading is dropped: the reload asks for its count.
     pub fn reload(&mut self, snapshot: bool) {
+        if let Err(e) = self.reload_strict(snapshot) {
+            self.set_status(format!("reload failed: {e:#}"));
+        }
+    }
+
+    /// [`App::reload`], returning a failed read (the rows stay as they
+    /// were).
+    pub(super) fn reload_strict(&mut self, snapshot: bool) -> anyhow::Result<()> {
         self.stat_reload();
         self.page.request += 1;
         if let Some(p) = self.page.pending.take() {
             self.page.limit = p.limit;
         }
         let current = self.log_key(self.cursor);
-        match self.load(snapshot) {
-            Ok(commits) => {
-                self.set_rows(commits);
-                self.cursor_to(current);
-                self.commit_reindex();
-            }
-            Err(e) => self.set_status(format!("reload failed: {e:#}")),
-        }
+        let commits = self.load(snapshot)?;
+        self.set_rows(commits);
+        self.cursor_to(current);
+        self.commit_reindex();
+        Ok(())
+    }
+
+    /// Under a path filter, whether one of `files` (a diff's) is at or
+    /// under it; without one, whether there are any.
+    pub(super) fn path_touched(&self, files: &[crate::vcs::FileDiff]) -> bool {
+        let Some(p) = self.opts.path.as_deref() else {
+            return !files.is_empty();
+        };
+        files.iter().any(|f| {
+            [&f.new_path, &f.old_path]
+                .into_iter()
+                .flatten()
+                .any(|f| crate::vcs::under(f, p))
+        })
     }
 
     pub(super) fn log_key(&self, i: usize) -> Option<RowKey> {

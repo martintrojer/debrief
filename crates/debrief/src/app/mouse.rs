@@ -3,7 +3,8 @@
 //! click to open, drag in the diff to select lines (scrolling at the
 //! edges), the wheel to scroll the pane under the pointer. Clicks outside
 //! an open picker, help or `K` popup close it. While typing (the comment
-//! box, a search or filter prompt, help's filter) the mouse does nothing.
+//! box, a search, filter or path prompt, help's filter) the mouse does
+//! nothing.
 //!
 //! [`App::hit`] finds what is under a cell from the rects the draw uses,
 //! top-most first, so a click lands where the screen shows. Effects reuse
@@ -315,12 +316,12 @@ impl App {
         self.clue_sync();
     }
 
-    /// Text is being typed: the comment box, a search or filter prompt,
+    /// Text is being typed: the comment box, a search, filter or path prompt,
     /// help's filter, the quit prompt.
     fn typing(&self) -> bool {
         matches!(
             self.mode,
-            Mode::Comment | Mode::Search | Mode::Filter | Mode::QuitPrompt
+            Mode::Comment | Mode::Search | Mode::Filter | Mode::PathFilter | Mode::QuitPrompt
         ) || self.help_filtering()
     }
 

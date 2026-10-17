@@ -18,6 +18,7 @@ mod log_search;
 mod motion;
 pub mod mouse;
 pub mod pane_nav;
+mod path_filter;
 pub mod picker;
 pub mod review;
 pub mod run;
@@ -67,6 +68,9 @@ pub struct StartOptions {
     /// The debrief state dir (saved review sessions live under it).
     pub state_dir: PathBuf,
     pub revset: Option<String>,
+    /// The log's path filter: only commits touching this repo-relative
+    /// file or directory load (`F` changes it).
+    pub path: Option<String>,
     pub limit: usize,
     /// `~/.config/debrief/config.toml` over the defaults.
     pub config: config::Config,
@@ -80,6 +84,7 @@ impl StartOptions {
             state_dir: cache_dir.join("state"),
             cache_dir,
             revset: None,
+            path: None,
             limit: DEFAULT_LIMIT,
             config: config::Config::defaults(),
         }
@@ -167,6 +172,8 @@ pub enum Mode {
     Search,
     /// Typing the log's `f` filter.
     Filter,
+    /// Typing the log's `F` path filter.
+    PathFilter,
     /// Line-wise selection in the commit view.
     Visual,
     /// Typing a comment's body.
@@ -199,6 +206,11 @@ pub struct App {
     all_rows: Vec<Row>,
     /// The log's `/` search and `f` filter.
     log_search: log_search::LogSearch,
+    /// The `F` prompt's text while it is open.
+    path_edit: Option<String>,
+    /// The open commit a path change dropped from the log, and the log's
+    /// commits before the change (for `]]` / `[[`).
+    hidden_open: Option<(String, Vec<String>)>,
     /// The log's stats pane.
     stat: stat::StatState,
     /// How many commits the log asks for, and the next page loading.
@@ -309,6 +321,8 @@ impl App {
             rows: Vec::new(),
             all_rows: Vec::new(),
             log_search: log_search::LogSearch::default(),
+            path_edit: None,
+            hidden_open: None,
             stat: stat::StatState::default(),
             page: log::Paging::new(limit),
             cursor: 0,
@@ -371,9 +385,14 @@ impl App {
         }
         let commits = app.load(true)?;
         if app.seen.is_fresh() {
-            app.seen
-                .mark_all(&commits)
-                .context("cannot write seen state")?;
+            // The first run marks what it lists seen and, under a path
+            // filter, the unfiltered log's first page too, so a later
+            // unfiltered run starts caught up.
+            let mut all = commits.clone();
+            if app.opts.path.is_some() {
+                all.extend(app.vcs.log(app.opts.revset.as_deref(), app.opts.limit)?);
+            }
+            app.seen.mark_all(&all).context("cannot write seen state")?;
         }
         app.set_rows(commits);
         app.cursor = app.first_unseen().unwrap_or(0);
@@ -417,6 +436,7 @@ impl App {
             }
             Mode::Search => self.search_insert(&paste_line(text)),
             Mode::Filter => self.filter_insert(&paste_line(text)),
+            Mode::PathFilter => self.path_insert(&paste_line(text)),
             Mode::Picker => self.picker_insert(&paste_line(text)),
             _ => {}
         }

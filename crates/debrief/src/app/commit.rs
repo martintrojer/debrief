@@ -383,6 +383,19 @@ impl CommitView {
             .and_then(|r| r.file)
     }
 
+    /// The header row of the first file (in the diff's order) at or under
+    /// `path`, either side of a rename.
+    pub(super) fn path_row(&self, path: &str) -> Option<usize> {
+        let diff = self.diff.as_ref()?;
+        let under = |p: &Option<String>| p.as_deref().is_some_and(|p| crate::vcs::under(p, path));
+        let file = self.order.iter().copied().find(|&i| {
+            diff.files
+                .get(i)
+                .is_some_and(|f| under(&f.new_path) || under(&f.old_path))
+        })?;
+        self.header_row(file)
+    }
+
     pub(super) fn header_row(&self, file: usize) -> Option<usize> {
         self.rows
             .iter()
@@ -564,6 +577,7 @@ impl App {
     fn enter_view(&mut self, i: usize) -> u64 {
         // The view being left is remembered for its session.
         self.session_capture();
+        self.hidden_open = None;
         let from_list = self.commit_list.opening;
         let id = self.rows[i].info.commit.clone();
         self.mark_row(i);
@@ -681,9 +695,10 @@ impl App {
                 }
                 let diff = working_diff(&w);
                 // Fresher than the row: it and its stat follow (line
-                // counts are the same in either context).
+                // counts are the same in either context). Under a path
+                // filter the row shows only while a file under it changed.
                 self.working_request += 1;
-                self.working = Some((&w).into());
+                self.working = self.path_touched(&w.diff.files).then(|| (&w).into());
                 self.stat_put_working(&w);
                 self.working_rows();
                 self.loaded(request, Ok(diff));
@@ -831,7 +846,14 @@ impl App {
             Ok(diff) => {
                 let keep = v.keep_row.take();
                 let anchor = v.keep_anchor.take();
+                let fresh = keep.is_none() && anchor.is_none() && v.restore.is_none();
                 v.set_diff(diff);
+                // Under a path filter a fresh view starts on the first
+                // file under it (a kept row or a session wins).
+                if fresh && let Some(row) = self.opts.path.as_deref().and_then(|p| v.path_row(p)) {
+                    v.goto_row(row);
+                    v.cursor_to_top();
+                }
                 // Side by side: the anchor's line is on its side.
                 if let Some((Anchor::Line { side, .. }, _)) = &anchor
                     && v.split_side().is_some_and(|s| s != *side)

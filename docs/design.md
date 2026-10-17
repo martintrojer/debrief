@@ -58,8 +58,8 @@ ramble depends on `debrief-review` for its comment mode.
 
 1. `vcs::open` finds `.jj` above the path (else `.git`) and returns a
    `Box<dyn Vcs>`. jj snapshots first unless `--no-snapshot`.
-2. The log loads `log(revset, limit)` and classifies each commit against
-   the seen state. A `notify` watcher on git's `HEAD`, `packed-refs` and
+2. The log loads `log_in(revset, path, limit)` and classifies each commit
+   against the seen state. The path is the log's path filter (see below). A `notify` watcher on git's `HEAD`, `packed-refs` and
    `refs/`, or jj's `op_heads/heads`, triggers a reload. For git's working
    copy a second watcher covers the tree, skipping the git dir and ignored
    untracked paths.
@@ -71,6 +71,32 @@ ramble depends on `debrief-review` for its comment mode.
    goes into the batch through `Review::add`.
 5. `<leader>rr` re-reads the batch, exports it and hands it back; the sent
    comments leave the batch and are marked sent in their sessions.
+
+## The path filter
+
+The log's path filter is part of the VCS query, not a narrowing of the
+loaded rows like the `f` filter: a rarely touched file's history may lie
+far past the first page, so only the VCS can find it, and `--limit` and
+paging then count matching commits.
+
+- **Queries.** git gets `-- :(top,literal)<path>` (from the top, glob
+  characters literal); jj gets `-- root:"<path>"`, the path quoted with
+  `"` and `\` escaped. Both match a file or everything under a
+  directory, and neither follows renames (git's `--follow` is one file,
+  git only).
+- **Paths** are repo-relative and `/`-separated. `debrief PATH` below the
+  root sets one: a symlink inside the repo names itself, one outside it
+  names its target. A typed path may be absolute inside the root; `..` is
+  refused, so a path never leaves the repo. A query that fails keeps the
+  old path and its rows.
+- **git's working-copy row** shows only while something under the path is
+  changed or untracked; its count stays the whole tree's. A working-copy
+  diff that arrives later is held to the same rule.
+- **Seen state.** A first run marks what it lists seen and, under a path
+  filter, the unfiltered log's first page too, so neither a later
+  unfiltered run nor this one starts with old commits marked new.
+- **The open commit** stays open when a new path drops it from the log;
+  `]]` / `[[` then go to the nearest shown commit around its old place.
 
 ## Storage
 

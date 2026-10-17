@@ -275,6 +275,26 @@ pub trait Vcs {
     /// Newest first. `None` uses the default, the current commit and its
     /// ancestors: `HEAD` for git, `::@` for jj (jj's root commit included).
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>>;
+    /// [`Vcs::log`] narrowed to the commits touching `path` (repo-relative,
+    /// `/`-separated: a file, or everything under a directory). Renames
+    /// are not followed. A backend without path support refuses a path.
+    fn log_in(
+        &self,
+        revset: Option<&str>,
+        path: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
+        match path {
+            None => self.log(revset, limit),
+            Some(p) => bail!("cannot filter the log by path: {p}"),
+        }
+    }
+    /// git: [`Vcs::working_status`], `None` unless something under `path`
+    /// (when given) is changed or untracked; the count is still the whole
+    /// tree's. Others: [`Vcs::working_status`].
+    fn working_status_in(&self, _path: Option<&str>) -> Result<Option<WorkingStatus>> {
+        self.working_status()
+    }
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
     /// revision naming one commit. `context`: hunks or the whole file.
     fn show(&self, commit: &str, context: Context) -> Result<CommitDiff>;
@@ -304,6 +324,50 @@ pub fn open(path: &Path, opts: OpenOptions) -> Result<Box<dyn Vcs>> {
         return Ok(Box::new(Git::open(&start)?));
     }
     bail!("not a git or jj repository: {}", path.display())
+}
+
+/// `path` (inside the repository at `root`, which is canonical) as the
+/// log's path filter: repo-relative and `/`-separated. `None` for the
+/// root itself.
+pub fn path_in(root: &Path, path: &Path) -> Result<Option<String>> {
+    let canon = path
+        .canonicalize()
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    // A symlink inside the repo names itself, not its target; one outside
+    // it (an alias for the repo or a directory in it) names its target.
+    let link = match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) if path.is_symlink() => {
+            let dir = if dir.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                dir
+            };
+            dir.canonicalize()
+                .ok()
+                .map(|d| d.join(name))
+                .filter(|p| p.starts_with(root))
+        }
+        _ => None,
+    };
+    let at = link.unwrap_or(canon);
+    let rel = at
+        .strip_prefix(root)
+        .with_context(|| format!("{} is outside {}", path.display(), root.display()))?;
+    let parts = rel
+        .components()
+        .map(|c| {
+            c.as_os_str()
+                .to_str()
+                .with_context(|| format!("path is not UTF-8: {}", path.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((!parts.is_empty()).then(|| parts.join("/")))
+}
+
+/// `file` (repo-relative) is `path` or lies under the directory `path`.
+pub fn under(file: &str, path: &str) -> bool {
+    file.strip_prefix(path)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// Open `root` again (a worker thread's handle), reading at `pin` when

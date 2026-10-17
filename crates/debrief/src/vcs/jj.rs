@@ -31,6 +31,19 @@ const LOG_TEMPLATE: &str = r#"commit_id ++ "\x1f" ++ change_id ++ "\x1f" ++ auth
 
 const STAT_TEMPLATE: &str = r#"author.name() ++ "\x1f" ++ author.email() ++ "\x1f" ++ author.timestamp().format("%s") ++ "\x1f" ++ description"#;
 
+/// A workspace-relative path as a fileset: the file, or everything under
+/// the directory, quoted so no character is read as an operator.
+fn fileset(path: &str) -> String {
+    let quoted: String = path
+        .chars()
+        .flat_map(|c| match c {
+            '"' | '\\' => vec!['\\', c],
+            c => vec![c],
+        })
+        .collect();
+    format!("root:\"{quoted}\"")
+}
+
 pub struct Jj {
     root: PathBuf,
     opts: OpenOptions,
@@ -202,10 +215,23 @@ impl Vcs for Jj {
     }
 
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {
+        self.log_in(revset, None, limit)
+    }
+
+    fn log_in(
+        &self,
+        revset: Option<&str>,
+        path: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
         let limit = limit.to_string();
         // One argv element, so the revset can never be read as a flag.
         let rev = format!("--revisions={}", revset.unwrap_or("::@"));
-        let args = ["log", "--no-graph", "-n", &limit, "-T", LOG_TEMPLATE, &rev];
+        let fileset = path.map(fileset);
+        let mut args = vec!["log", "--no-graph", "-n", &limit, "-T", LOG_TEMPLATE, &rev];
+        if let Some(f) = &fileset {
+            args.extend(["--", f]);
+        }
         let out = self.jj(&self.at_op()?, &args)?;
         out.split('\x1e')
             .filter(|r| !r.trim().is_empty())

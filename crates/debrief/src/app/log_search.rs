@@ -56,8 +56,12 @@ fn row_matches(r: &Row, pat: &str) -> bool {
 }
 
 impl App {
-    /// The log's open prompt: `/foo`, `?foo` or `filter: foo`.
+    /// The log's open prompt: `path: foo` (see `path_filter`), `/foo`,
+    /// `?foo` or `filter: foo`.
     pub(super) fn log_prompt(&self) -> Option<String> {
+        if let Some(p) = self.path_prompt() {
+            return Some(p);
+        }
         let s = &self.log_search;
         if s.filtering {
             return Some(format!("filter: {}", s.filter));
@@ -69,6 +73,9 @@ impl App {
     /// Said after the open prompt: [`NOT_LOADED`] when its pattern
     /// matches no loaded row and more may exist.
     pub fn log_prompt_note(&self) -> Option<&'static str> {
+        if self.mode == Mode::PathFilter {
+            return None;
+        }
         let s = &self.log_search;
         let pat = if s.filtering {
             &s.filter
@@ -145,26 +152,36 @@ impl App {
         if self.view_index(v).is_some() {
             return None;
         }
-        let at = self.all_rows.iter().position(|r| {
+        let shown = |id: &String| self.rows.iter().position(|s| &s.info.commit == id);
+        let ids: Vec<String> = self
+            .all_rows
+            .iter()
+            .map(|r| r.info.commit.clone())
+            .collect();
+        let found = self.all_rows.iter().position(|r| {
             if v.working {
                 r.working
             } else {
                 r.info.commit == v.commit
             }
-        })?;
-        let shown = |r: &Row| {
-            self.rows
-                .iter()
-                .position(|s| s.info.commit == r.info.commit)
+        });
+        // A path change dropped it from the log: its place in the log
+        // before (see `set_path`).
+        let (ids, at) = match (found, &self.hidden_open) {
+            (Some(at), _) => (&ids, at),
+            (None, Some((id, before))) if *id == v.commit => {
+                (before, before.iter().position(|c| c == id)?)
+            }
+            _ => return None,
         };
         Some(if forward {
-            self.all_rows[at + 1..].iter().find_map(shown)
+            ids[at + 1..].iter().find_map(shown)
         } else {
-            self.all_rows[..at].iter().rev().find_map(shown)
+            ids[..at].iter().rev().find_map(shown)
         })
     }
 
-    fn cursor_id(&self) -> Option<String> {
+    pub(super) fn cursor_id(&self) -> Option<String> {
         self.rows.get(self.cursor).map(|r| r.info.commit.clone())
     }
 
@@ -208,6 +225,11 @@ impl App {
         self.log_search.filter.clear();
         self.mode = Mode::Normal;
         self.refilter(keep);
+    }
+
+    /// A text filter is kept.
+    pub(super) fn log_filtered(&self) -> bool {
+        !self.log_search.filter.is_empty()
     }
 
     /// Clear the filter when it hides `id`, a loaded commit (a picked

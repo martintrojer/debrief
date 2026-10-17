@@ -10,7 +10,8 @@
 //! clipped to the width; the open commit's row on the cursor-row
 //! background, the list's cursor bold on it while the list has focus;
 //! the log's dim `… more` row ends it while more commits may exist. The
-//! log's search and filter matches are marked as in the log.
+//! log's search and filter matches are marked as in the log, and a
+//! path filter shows on the rule as `─ ⌕ path ─`.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -84,11 +85,24 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
     if inner.height == 0 {
         return;
     }
-    let rule = "─".repeat(inner.width as usize);
-    frame.render_widget(
-        Paragraph::new(rule).style(Style::new().fg(palette::OVERLAY)),
-        Rect { height: 1, ..inner },
-    );
+    // The rule carries a path filter: `─ ⌕ src/app ────`.
+    let w = inner.width as usize;
+    let rule = match app.path_filter() {
+        Some(p) if w > 4 => {
+            let chip = super::log::path_chip(p, w - 3);
+            let used = 3 + chip.width();
+            Line::from(vec![
+                Span::styled("─ ", Style::new().fg(palette::OVERLAY)),
+                Span::styled(chip, Style::new().fg(palette::PEACH)),
+                Span::styled(
+                    format!(" {}", "─".repeat(w.saturating_sub(used))),
+                    Style::new().fg(palette::OVERLAY),
+                ),
+            ])
+        }
+        _ => Line::styled("─".repeat(w), Style::new().fg(palette::OVERLAY)),
+    };
+    frame.render_widget(Paragraph::new(rule), Rect { height: 1, ..inner });
     let list = Rect {
         y: inner.y + 1,
         height: inner.height - 1,

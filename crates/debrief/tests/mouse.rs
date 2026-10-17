@@ -1100,19 +1100,21 @@ fn mouse_events_are_ignored_while_typing() {
 
 #[test]
 fn mouse_events_are_ignored_in_the_log_filter() {
-    let f = fixture();
-    let mut clock = Clock::new();
-    let mut app = f.app("");
-    keys(&mut app, "f");
-    assert_eq!(app.mode(), Mode::Filter);
-    let log = app.log_layout(main_area(&app)).log;
-    double_click(&mut app, &mut clock, log.x + 5, log.y + 3);
-    wheel(&mut app, log.x + 5, log.y + 3, true);
-    assert_eq!(app.mode(), Mode::Filter);
-    assert_eq!(
-        (app.cursor(), app.scroll(), app.screen()),
-        (0, 0, Screen::Log)
-    );
+    for (key, mode) in [("f", Mode::Filter), ("F", Mode::PathFilter)] {
+        let f = fixture();
+        let mut clock = Clock::new();
+        let mut app = f.app("");
+        keys(&mut app, key);
+        assert_eq!(app.mode(), mode);
+        let log = app.log_layout(main_area(&app)).log;
+        double_click(&mut app, &mut clock, log.x + 5, log.y + 3);
+        wheel(&mut app, log.x + 5, log.y + 3, true);
+        assert_eq!(app.mode(), mode);
+        assert_eq!(
+            (app.cursor(), app.scroll(), app.screen()),
+            (0, 0, Screen::Log)
+        );
+    }
 }
 
 #[test]

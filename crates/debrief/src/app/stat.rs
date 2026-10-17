@@ -52,6 +52,8 @@ pub const STACKED_HALF_FROM: u16 = 40;
 /// Where the log screen's panes go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LogLayout {
+    /// The path filter's row across the top, while one is set.
+    pub chip: Option<Rect>,
     pub log: Rect,
     /// The stats pane, its border (left or top edge) included.
     pub stats: Option<Rect>,
@@ -123,6 +125,7 @@ pub fn log_width(fit: u16, cols: u16) -> u16 {
 /// the log's width side by side before [`log_width`] bounds it.
 pub fn log_layout(area: Rect, stats: bool, fit: u16) -> LogLayout {
     let none = LogLayout {
+        chip: None,
         log: area,
         stats: None,
         side_by_side: false,
@@ -137,6 +140,7 @@ pub fn log_layout(area: Rect, stats: bool, fit: u16) -> LogLayout {
         ])
         .areas(area);
         return LogLayout {
+            chip: None,
             log,
             stats: Some(pane),
             side_by_side: true,
@@ -154,6 +158,7 @@ pub fn log_layout(area: Rect, stats: bool, fit: u16) -> LogLayout {
     }
     let [log, pane] = Layout::vertical([Constraint::Min(0), Constraint::Length(h)]).areas(area);
     LogLayout {
+        chip: None,
         log,
         stats: Some(pane),
         side_by_side: false,
@@ -162,13 +167,28 @@ pub fn log_layout(area: Rect, stats: bool, fit: u16) -> LogLayout {
 
 impl App {
     /// The log screen's panes for `area`.
+    /// A path filter takes the top row (when there are rows to spare).
     pub fn log_layout(&self, area: Rect) -> LogLayout {
         let fit = if self.stats_visible() && area.width >= SIDE_BY_SIDE_MIN {
             self.log_fit()
         } else {
             0
         };
-        log_layout(area, self.stats_visible(), fit)
+        let (chip, area) = match self.path_filter() {
+            Some(_) if area.height > 1 => (
+                Some(Rect { height: 1, ..area }),
+                Rect {
+                    y: area.y + 1,
+                    height: area.height - 1,
+                    ..area
+                },
+            ),
+            _ => (None, area),
+        };
+        LogLayout {
+            chip,
+            ..log_layout(area, self.stats_visible(), fit)
+        }
     }
 
     /// The columns most log rows need: the 90th percentile of the loaded

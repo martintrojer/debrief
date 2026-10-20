@@ -48,16 +48,31 @@ fn fixture() -> Fixture {
 
 impl Fixture {
     fn app(&self) -> App {
-        App::new(
-            vcs::open(&self.root, OpenOptions::default()).unwrap(),
-            StartOptions::new(self.cache.clone()),
-        )
-        .unwrap()
+        self.app_with(StartOptions::new(self.cache.clone()))
+    }
+
+    fn app_with(&self, opts: StartOptions) -> App {
+        App::new(vcs::open(&self.root, OpenOptions::default()).unwrap(), opts).unwrap()
+    }
+
+    /// Options with `[view] follow_working` on.
+    fn follow_opts(&self) -> StartOptions {
+        let mut opts = StartOptions::new(self.cache.clone());
+        opts.config.view.follow_working = true;
+        opts
     }
 
     /// The app with the working copy open.
     fn open(&self) -> App {
-        let mut app = self.app();
+        self.open_in(self.app())
+    }
+
+    /// The app with the working copy open, following the tree.
+    fn open_following(&self) -> App {
+        self.open_in(self.app_with(self.follow_opts()))
+    }
+
+    fn open_in(&self, mut app: App) -> App {
         keys(&mut app, "gg");
         press(&mut app, KeyCode::Enter);
         assert_eq!(app.screen(), Screen::Commit(0));
@@ -319,6 +334,82 @@ fn r_reloads_the_working_copy_in_place() {
     keys(&mut app, "r");
     row_of(&app, "n3", RowKind::Line(LineKind::Added));
     assert_eq!(app.commit_cursor().row, r, "cursor row kept");
+}
+
+#[test]
+fn a_tree_change_leaves_the_open_working_copy_by_default() {
+    let f = fixture();
+    let mut app = f.open();
+    let before = app.commit_rows().to_vec();
+    std::fs::write(f.root.join("new.txt"), "n0\nn1\nn2\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(app.commit_rows(), before, "waits for r");
+    keys(&mut app, "r");
+    row_of(&app, "n0", RowKind::Line(LineKind::Added));
+}
+
+#[test]
+fn a_tree_change_reloads_the_open_working_copy_in_place() {
+    let f = fixture();
+    let mut app = f.open_following();
+    let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    // An earlier file grows a line: the cursor follows its line down.
+    std::fs::write(f.root.join("a.txt"), "a1\nA2\nX\na3\na5\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    row_of(&app, "X", RowKind::Line(LineKind::Added));
+    assert_eq!(
+        app.commit_cursor().row,
+        row_of(&app, "n2", RowKind::Line(LineKind::Added)),
+        "cursor kept on its line"
+    );
+    assert_eq!(app.screen(), Screen::Commit(0));
+}
+
+#[test]
+fn a_tree_change_waits_while_a_selection_or_draft_is_open() {
+    let f = fixture();
+    let mut app = f.open_following();
+    let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    keys(&mut app, "V");
+    assert_eq!(app.mode(), Mode::Visual);
+    let before = app.commit_rows().to_vec();
+    std::fs::write(f.root.join("new.txt"), "n0\nn1\nn2\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(app.commit_rows(), before, "the selection's rows stay");
+    assert_eq!(app.mode(), Mode::Visual);
+    press(&mut app, KeyCode::Esc);
+    app.event(AppEvent::WorkingChanged);
+    row_of(&app, "n0", RowKind::Line(LineKind::Added));
+}
+
+#[test]
+fn a_tree_change_to_clean_leaves_the_working_copy_view() {
+    let f = fixture();
+    let mut app = f.open_following();
+    git(&f.root, &["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(f.root.join("new.txt")).unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(app.screen(), Screen::Log);
+    assert_eq!(summaries(&app), ["second", "base"]);
+}
+
+#[test]
+fn the_tree_watcher_reloads_the_open_view_off_the_ui_thread() {
+    let f = fixture();
+    let (mut app, reads, rx) = f.counting_with(f.follow_opts());
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    settle_events(&mut app, &rx);
+    assert!(app.viewing_working_copy());
+    reads.set(0);
+    std::fs::write(f.root.join("new.txt"), "n0\nn1\nn2\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(reads.get(), 0, "read the working copy on the UI thread");
+    settle_events(&mut app, &rx);
+    row_of(&app, "n0", RowKind::Line(LineKind::Added));
+    assert!(app.viewing_working_copy());
 }
 
 #[test]
@@ -863,12 +954,23 @@ impl Fixture {
         std::rc::Rc<std::cell::Cell<usize>>,
         mpsc::Receiver<AppEvent>,
     ) {
+        self.counting_with(StartOptions::new(self.cache.clone()))
+    }
+
+    fn counting_with(
+        &self,
+        opts: StartOptions,
+    ) -> (
+        App,
+        std::rc::Rc<std::cell::Cell<usize>>,
+        mpsc::Receiver<AppEvent>,
+    ) {
         let reads = std::rc::Rc::new(std::cell::Cell::new(0));
         let v = Counting {
             inner: vcs::open(&self.root, OpenOptions::default()).unwrap(),
             reads: reads.clone(),
         };
-        let mut app = App::new(Box::new(v), StartOptions::new(self.cache.clone())).unwrap();
+        let mut app = App::new(Box::new(v), opts).unwrap();
         let (tx, rx) = mpsc::channel();
         app.set_sender(tx);
         reads.set(0);

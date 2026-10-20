@@ -152,6 +152,9 @@ pub struct ViewConfig {
     /// Inside tmux, zoom debrief's pane at start and unzoom it on exit
     /// (off by default).
     pub tmux_zoom: bool,
+    /// git: an open working-copy view reloads in place when the tree
+    /// changes, as `r` does (off by default: it waits for `r`).
+    pub follow_working: bool,
     /// The commit view's header row: short ID and subject (on by default).
     pub header: bool,
 }
@@ -323,6 +326,7 @@ impl Default for ViewConfig {
             files: FilesLayout::Tree,
             split_min_width: SPLIT_MIN_WIDTH,
             tmux_zoom: false,
+            follow_working: false,
             header: true,
         }
     }
@@ -491,6 +495,7 @@ impl Config {
             set(&mut c.view.files, v.files);
             set(&mut c.view.split_min_width, v.split_min_width);
             set(&mut c.view.tmux_zoom, v.tmux_zoom);
+            set(&mut c.view.follow_working, v.follow_working);
             set(&mut c.view.header, v.header);
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
@@ -697,6 +702,7 @@ struct RawView {
     files: Option<FilesLayout>,
     split_min_width: Option<u16>,
     tmux_zoom: Option<bool>,
+    follow_working: Option<bool>,
     header: Option<bool>,
 }
 
@@ -1084,6 +1090,17 @@ kinds = [
                 .tmux_zoom
         );
         assert!(Config::parse("[view]\ntmux_zoom = \"yes\"\n").is_err());
+    }
+
+    #[test]
+    fn view_follow_working_defaults_off() {
+        assert!(!Config::defaults().view.follow_working);
+        assert!(
+            Config::parse("[view]\nfollow_working = true\n")
+                .unwrap()
+                .view
+                .follow_working
+        );
     }
 
     #[test]

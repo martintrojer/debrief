@@ -795,6 +795,40 @@ impl App {
         }
     }
 
+    /// git, the tree watcher under `[view] follow_working`: reload an open
+    /// working-copy view in place,
+    /// the cursor on its line at the same screen row. Not while a
+    /// selection or a comment draft holds rows of the current diff. A
+    /// load still running is superseded, so the last change wins.
+    /// Whether it started a load.
+    pub(super) fn working_follow(&mut self) -> bool {
+        if !self.config.view.follow_working
+            || !matches!(self.screen, Screen::Commit(_))
+            || matches!(self.mode, Mode::Visual | Mode::Comment)
+        {
+            return false;
+        }
+        let Some(v) = self
+            .commit
+            .as_ref()
+            .filter(|v| v.working && v.diff.is_some())
+        else {
+            return false;
+        };
+        let anchor = v.anchor().map(|a| (a, v.cur.row.saturating_sub(v.scroll)));
+        let row = v.cur.row;
+        self.next_request += 1;
+        let request = self.next_request;
+        if let Some(v) = &mut self.commit {
+            v.request = request;
+            // The row is the fallback when the anchor's line is gone.
+            v.keep_row = Some(row);
+            v.keep_anchor = anchor;
+        }
+        self.start_working(request);
+        true
+    }
+
     /// `T`: switch between hunks and the full file for this session and
     /// reload the open commit in that mode, the cursor kept on its line.
     pub(super) fn toggle_context(&mut self) {

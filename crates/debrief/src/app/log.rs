@@ -548,6 +548,11 @@ impl App {
         if self.vcs.kind() != Kind::Git {
             return;
         }
+        // An open working-copy view follows the tree; its load updates
+        // the row too.
+        if self.working_follow() {
+            return;
+        }
         self.load_working();
         if self.sender.is_none() {
             self.working_rows();

@@ -51,6 +51,10 @@
 ## full diffs need, and unzoom it on exit. A window already zoomed at
 ## start, or unzoomed meanwhile, is left as it is.
 # tmux_zoom = false
+## git: an open working-copy view reloads in place when files change, the
+## cursor kept on its line. Off: the view waits for r (the log's
+## working-copy row follows the tree either way).
+# follow_working = false
 ## The commit view's header row: the short ID and the subject, a
 ## conventional-commit type (feat, fix(ui), ...) as a coloured badge.
 # header = true

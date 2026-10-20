@@ -139,7 +139,9 @@ Uncommitted changes show in the log and take comments like any commit.
   directory are refused for comments and for `<leader>o`.
 - **Refresh:** `r` and a return from the editor reload the working copy's
   view in place, keeping the cursor row. Any other commit's view stays as
-  it was opened.
+  it was opened. git: with `[view] follow_working = true` the open
+  working-copy view also reloads when files change, the cursor kept on its
+  line; it waits while a selection or comment box is open.
 
 ## The commit view
 
@@ -507,6 +509,7 @@ session. The rows without a key are set only in the file.
 | the file list as a tree / flat paths | `` ` `` | `view.files` | `"tree"` (or `"flat"`) |
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
 | header row (short ID and subject) on the commit screen | — | `view.header` | `true` |
+| git: the open working-copy view follows file changes | `r` | `view.follow_working` | `false` |
 | zoom the tmux pane while debrief runs (see [Panes and tmux](#panes-and-tmux)) | — | `view.tmux_zoom` | `false` |
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |

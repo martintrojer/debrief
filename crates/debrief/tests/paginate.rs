@@ -116,8 +116,9 @@ fn a_full_page_ends_with_a_more_row_and_j_past_it_loads_the_next() {
     assert_eq!(app.rows().len(), 5);
     assert!(app.log_more());
     let s = screen(&mut app, 80, 12);
-    assert!(s[4].contains("commit 8"), "{s:#?}");
-    assert_eq!(s[5].trim(), MORE, "{s:#?}");
+    // Under the branch chip: the five rows, then the more row.
+    assert!(s[5].contains("commit 8"), "{s:#?}");
+    assert_eq!(s[6].trim(), MORE, "{s:#?}");
     // Onto the last row: nothing loads.
     keys(&mut app, "4j");
     assert_eq!((app.rows().len(), app.cursor()), (5, 4));

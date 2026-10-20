@@ -58,8 +58,22 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     };
     let width = area.width as usize;
     let text = subject.text;
-    let right = format!(" {id} ");
-    let right_w = right.chars().count();
+    // The short ID, then the branch the log lists, dim.
+    // Only while the row stays centred with room for some subject.
+    let branch = app
+        .branch_name()
+        .map(|b| format!(" {} {} ", super::log::BRANCH_MARKER, fit(b, 24)))
+        .filter(|b| {
+            let w = Span::raw(b.as_str()).width() + id.chars().count() + 1;
+            2 * (w + 1) + 12 <= width
+        });
+    let right = if branch.is_some() {
+        format!(" {id}")
+    } else {
+        format!(" {id} ")
+    };
+    let branch_w = branch.as_deref().map_or(0, |b| Span::raw(b).width());
+    let right_w = right.chars().count() + branch_w;
     // The badge and subject are centred on the row, kept clear of the ID.
     let mut mid = Vec::new();
     let mut mid_w = 0;
@@ -86,7 +100,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     }
     let mut spans = Vec::new();
     if mid_w + right_w <= width {
-        let pad = (width - mid_w) / 2;
+        // Centred, kept clear of the right side.
+        let pad = ((width - mid_w) / 2).min(width - mid_w - right_w);
         spans.push(Span::styled(" ".repeat(pad), base));
         spans.extend(mid);
         spans.push(Span::styled(
@@ -94,6 +109,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             base,
         ));
         spans.push(Span::styled(right, base.fg(palette::MAUVE)));
+        if let Some(b) = branch {
+            spans.push(Span::styled(b, base.fg(palette::OVERLAY)));
+        }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }

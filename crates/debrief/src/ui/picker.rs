@@ -42,6 +42,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         let empty = match view.kind {
             crate::app::PickerKind::Comments => "No comments",
             crate::app::PickerKind::Sessions => "No sessions",
+            crate::app::PickerKind::Branches => "No branches",
         };
         vec![Line::from(Span::styled(empty, base.fg(palette::OVERLAY)))]
     } else {

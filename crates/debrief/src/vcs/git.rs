@@ -118,6 +118,24 @@ impl Git {
         Ok(out.trim().to_string())
     }
 
+    /// Whether `rev` names a commit.
+    fn exists(&self, rev: &str) -> bool {
+        self.resolve(rev).is_ok()
+    }
+
+    /// The trunk: `origin/HEAD`'s target, else `main`, else `master`.
+    fn trunk(&self) -> Option<String> {
+        let origin = self
+            .git(&["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        origin
+            .into_iter()
+            .chain(["refs/heads/main".into(), "refs/heads/master".into()])
+            .find(|r| self.exists(r))
+    }
+
     /// Untracked, non-ignored paths (repo-relative).
     fn untracked(&self) -> Result<Vec<String>> {
         let out = self.git(&["ls-files", "-z", "--others", "--exclude-standard", "--"])?;
@@ -289,6 +307,73 @@ impl Vcs for Git {
             .filter(|r| !r.trim().is_empty())
             .map(parse_record)
             .collect()
+    }
+
+    fn branches(&self) -> Result<Vec<String>> {
+        let out = self.git(&[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname)",
+            "refs/heads/",
+        ])?;
+        Ok(out
+            .lines()
+            .filter_map(|l| l.strip_prefix("refs/heads/"))
+            .map(str::to_string)
+            .collect())
+    }
+
+    fn current_branch(&self) -> Result<Option<String>> {
+        // Fails when detached; an unborn branch has no commits to list.
+        let Ok(out) = self.git(&["symbolic-ref", "--quiet", "HEAD"]) else {
+            return Ok(None);
+        };
+        let name = out.trim().strip_prefix("refs/heads/").map(str::to_string);
+        Ok(name.filter(|n| self.exists(&format!("refs/heads/{n}"))))
+    }
+
+    fn branch_revset(
+        &self,
+        branch: &str,
+        trunk: Option<&str>,
+        _with_working_copy: bool,
+    ) -> Result<String> {
+        let tip = format!("refs/heads/{branch}");
+        if !self.exists(&tip) {
+            bail!("no such branch: {branch}");
+        }
+        let trunk = match trunk {
+            Some(t) => {
+                self.resolve(t).with_context(|| format!("trunk {t}"))?;
+                Some(t.to_string())
+            }
+            None => self.trunk(),
+        };
+        let Some(trunk) = trunk else {
+            return Ok(tip);
+        };
+        // Trunk's own branch (`main` for `origin/main`), even when ahead
+        // of it, and a branch merged into trunk: the whole history.
+        let short = [
+            "refs/remotes/origin/",
+            "refs/remotes/",
+            "refs/heads/",
+            "origin/",
+        ]
+        .iter()
+        .find_map(|p| trunk.strip_prefix(p))
+        .unwrap_or(&trunk);
+        if short == branch {
+            return Ok(tip);
+        }
+        let in_trunk = self
+            .git(&["merge-base", "--is-ancestor", &tip, &trunk])
+            .is_ok();
+        Ok(if in_trunk {
+            tip
+        } else {
+            format!("{trunk}..{tip}")
+        })
     }
 
     fn show(&self, commit: &str, context: DiffContext) -> Result<CommitDiff> {

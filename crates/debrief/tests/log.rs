@@ -110,22 +110,24 @@ fn git_log_markers_cursor_mark_and_reload() {
         .unwrap()
         .log(None, 10)
         .unwrap();
+    // The branch chip on top, the log under it.
+    assert!(s[0].starts_with(" ⎇ "), "{s:#?}");
     assert!(
-        s[0].starts_with(&format!("● {} ", &log[0].commit[..8])),
+        s[1].starts_with(&format!("● {} ", &log[0].commit[..8])),
         "{s:#?}"
     );
-    assert!(s[0].ends_with("t            commit 2"), "{}", s[0]);
+    assert!(s[1].ends_with("t            commit 2"), "{}", s[1]);
     assert!(
-        s[1].starts_with("● ") && s[1].ends_with("commit 1"),
-        "{}",
-        s[1]
-    );
-    assert!(
-        s[2].starts_with("  ") && s[2].ends_with("commit 0"),
+        s[2].starts_with("● ") && s[2].ends_with("commit 1"),
         "{}",
         s[2]
     );
-    assert!(s[0].contains("  0s ") || s[0].contains("s "), "{}", s[0]);
+    assert!(
+        s[3].starts_with("  ") && s[3].ends_with("commit 0"),
+        "{}",
+        s[3]
+    );
+    assert!(s[1].contains("  0s ") || s[1].contains("s "), "{}", s[1]);
     assert!(s[11].contains("2 new"), "{}", s[11]);
     assert!(s[11].contains(" git "), "{}", s[11]);
     assert!(s[11].contains("2/3"), "{}", s[11]);
@@ -146,9 +148,9 @@ fn git_log_markers_cursor_mark_and_reload() {
     assert_eq!(app.rows()[app.cursor()].info.commit, under);
     let s = screen(&mut app);
     assert!(
-        s[0].starts_with("● ") && s[0].ends_with("commit 3"),
+        s[1].starts_with("● ") && s[1].ends_with("commit 3"),
         "{}",
-        s[0]
+        s[1]
     );
 
     // m persisted across opens.
@@ -181,7 +183,7 @@ fn motions_and_enter() {
     keys(&mut app, "2gg");
     assert_eq!(app.cursor(), 1);
     app.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
-    assert_eq!(app.cursor(), 6, "half of 11 log rows");
+    assert_eq!(app.cursor(), 6, "half of 10 log rows");
     app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
     assert_eq!(app.cursor(), 1);
     key(&mut app, 'G');
@@ -269,9 +271,9 @@ fn jj_log_markers_updated_and_reload() {
     let s = screen(&mut app);
     let change = app.rows()[1].info.change.clone().unwrap();
     assert!(
-        s[1].starts_with(&format!("◐ {} ", &change[..8])),
+        s[2].starts_with(&format!("◐ {} ", &change[..8])),
         "{}",
-        s[1]
+        s[2]
     );
     assert!(s[11].contains(" jj "), "{}", s[11]);
     assert!(s[11].contains("0 new, 2 updated"), "{}", s[11]);
@@ -427,20 +429,25 @@ fn stats_pane_side_by_side_at_120_columns_stacked_at_119() {
     let (tmp, root) = git_repo(3);
     let mut app = open_with_stats(&root, &tmp.path().join("cache"));
     let s = screen_at(&mut app, 120, 20);
-    assert!(s[0].contains("loading…"), "{s:#?}");
+    assert!(s[1].contains("loading…"), "{s:#?}");
     settle(&mut app);
     let s = screen_at(&mut app, 120, 20);
-    // Log 72 columns, the border at column 72, the pane after it.
-    for row in &s[..19] {
+    // The branch chip on top; under it the log 72 columns, the border at
+    // column 72, the pane after it.
+    assert!(s[0].starts_with(" ⎇ ") && !s[0].contains('│'), "{s:#?}");
+    for row in &s[1..19] {
         assert_eq!(row.chars().nth(72), Some('│'), "{s:#?}");
     }
     assert!(
-        s[0].chars()
+        s[1].chars()
             .take(72)
             .collect::<String>()
             .contains("commit 2")
     );
-    let pane: Vec<String> = s.iter().map(|r| r.chars().skip(74).collect()).collect();
+    let pane: Vec<String> = s[1..]
+        .iter()
+        .map(|r| r.chars().skip(74).collect())
+        .collect();
     // One header line (wrapped here): ID, author, date.
     assert!(pane[0].contains("  t <t@t>  "), "{pane:#?}");
     assert!(pane[0].contains(" UTC"), "{pane:#?}");
@@ -452,10 +459,10 @@ fn stats_pane_side_by_side_at_120_columns_stacked_at_119() {
     );
 
     let s = screen_at(&mut app, 119, 20);
-    // 19 rows above the status line: the pane is the bottom 40% (7),
-    // its top border on row 12.
+    // 18 rows between the chip and the status line: the pane is the
+    // bottom 40% (7), its top border on row 12.
     assert!(s[12].trim_end().chars().all(|c| c == '─'), "{s:#?}");
-    assert!(s[0].contains("commit 2") && !s[0].contains('│'));
+    assert!(s[1].contains("commit 2") && !s[1].contains('│'));
     assert!(s[13].contains(&app.rows()[0].info.commit[..12]), "{s:#?}");
 
     // <leader>e hides it.
@@ -473,13 +480,13 @@ fn a_wide_terminal_gives_the_stats_pane_what_the_log_doesnt_need() {
     settle(&mut app);
     // Short summaries: the log keeps its 72-column floor, the pane the rest.
     let s = screen_at(&mut app, 250, 20);
-    assert_eq!(s[0].chars().nth(72), Some('│'), "{s:#?}");
+    assert_eq!(s[1].chars().nth(72), Some('│'), "{s:#?}");
     // A long summary widens the log, up to 60% (150 of 250).
     std::fs::write(root.join("long.txt"), "x\n").unwrap();
     commit(&root, &"long subject ".repeat(20));
     key(&mut app, 'r');
     let s = screen_at(&mut app, 250, 20);
-    assert_eq!(s[0].chars().nth(150), Some('│'), "{s:#?}");
+    assert_eq!(s[1].chars().nth(150), Some('│'), "{s:#?}");
 }
 
 #[test]
@@ -564,10 +571,10 @@ fn filter_narrows_marks_only_visible_rows_and_survives_reload() {
     let mut t = Terminal::new(TestBackend::new(80, 12)).unwrap();
     t.draw(|f| app.render(f)).unwrap();
     let buf = t.backend().buffer();
-    let line: String = (0..80).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+    let line: String = (0..80).map(|x| buf[(x, 1)].symbol().to_string()).collect();
     let at = line.find("commit 1").unwrap();
     let x = line[..at].chars().count() as u16;
-    assert_eq!(buf[(x, 0)].bg, debrief::ui::palette::YELLOW);
+    assert_eq!(buf[(x, 1)].bg, debrief::ui::palette::YELLOW);
 
     // m marks only the filtered rows.
     key(&mut app, 'm');
@@ -747,8 +754,8 @@ fn stats_pane_message_is_whole_when_it_fits_and_every_line_is_reachable() {
     let mut app = open_with_stats(&root, &tmp.path().join("cache"));
     settle(&mut app);
 
-    // The repro: 119x26, a five-line message and one file fit, so all of
-    // it shows, uncut.
+    // The repro: 119x27 (the 119x26 of old plus the branch chip's row), a
+    // five-line message and one file fit, so all of it shows, uncut.
     let at = |app: &mut App, n: usize| {
         key(app, 'g');
         key(app, 'g');
@@ -758,7 +765,7 @@ fn stats_pane_message_is_whole_when_it_fits_and_every_line_is_reachable() {
         settle(app);
     };
     at(&mut app, 5);
-    let pane = pane_at(&mut app, 119, 26);
+    let pane = pane_at(&mut app, 119, 27);
     for want in [
         "m5 subj",
         "m5 line 1",

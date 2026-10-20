@@ -134,6 +134,7 @@ fn diff_comment(commit: &str, path: &str, line: u32, body: &str) -> Comment {
         commit: commit.into(),
         change: None,
         summary: None,
+        branch: None,
     };
     Comment::on_diff(path, rev, Side::New, line..=line, "+x", body)
 }
@@ -383,20 +384,20 @@ fn the_log_marks_sessions_with_their_unsent_count() {
     let (top, _) = save_top_with_comment(&f);
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("1 top"), "{}", s[0]);
-    assert!(!s[1].contains(''), "{}", s[1]);
+    assert!(s[1].contains("1 top"), "{}", s[1]);
+    assert!(!s[2].contains(''), "{}", s[2]);
     // Kept by a filter.
     keys(&mut app, "ftop");
     press(&mut app, KeyCode::Enter);
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains("1 top"), "{}", s[0]);
+    assert!(s[1].contains("1 top"), "{}", s[1]);
     // No comments: the bare marker.
     let mut s = f.store().load(&top).unwrap().unwrap();
     s.comments.clear();
     f.store().save(&s).unwrap();
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains(" top"), "{}", s[0]);
+    assert!(s[1].contains(" top"), "{}", s[1]);
 }
 
 #[test]
@@ -585,7 +586,7 @@ fn quit_prompt_y_copies_marks_sent_and_quits() {
     // A sent comment is never restored and the marker counts unsent ones.
     let mut app = f.app();
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].contains(" top"), "{}", s[0]);
+    assert!(s[1].contains(" top"), "{}", s[1]);
     open(&mut app, 0);
     assert!(f.comments().is_empty());
 }
@@ -684,7 +685,8 @@ fn session_list_opens_and_deletes() {
     assert_eq!(v.items[0].key, top);
     assert!(v.items[0].label.ends_with(" top"), "{}", v.items[0].label);
     assert!(
-        v.items[0].detail.ends_with("ago, 1 comment"),
+        v.items[0].detail.ends_with("ago on master, 1 comment")
+            || v.items[0].detail.ends_with("ago on main, 1 comment"),
         "{}",
         v.items[0].detail
     );
@@ -765,7 +767,7 @@ fn the_working_copy_has_one_session_file() {
     assert_eq!(s.comments[0].comment.rev, None);
     press(&mut app, KeyCode::Esc);
     let s = screen(&mut app, 80, 8);
-    assert!(s[0].ends_with("1"), "{}", s[0]);
+    assert!(s[1].ends_with("1"), "{}", s[1]);
 }
 
 #[test]

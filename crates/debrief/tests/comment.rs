@@ -175,8 +175,11 @@ fn cc_on_an_added_line() {
             commit: info.commit.clone(),
             change: None,
             summary: Some("change".into()),
+            // The log lists the checked-out branch; the comment records it.
+            branch: app.branch_name().map(str::to_string),
         })
     );
+    assert!(app.branch_name().is_some(), "on a branch");
 }
 
 #[test]
@@ -410,6 +413,7 @@ fn another_handle_adding_a_comment_shows_after_a_tick() {
         commit: info.commit,
         change: None,
         summary: None,
+        branch: None,
     };
     f.review()
         .add(Comment::on_diff(
@@ -512,6 +516,7 @@ fn add_diff(f: &Fixture, commit: &str, path: &str, line: u32, body: &str) -> u64
         commit: commit.into(),
         change: None,
         summary: None,
+        branch: None,
     };
     f.review()
         .add(Comment::on_diff(
@@ -717,6 +722,7 @@ fn a_comment_added_during_a_send_survives() {
             commit: commit.clone(),
             change: None,
             summary: None,
+            branch: None,
         };
         Review::open(&cache, &root)
             .unwrap()

@@ -144,7 +144,9 @@ fn dirty_tree_puts_the_working_copy_row_on_top() {
     assert_eq!(app.rows()[0].info.commit, WORKING_ID);
     assert_eq!(app.working_copy().unwrap().files, 2);
     let s = screen(&mut app, 80, 6);
-    assert!(s[0].starts_with("✎ Working copy  2 files"), "{}", s[0]);
+    // Row 0 is the branch chip; the working-copy row tops the log.
+    assert!(s[0].starts_with(" ⎇ "), "{}", s[0]);
+    assert!(s[1].starts_with("✎ Working copy  2 files"), "{}", s[1]);
     assert!(s[5].contains("0 new, working copy dirty"), "{}", s[5]);
     // Marking all seen skips the row; it never becomes new.
     keys(&mut app, "m");
@@ -281,6 +283,7 @@ fn old_side_markers_never_match_a_renamed_new_path() {
         commit: head.commit,
         change: head.change,
         summary: None,
+        branch: None,
     };
     review
         .add(Comment::on_diff(
@@ -508,7 +511,9 @@ fn unborn_repos_start_and_show_the_working_copy() {
         let mut app = f.app();
         assert!(app.rows().is_empty(), "{format}");
         let s = screen(&mut app, 80, 4);
-        assert!(s[0].contains("no commits"), "{format}: {}", s[0]);
+        // Unborn: no branch to list, so the chip names HEAD.
+        assert_eq!(s[0], " ⎇ HEAD", "{format}");
+        assert!(s[1].contains("no commits"), "{format}: {}", s[1]);
         std::fs::write(f.root.join("first.txt"), "hello\n").unwrap();
         keys(&mut app, "r");
         assert_eq!(summaries(&app), ["Working copy"], "{format}");
@@ -726,8 +731,9 @@ fn jj_at_shows_the_edit_after_the_snapshot() {
     assert!(app.rows()[0].working, "@ is marked");
     assert!(!app.rows()[1].working);
     let s = screen(&mut app, 80, 6);
-    assert!(s[0].starts_with("✎ "), "{}", s[0]);
-    assert!(!s[1].starts_with("✎"), "{}", s[1]);
+    assert!(s[0].starts_with(" ⎇ "), "{}", s[0]);
+    assert!(s[1].starts_with("✎ "), "{}", s[1]);
+    assert!(!s[2].starts_with("✎"), "{}", s[2]);
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
     assert!(app.viewing_working_copy());
@@ -884,10 +890,11 @@ fn search_and_filter_highlight_the_working_copy_row() {
         let mut t = Terminal::new(TestBackend::new(80, 12)).unwrap();
         t.draw(|fr| app.render(fr)).unwrap();
         let buf = t.backend().buffer();
-        let line: String = (0..80).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        // Row 1: the working-copy row, under the branch chip.
+        let line: String = (0..80).map(|x| buf[(x, 1)].symbol().to_string()).collect();
         let at = line.find(needle).unwrap();
         let x = line[..at].chars().count() as u16;
-        buf[(x, 0)].bg == debrief::ui::palette::YELLOW
+        buf[(x, 1)].bg == debrief::ui::palette::YELLOW
     };
     assert!(!yellow_at(&mut app, "Working"));
     keys(&mut app, "fworking");
@@ -1018,7 +1025,7 @@ fn the_tree_watcher_reads_the_working_row_off_the_ui_thread() {
     );
     settle_events(&mut app, &rx);
     let s = screen(&mut app, 80, 6);
-    assert!(s[0].starts_with("✎ Working copy  2 files"), "{}", s[0]);
+    assert!(s[1].starts_with("✎ Working copy  2 files"), "{}", s[1]);
     std::fs::remove_file(f.root.join("x.txt")).unwrap();
     std::fs::remove_file(f.root.join("y.txt")).unwrap();
     app.event(AppEvent::WorkingChanged);

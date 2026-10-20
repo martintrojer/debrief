@@ -67,6 +67,11 @@
 ##   revset = "trunk().."
 ## Commits loaded at first and per page (at least 1); --limit overrides it.
 # limit = 200
+## The trunk a branch's log stops at: the log shows the branch's commits
+## not in it (its whole history when it is in trunk). A git revision or a
+## jj revset. Unset: origin/HEAD, else main, else master (jj: trunk(),
+## else a main or master bookmark).
+##   trunk = "develop"
 
 ## ---------------------------------------------------------------------------
 ## Rendering

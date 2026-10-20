@@ -37,7 +37,7 @@ pub(super) fn elide_left(s: &str, max: usize) -> String {
 }
 
 /// `s` in at most `max` columns, cut from the right before `…`.
-fn elide_right(s: &str, max: usize) -> String {
+pub(super) fn elide_right(s: &str, max: usize) -> String {
     if s.width() <= max {
         return s.to_string();
     }
@@ -56,16 +56,29 @@ fn elide_right(s: &str, max: usize) -> String {
     format!("{keep}…")
 }
 
-/// The log's path filter and kept text filter in `room` columns:
-/// `  path: src/app` and `  filter: x (3/41)`. The text filter is cut
+/// The log's branch, path filter and kept text filter in `room` columns:
+/// `  branch: main`, `  path: src/app` and `  filter: x (3/41)`. The text filter is cut
 /// first (from the right), down to what the path leaves; the path keeps
 /// at least 12 columns of the text filter's room and is cut from the
 /// left.
 fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
     const LEAD: &str = "  path: ";
+    const BRANCH: &str = "  branch: ";
     let filter = app.filter_label();
     let mut spans = Vec::new();
     let mut room = room;
+    // The branch first, cut from the right; it keeps at most what leaves
+    // the path and the filter 12 columns each.
+    let label = app.branch_label();
+    let others = 12 * (usize::from(app.path_filter().is_some()) + usize::from(filter.is_some()));
+    let fit = room
+        .saturating_sub(others)
+        .min(BRANCH.len() + label.width());
+    if fit > BRANCH.len() {
+        let b = format!("{BRANCH}{}", elide_right(&label, fit - BRANCH.len()));
+        room = room.saturating_sub(b.width());
+        spans.push(Span::styled(b, base.fg(palette::GREEN)));
+    }
     if let Some(p) = app.path_filter() {
         let text = filter.as_ref().map_or(0, |f| f.width() + 2);
         let fit = room.saturating_sub(text).max(room.min(LEAD.len() + 12));
@@ -147,10 +160,10 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(format!(" {root}"), base.fg(palette::BLUE)),
         Span::styled(kind, base.fg(palette::OVERLAY)),
     ];
-    // `path: …` before the counts, the text filter after them.
+    // `branch: …` and `path: …` before the counts, the text filter after.
     let mut filters = filters.into_iter().peekable();
-    if app.path_filter().is_some()
-        && let Some(p) = filters.next_if(|s| s.content.starts_with("  path: "))
+    while let Some(p) = filters
+        .next_if(|s| s.content.starts_with("  branch: ") || s.content.starts_with("  path: "))
     {
         spans.push(p);
     }

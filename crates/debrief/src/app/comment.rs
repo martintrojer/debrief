@@ -27,12 +27,14 @@ use super::textbox::{Edit, TextBox};
 use super::{App, Mode};
 use crate::vcs::{CommitInfo, DiffLine, FileDiff, LineKind};
 
-/// The revision a comment on `info` records.
-fn rev_of(info: &CommitInfo) -> Rev {
+/// The revision a comment on `info` records, with the branch the log
+/// listed it under.
+fn rev_of(info: &CommitInfo, branch: Option<&str>) -> Rev {
     Rev {
         commit: info.commit.clone(),
         change: info.change.clone(),
         summary: Some(info.summary.clone()),
+        branch: branch.map(str::to_string),
     }
 }
 
@@ -626,7 +628,7 @@ impl App {
         };
         Ok(Draft {
             path: path.to_string(),
-            rev: Some(rev_of(info)),
+            rev: Some(rev_of(info, self.branch_name())),
             side: Some(side),
             lines: (a, b),
             excerpt,
@@ -667,7 +669,11 @@ impl App {
         }
         let path = f.old_path.as_deref().ok_or(NOT_A_LINE)?;
         let base = self.working_base()?;
-        Ok(draft(path, Some(rev_of(&base)), Some(Side::Old)))
+        Ok(draft(
+            path,
+            Some(rev_of(&base, self.branch_name())),
+            Some(Side::Old),
+        ))
     }
 
     /// The working copy's base commit: git's `HEAD`, jj's single `@-`.

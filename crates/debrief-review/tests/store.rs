@@ -45,6 +45,7 @@ fn add_edit_remove_clear_round_trip() {
         commit: "3f2a9c1e0000".into(),
         change: Some("kmxqpwrz".into()),
         summary: Some("feat: x".into()),
+        branch: None,
     };
     let a = r.add(note("docs/plan.md", 12, "one")).unwrap();
     let b = r
@@ -104,6 +105,7 @@ fn side_serialises_lowercase() {
         commit: "c".into(),
         change: None,
         summary: None,
+        branch: None,
     };
     r.add(Comment::on_diff("f", rev, Side::Old, 1..=1, "-x", "b"))
         .unwrap();
@@ -426,6 +428,62 @@ fn v1_batch_without_kind_loads() {
     assert_eq!(r.comments().len(), 1);
     let c = &r.comments()[0];
     assert_eq!((c.id, c.lines, c.kind.clone()), (7, (3, 4), None));
+}
+
+#[test]
+fn a_rev_branch_round_trips_and_is_omitted_when_unset() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    let rev = |branch: Option<&str>| Rev {
+        commit: "c".into(),
+        change: None,
+        summary: None,
+        branch: branch.map(str::to_string),
+    };
+    r.add(Comment::on_diff(
+        "a",
+        rev(Some("feat/x")),
+        Side::New,
+        1..=1,
+        "+x",
+        "b",
+    ))
+    .unwrap();
+    r.add(Comment::on_diff(
+        "b",
+        rev(None),
+        Side::New,
+        1..=1,
+        "+x",
+        "b",
+    ))
+    .unwrap();
+    let json: serde_json::Value =
+        serde_json::from_slice(&fs::read(json_file(cache.path())).unwrap()).unwrap();
+    assert_eq!(json["comments"][0]["rev"]["branch"], "feat/x");
+    assert!(json["comments"][1]["rev"].get("branch").is_none());
+    let fresh = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(fresh.comments(), r.comments());
+}
+
+#[test]
+fn a_rev_without_branch_loads() {
+    let (cache, root) = dirs();
+    let mut r = Review::open(cache.path(), root.path()).unwrap();
+    r.add(note("a", 1, "x")).unwrap();
+    let canon = root.path().canonicalize().unwrap();
+    let old = serde_json::json!({
+        "version": 1,
+        "root": canon,
+        "comments": [{
+            "id": 7, "path": "a", "side": "new", "lines": [1, 1],
+            "rev": {"commit": "c", "change": null, "summary": null},
+            "excerpt": "e", "body": "b", "created": 1700000000
+        }]
+    });
+    fs::write(json_file(cache.path()), old.to_string()).unwrap();
+    let r = Review::open(cache.path(), root.path()).unwrap();
+    assert_eq!(r.comments()[0].rev.as_ref().unwrap().branch, None);
 }
 
 #[test]

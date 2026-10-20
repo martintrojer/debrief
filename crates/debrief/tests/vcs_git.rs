@@ -725,3 +725,108 @@ fn full_context_working_copy() {
     let w = v.working_copy(Context::Full).unwrap().unwrap();
     assert_eq!(new_lines(&w.diff.files[0]), (1..=40).collect::<Vec<_>>());
 }
+
+/// `main`: first, second; `feat/x` off second: f1, f2; back on `main`.
+fn branchy() -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("a.txt"), "1\n").unwrap();
+    commit(&root, "first");
+    std::fs::write(root.join("a.txt"), "2\n").unwrap();
+    commit(&root, "second");
+    git(&root, &["checkout", "-q", "-b", "feat/x"]);
+    std::fs::write(root.join("f.txt"), "1\n").unwrap();
+    commit(&root, "f1");
+    std::fs::write(root.join("f.txt"), "2\n").unwrap();
+    commit(&root, "f2");
+    git(&root, &["checkout", "-q", "main"]);
+    let root = root.canonicalize().unwrap();
+    (tmp, root)
+}
+
+fn summaries_of(v: &dyn vcs::Vcs, revset: &str) -> Vec<String> {
+    v.log(Some(revset), 200)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect()
+}
+
+#[test]
+fn branches_and_the_current_one() {
+    let (_t, root) = branchy();
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    let mut b = v.branches().unwrap();
+    b.sort();
+    assert_eq!(b, ["feat/x", "main"]);
+    assert_eq!(v.current_branch().unwrap().as_deref(), Some("main"));
+    git(&root, &["checkout", "-q", "--detach", "HEAD"]);
+    assert_eq!(v.current_branch().unwrap(), None, "detached");
+}
+
+#[test]
+fn a_branch_lists_what_trunk_lacks_and_trunk_its_whole_history() {
+    let (_t, root) = branchy();
+    git(&root, &["branch", "-q", "old", "main~1"]);
+    let before = git_snapshot(&root);
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &feat), ["f2", "f1"]);
+    let main = v.branch_revset("main", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &main), ["second", "first"]);
+    // A trunk override; a merged branch shows its whole history.
+    let over = v.branch_revset("feat/x", Some("main~1"), false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &over), ["f2", "f1", "second"]);
+    let old = v.branch_revset("old", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &old), ["first"]);
+    assert!(v.branch_revset("nope", None, false).is_err());
+    assert!(v.branch_revset("feat/x", Some("nope"), false).is_err());
+    let after = git_snapshot(&root);
+    assert_same(&before.0, &after.0);
+    assert_eq!(before.1, after.1);
+}
+
+#[test]
+fn trunk_falls_back_to_master_and_to_the_whole_history() {
+    let (_t, root) = branchy();
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    git(&root, &["branch", "-q", "-m", "main", "master"]);
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &feat), ["f2", "f1"]);
+    git(&root, &["branch", "-q", "-m", "master", "trunkless"]);
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(
+        summaries_of(v.as_ref(), &feat),
+        ["f2", "f1", "second", "first"]
+    );
+}
+
+#[test]
+fn origin_head_is_trunk_and_its_own_branch_shows_whole_even_ahead() {
+    let (_t, root) = branchy();
+    // A fake remote-tracking trunk one commit behind main.
+    git(&root, &["update-ref", "refs/remotes/origin/main", "main~1"]);
+    git(
+        &root,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    let main = v.branch_revset("main", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &main), ["second", "first"]);
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &feat), ["f2", "f1", "second"]);
+}
+
+#[test]
+fn option_like_branch_names_stay_names() {
+    let (_t, root) = branchy();
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    assert!(v.branch_revset("--all", None, false).is_err());
+    assert!(v.branch_revset("-n1", None, false).is_err());
+}

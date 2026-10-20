@@ -295,6 +295,29 @@ pub trait Vcs {
     fn working_status_in(&self, _path: Option<&str>) -> Result<Option<WorkingStatus>> {
         self.working_status()
     }
+    /// Local branches (git) or local bookmarks (jj), most recently
+    /// committed first. A backend without branches lists none.
+    fn branches(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+    /// The checked-out branch: git's `HEAD` branch (`None` detached); jj's
+    /// one bookmark on `@`, else the one on `@-`, else `None`.
+    fn current_branch(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+    /// The revset (jj) or revision range (git) listing `branch`: its
+    /// commits not in trunk, or its whole history when it is in trunk or
+    /// no trunk is found. `trunk` overrides trunk detection (a revision
+    /// for git, a revset for jj). `with_working_copy` (jj, the current
+    /// bookmark): `@` is listed too.
+    fn branch_revset(
+        &self,
+        branch: &str,
+        _trunk: Option<&str>,
+        _with_working_copy: bool,
+    ) -> Result<String> {
+        bail!("no branches here: {branch}")
+    }
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
     /// revision naming one commit. `context`: hunks or the whole file.
     fn show(&self, commit: &str, context: Context) -> Result<CommitDiff>;

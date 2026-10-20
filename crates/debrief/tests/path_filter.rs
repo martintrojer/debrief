@@ -20,7 +20,8 @@ fn repo() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
     std::fs::create_dir_all(root.join("a/sub")).unwrap();
-    git(&root, &["init", "-q"]);
+    // On `main` whatever init.defaultBranch says: the screens name it.
+    git(&root, &["init", "-q", "-b", "main"]);
     let w = |p: &str, s: &str| std::fs::write(root.join(p), s).unwrap();
     w("a/x.txt", "0\n");
     commit(&root, "m0");
@@ -172,9 +173,9 @@ fn the_log_loads_only_matching_commits_and_shows_the_path() {
     let mut app = open(&root, &tmp.path().join("cache"), Some("a/x.txt"));
     assert_eq!(rows(&app), ["m3", "m0"]);
     let s = screen(&mut app, 80, 8);
-    assert_eq!(s[0], " ⌕ a/x.txt", "{s:#?}");
+    assert_eq!(s[0], " ⎇ main  ⌕ a/x.txt", "{s:#?}");
     assert!(s[1].ends_with("m3"), "{s:#?}");
-    assert!(s[7].contains("path: a/x.txt"), "{}", s[7]);
+    assert!(s[7].contains("branch: main  path: a/x.txt"), "{}", s[7]);
     // The text filter narrows what the path loaded; both show.
     keys(&mut app, "fm3");
     press(&mut app, KeyCode::Enter);
@@ -285,7 +286,12 @@ fn the_working_row_follows_the_path() {
 #[test]
 fn a_commit_opens_on_the_first_file_under_the_path() {
     let (tmp, root) = repo();
-    let mut app = open(&root, &tmp.path().join("cache"), Some("b.txt"));
+    // A sidebar wide enough for the rule's branch and path chips.
+    let mut opts = StartOptions::new(tmp.path().join("cache"));
+    opts.config.view.stats = false;
+    opts.config.view.sidebar_width = debrief::app::config::SidebarWidth::Fixed(30);
+    opts.path = Some("b.txt".into());
+    let mut app = App::new(vcs::open(&root, OpenOptions::default()).unwrap(), opts).unwrap();
     assert_eq!(rows(&app), ["m3", "m1"]);
     press(&mut app, KeyCode::Enter);
     assert!(matches!(app.screen(), Screen::Commit(0)));
@@ -298,8 +304,11 @@ fn a_commit_opens_on_the_first_file_under_the_path() {
     // The commit list's rule shows the path too.
     keys(&mut app, " E");
     let s = screen(&mut app, 120, 30);
-    assert!(s.iter().any(|l| l.contains("─ ⌕ b.txt ─")), "{s:#?}");
-    assert!(s[29].contains("path: b.txt"), "{}", s[29]);
+    assert!(
+        s.iter().any(|l| l.contains("─ ⎇ main  ⌕ b.txt ─")),
+        "{s:#?}"
+    );
+    assert!(s[29].contains("branch: main  path: b.txt"), "{}", s[29]);
 }
 
 /// Enter a path in the `F` prompt, replacing what it holds.

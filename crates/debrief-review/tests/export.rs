@@ -96,6 +96,7 @@ fn diff_new_side_jj_rev() {
         commit: "3f2a9c1e77aa".into(),
         change: Some("kmxqpwrz".into()),
         summary: Some("feat: parse things".into()),
+        branch: None,
     };
     assert_eq!(
         md(vec![Comment::on_diff(
@@ -114,11 +115,36 @@ fn diff_new_side_jj_rev() {
 }
 
 #[test]
+fn a_branch_follows_the_revision() {
+    let rev = Rev {
+        commit: "abcdef0123456789".into(),
+        change: None,
+        summary: None,
+        branch: Some("feat/x".into()),
+    };
+    assert_eq!(
+        md(vec![Comment::on_diff(
+            "src/y.rs",
+            rev,
+            Side::New,
+            5..=5,
+            "+new()",
+            "Good."
+        )]),
+        "# Review feedback\n\n\
+         ## Item 1\n- File: src/y.rs (new side)\n- Line: 5\n- Revision: abcdef01\n\
+         - Branch: feat/x\n\
+         ```diff\n+new()\n```\nGood.\n\n"
+    );
+}
+
+#[test]
 fn diff_old_side_git_rev() {
     let rev = Rev {
         commit: "abcdef0123456789".into(),
         change: None,
         summary: None,
+        branch: None,
     };
     assert_eq!(
         md(vec![Comment::on_diff(

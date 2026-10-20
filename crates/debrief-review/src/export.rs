@@ -102,6 +102,9 @@ fn item(out: &mut String, n: usize, c: &Comment) {
                 parts.push(format!("\"{summary}\""));
             }
             let _ = writeln!(out, "- Revision: {}", parts.join(" "));
+            if let Some(branch) = &rev.branch {
+                let _ = writeln!(out, "- Branch: {branch}");
+            }
         }
     }
     let fence = "`".repeat(longest_backtick_run(&c.excerpt).max(2) + 1);

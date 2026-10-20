@@ -484,3 +484,107 @@ fn full_context_shows_the_whole_file() {
     assert_eq!(full.files[0].hunks.len(), 1);
     assert_eq!(new(&full), (1..=40).collect::<Vec<_>>());
 }
+
+/// `main` on second; `feat/x` on f2 (f1, f2 off second); `@` empty on
+/// top of `main`.
+fn branchy() -> Env {
+    let e = Env::new(false);
+    e.write("a.txt", "1\n");
+    e.jj(&["--quiet", "commit", "-m", "first"]);
+    e.write("a.txt", "2\n");
+    e.jj(&["--quiet", "commit", "-m", "second"]);
+    e.jj(&["--quiet", "bookmark", "create", "main", "-r", "@-"]);
+    e.write("f.txt", "1\n");
+    e.jj(&["--quiet", "commit", "-m", "f1"]);
+    e.write("f.txt", "2\n");
+    e.jj(&["--quiet", "commit", "-m", "f2"]);
+    e.jj(&["--quiet", "bookmark", "create", "feat/x", "-r", "@-"]);
+    e.jj(&["--quiet", "new", "main"]);
+    e
+}
+
+fn summaries_of(v: &dyn vcs::Vcs, revset: &str) -> Vec<String> {
+    v.log(Some(revset), 200)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect()
+}
+
+#[test]
+fn bookmarks_and_the_current_one() {
+    if !have_jj() {
+        return;
+    }
+    let e = branchy();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let mut b = v.branches().unwrap();
+    b.sort();
+    assert_eq!(b, ["feat/x", "main"]);
+    // `@` is empty on `main`: the bookmark on `@-`.
+    assert_eq!(v.current_branch().unwrap().as_deref(), Some("main"));
+    // One on `@` wins over `@-`.
+    e.jj(&["--quiet", "bookmark", "create", "here", "-r", "@"]);
+    assert_eq!(v.current_branch().unwrap().as_deref(), Some("here"));
+    // Two on `@`: no guess.
+    e.jj(&["--quiet", "bookmark", "create", "there", "-r", "@"]);
+    assert_eq!(v.current_branch().unwrap(), None);
+}
+
+#[test]
+fn a_bookmark_lists_what_trunk_lacks_and_trunk_its_whole_history() {
+    if !have_jj() {
+        return;
+    }
+    let e = branchy();
+    let ops = e.op_count();
+    let before = snapshot(&e.root.join(".jj"));
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    // No remote: `trunk()` is the root, so the `main` bookmark is trunk.
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &feat), ["f2", "f1"]);
+    let main = v.branch_revset("main", None, false).unwrap();
+    assert_eq!(
+        summaries_of(v.as_ref(), &format!("{main} ~ root()")),
+        ["second", "first"]
+    );
+    // `@` on the bookmark's line comes along.
+    let with_at = v.branch_revset("main", None, true).unwrap();
+    assert_eq!(
+        summaries_of(v.as_ref(), &format!("{with_at} ~ root()")),
+        ["", "second", "first"]
+    );
+    let over = v.branch_revset("feat/x", Some("main-"), false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &over), ["f2", "f1", "second"]);
+    assert!(v.branch_revset("nope", None, false).is_err());
+    assert_same(&before, &snapshot(&e.root.join(".jj")));
+    assert_eq!(e.op_count(), ops);
+}
+
+#[test]
+fn odd_bookmark_names_are_literals() {
+    if !have_jj() {
+        return;
+    }
+    let e = branchy();
+    // jj takes an odd name quoted, as a revset string literal.
+    e.jj(&[
+        "--quiet",
+        "bookmark",
+        "create",
+        "\"a\\\"b|c\"",
+        "-r",
+        "main",
+    ]);
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    assert!(
+        v.branches().unwrap().iter().any(|b| b == "a\"b|c"),
+        "raw name listed"
+    );
+    let odd = v.branch_revset("a\"b|c", None, false).unwrap();
+    assert_eq!(
+        summaries_of(v.as_ref(), &format!("{odd} ~ root()")),
+        ["second", "first"]
+    );
+    assert!(v.branch_revset("main | all()", None, false).is_err());
+}

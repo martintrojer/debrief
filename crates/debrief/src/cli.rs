@@ -1,4 +1,4 @@
-//! Command line: `debrief [PATH] [--revset R] [--limit N] [--cache-dir DIR]
+//! Command line: `debrief [PATH] [--branch B | --revset R] [--limit N] [--cache-dir DIR]
 //! [--state-dir DIR] [--config PATH] [--no-snapshot]`, or `debrief --init-config [--config PATH]`.
 
 use std::path::PathBuf;
@@ -22,8 +22,12 @@ pub struct Cli {
     pub path: Option<PathBuf>,
     /// Revset (jj) or revision range (git) to list instead of `[log]
     /// revset`, else the current commit and its ancestors.
-    #[arg(long, value_name = "R")]
+    #[arg(long, value_name = "R", conflicts_with = "branch")]
     pub revset: Option<String>,
+    /// The branch (git) or bookmark (jj) to list: its commits not in
+    /// trunk (default: the current branch). `<leader>b` switches.
+    #[arg(long, value_name = "B")]
+    pub branch: Option<String>,
     /// Commits loaded at first and per page (default: `[log] limit`, else
     /// 200).
     #[arg(long, value_name = "N")]
@@ -97,7 +101,14 @@ impl Cli {
         Ok(StartOptions {
             cache_dir,
             state_dir,
-            revset: self.revset.clone().or_else(|| config.log.revset.clone()),
+            // `--branch` replaces a configured revset as it does `--revset`.
+            revset: self.revset.clone().or_else(|| {
+                self.branch
+                    .is_none()
+                    .then(|| config.log.revset.clone())
+                    .flatten()
+            }),
+            branch: self.branch.clone(),
             path: None,
             limit: self.limit.unwrap_or(config.log.limit),
             config,
@@ -190,6 +201,16 @@ mod tests {
         assert_eq!((o.revset.as_deref(), o.limit), (Some("main.."), 3));
         let o = opts(&["--revset", "::@"]);
         assert_eq!((o.revset.as_deref(), o.limit), (Some("::@"), 7));
+        // A branch replaces the configured revset.
+        let o = opts(&["--branch", "feat/x"]);
+        assert_eq!((o.revset, o.branch.as_deref()), (None, Some("feat/x")));
+    }
+
+    #[test]
+    fn branch_and_revset_conflict() {
+        let e = Cli::try_parse_from(["debrief", "--branch", "b", "--revset", "r"]).unwrap_err();
+        assert_eq!(e.kind(), clap::error::ErrorKind::ArgumentConflict);
+        assert_eq!(e.exit_code(), 2);
     }
 
     #[test]

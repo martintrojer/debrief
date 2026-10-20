@@ -765,6 +765,10 @@ impl App {
             } else {
                 visit.summary.clone()
             },
+            branch: self
+                .branch_name()
+                .map(str::to_string)
+                .or_else(|| old.and_then(|s| s.branch.clone())),
             saved: session::now(),
             comments,
             view,
@@ -811,12 +815,16 @@ impl App {
                     0 => String::new(),
                     n => format!(" ({n} sent)"),
                 };
+                let branch = s
+                    .branch
+                    .as_deref()
+                    .map_or(String::new(), |b| format!(" on {b}"));
                 super::PickerItem {
                     id: 0,
                     key: s.commit.clone(),
                     label: format!("{short} {}", s.summary),
                     detail: format!(
-                        "{} ago, {}{sent}",
+                        "{} ago{branch}, {}{sent}",
                         ago(s.saved),
                         comments_label(s.comments.len())
                     ),
@@ -833,6 +841,14 @@ impl App {
 
     /// Enter in the session list: open its commit, if listed.
     pub(super) fn session_goto(&mut self, key: &str) {
+        // The session's branch first; a gone one opens in this log.
+        let branch = self.sessions.saved.get(key).and_then(|s| s.branch.clone());
+        let mut note = None;
+        if let Some(b) = &branch
+            && !self.branch_switch(b)
+        {
+            note = Some(super::branch::gone(b));
+        }
         // The working copy's row: git's synthetic one, jj's `@`.
         let id = match key {
             WORKING => self
@@ -855,6 +871,14 @@ impl App {
         match i {
             Some(i) => self.open_index(i),
             None => self.set_status(SESSION_NOT_IN_LOG),
+        }
+        if let Some(n) = note {
+            let s = if self.status.is_empty() {
+                n
+            } else {
+                format!("{n}; {}", self.status)
+            };
+            self.set_status(s);
         }
     }
 

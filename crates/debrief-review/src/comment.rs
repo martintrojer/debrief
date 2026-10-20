@@ -10,6 +10,11 @@ pub struct Rev {
     pub commit: String,
     pub change: Option<String>,
     pub summary: Option<String>,
+    /// The branch (git) or bookmark (jj) the commit was reviewed under;
+    /// `None` when the log showed no branch. Batches written before it
+    /// read as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// Which side of a diff the comment's lines refer to.

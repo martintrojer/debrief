@@ -160,6 +160,7 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("Backspace", Fl, G::Log, "in the filter: delete a character"),
         b("F", L, G::Log, PATH_FILTER),
         b("<leader>F", L, G::Log, FILTERS_CLEAR),
+        b("<leader>b", L, G::Log, BRANCH_LIST),
         b(
             "Enter",
             Pf,
@@ -300,6 +301,9 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("<leader>F", CL, G::Commits, FILTERS_CLEAR),
         b("<leader>F", C, G::Commit, FILTERS_CLEAR),
         b("<leader>F", F, G::Files, FILTERS_CLEAR),
+        b("<leader>b", CL, G::Commits, BRANCH_LIST),
+        b("<leader>b", C, G::Commit, BRANCH_LIST),
+        b("<leader>b", F, G::Files, BRANCH_LIST),
         b("Esc", CL, G::Commits, "back to the diff"),
         b("q", CL, G::Commits, "back to the log"),
         b("{1-9}", CL, G::Commits, "count for the next motion"),
@@ -444,6 +448,8 @@ const FILE_LIST_TOGGLE: &str = "show or hide the file list";
 const PATH_FILTER: &str = "filter the log by a file or directory";
 /// `<leader>F`.
 const FILTERS_CLEAR: &str = "clear the path and text filters";
+/// `<leader>b`.
+const BRANCH_LIST: &str = "pick the branch the log lists";
 /// `<leader>E`.
 const COMMIT_LIST_TOGGLE: &str = "show or hide the commit list under the files";
 

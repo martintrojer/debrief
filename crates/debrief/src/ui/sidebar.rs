@@ -85,22 +85,20 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
     if inner.height == 0 {
         return;
     }
-    // The rule carries a path filter: `─ ⌕ src/app ────`.
+    // The rule names the branch and path filter: `─ ⎇ main  ⌕ src ──`.
     let w = inner.width as usize;
-    let rule = match app.path_filter() {
-        Some(p) if w > 4 => {
-            let chip = super::log::path_chip(p, w - 3);
-            let used = 3 + chip.width();
-            Line::from(vec![
-                Span::styled("─ ", Style::new().fg(palette::OVERLAY)),
-                Span::styled(chip, Style::new().fg(palette::PEACH)),
-                Span::styled(
-                    format!(" {}", "─".repeat(w.saturating_sub(used))),
-                    Style::new().fg(palette::OVERLAY),
-                ),
-            ])
-        }
-        _ => Line::styled("─".repeat(w), Style::new().fg(palette::OVERLAY)),
+    let rule = if w > 4 {
+        let chips = super::log::chips(app, w - 3);
+        let used = 3 + chips.iter().map(Span::width).sum::<usize>();
+        let mut spans = vec![Span::styled("─ ", Style::new().fg(palette::OVERLAY))];
+        spans.extend(chips);
+        spans.push(Span::styled(
+            format!(" {}", "─".repeat(w.saturating_sub(used))),
+            Style::new().fg(palette::OVERLAY),
+        ));
+        Line::from(spans)
+    } else {
+        Line::styled("─".repeat(w), Style::new().fg(palette::OVERLAY))
     };
     frame.render_widget(Paragraph::new(rule), Rect { height: 1, ..inner });
     let list = Rect {

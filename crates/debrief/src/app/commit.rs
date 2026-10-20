@@ -698,7 +698,8 @@ impl App {
                 // counts are the same in either context). Under a path
                 // filter the row shows only while a file under it changed.
                 self.working_request += 1;
-                self.working = self.path_touched(&w.diff.files).then(|| (&w).into());
+                self.working = (self.path_touched(&w.diff.files) && self.on_checked_out())
+                    .then(|| (&w).into());
                 self.stat_put_working(&w);
                 self.working_rows();
                 self.loaded(request, Ok(diff));

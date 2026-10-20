@@ -52,7 +52,7 @@ pub const STACKED_HALF_FROM: u16 = 40;
 /// Where the log screen's panes go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LogLayout {
-    /// The path filter's row across the top, while one is set.
+    /// The branch and path filter row across the top.
     pub chip: Option<Rect>,
     pub log: Rect,
     /// The stats pane, its border (left or top edge) included.
@@ -167,15 +167,17 @@ pub fn log_layout(area: Rect, stats: bool, fit: u16) -> LogLayout {
 
 impl App {
     /// The log screen's panes for `area`.
-    /// A path filter takes the top row (when there are rows to spare).
+    /// The branch (and path filter) row takes the top row (when there are
+    /// rows to spare).
     pub fn log_layout(&self, area: Rect) -> LogLayout {
         let fit = if self.stats_visible() && area.width >= SIDE_BY_SIDE_MIN {
             self.log_fit()
         } else {
             0
         };
-        let (chip, area) = match self.path_filter() {
-            Some(_) if area.height > 1 => (
+        // The branch row is always there (when there are rows to spare).
+        let (chip, area) = match () {
+            () if area.height > 1 => (
                 Some(Rect { height: 1, ..area }),
                 Rect {
                     y: area.y + 1,

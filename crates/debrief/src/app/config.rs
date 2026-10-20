@@ -105,6 +105,9 @@ pub struct LogConfig {
     pub revset: Option<String>,
     /// Commits loaded at first and per page (at least 1).
     pub limit: usize,
+    /// The trunk a branch's log stops at (a git revision, a jj revset);
+    /// `None` finds it: `origin/HEAD`, `main`, `master` (jj `trunk()`).
+    pub trunk: Option<String>,
 }
 
 impl Default for LogConfig {
@@ -112,6 +115,7 @@ impl Default for LogConfig {
         LogConfig {
             revset: None,
             limit: crate::app::DEFAULT_LIMIT,
+            trunk: None,
         }
     }
 }
@@ -473,6 +477,9 @@ impl Config {
                 c.log.revset = l.revset;
             }
             set(&mut c.log.limit, l.limit.map(NonZeroUsize::get));
+            if l.trunk.is_some() {
+                c.log.trunk = l.trunk;
+            }
         }
         if let Some(v) = raw.view {
             set(&mut c.view.sidebar, v.sidebar);
@@ -649,6 +656,8 @@ struct RawLog {
     #[serde(default, deserialize_with = "non_empty")]
     revset: Option<String>,
     limit: Option<NonZeroUsize>,
+    #[serde(default, deserialize_with = "non_empty")]
+    trunk: Option<String>,
 }
 
 /// A string with something in it besides whitespace.
@@ -943,6 +952,7 @@ kinds = [
             Config::defaults().log,
             LogConfig {
                 revset: None,
+                trunk: None,
                 limit: 200
             }
         );
@@ -1090,6 +1100,14 @@ kinds = [
                 .tmux_zoom
         );
         assert!(Config::parse("[view]\ntmux_zoom = \"yes\"\n").is_err());
+    }
+
+    #[test]
+    fn log_trunk_defaults_to_detection() {
+        assert_eq!(Config::defaults().log.trunk, None);
+        let c = Config::parse("[log]\ntrunk = \"develop\"\n").unwrap();
+        assert_eq!(c.log.trunk.as_deref(), Some("develop"));
+        assert!(Config::parse("[log]\ntrunk = \"\"\n").is_err());
     }
 
     #[test]

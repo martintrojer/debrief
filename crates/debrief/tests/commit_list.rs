@@ -257,9 +257,9 @@ fn rows_show_the_markers_the_short_id_and_the_summary_clipped() {
     let buf = draw(&mut app, COLS, ROWS);
     let c = app.commit_layout(area(ROWS)).commits.unwrap();
     assert_eq!(buf[(c.x + c.width - 1, c.y + 1)].symbol(), "│");
-    // The rule.
+    // The rule, naming the branch.
     assert!(
-        line(&buf, c, c.y).starts_with("──────"),
+        line(&buf, c, c.y).starts_with("─ ⎇ ") && line(&buf, c, c.y).contains(" ─────"),
         "{:?}",
         line(&buf, c, c.y)
     );

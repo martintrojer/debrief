@@ -172,14 +172,18 @@ impl App {
             self.set_status(format!("{e:#}"));
         }
         let limit = self.page.limit;
-        let commits = self.vcs.log_in(
-            self.opts.revset.as_deref(),
-            self.opts.path.as_deref(),
-            limit,
-        )?;
+        self.branch_refresh();
+        let commits = self
+            .vcs
+            .log_in(self.query.as_deref(), self.opts.path.as_deref(), limit)?;
         let commits = self.trim(commits, limit);
         match self.vcs.kind() {
-            Kind::Git => self.load_working(),
+            Kind::Git if self.on_checked_out() => self.load_working(),
+            Kind::Git => {
+                // Another branch: its history has no uncommitted changes.
+                self.working_request += 1;
+                self.working = None;
+            }
             Kind::Jj => match self.vcs.working_copy_commit() {
                 Ok(id) => self.working_commit = id,
                 Err(e) => {
@@ -258,17 +262,13 @@ impl App {
                     self.vcs.open_options(),
                     self.vcs.pinned_op(),
                 );
-                let q = (self.opts.revset.clone(), self.opts.path.clone());
+                let q = (self.query.clone(), self.opts.path.clone());
                 spawn_page(at, q, (request, limit), tx);
             }
             None => {
                 let result = self
                     .vcs
-                    .log_in(
-                        self.opts.revset.as_deref(),
-                        self.opts.path.as_deref(),
-                        limit,
-                    )
+                    .log_in(self.query.as_deref(), self.opts.path.as_deref(), limit)
                     .map_err(|e| format!("{e:#}"));
                 self.page_loaded(request, result);
             }
@@ -411,7 +411,7 @@ impl App {
 
     fn set_working(&mut self, result: Result<Option<WorkingStatus>, String>) {
         match result {
-            Ok(w) => self.working = w,
+            Ok(w) => self.working = w.filter(|_| self.on_checked_out()),
             Err(e) => {
                 self.working = None;
                 self.set_status(format!("cannot read the working copy: {e}"));
@@ -545,7 +545,7 @@ impl App {
 
     /// git's tree watcher: re-read only the working-copy row.
     pub(super) fn working_changed(&mut self) {
-        if self.vcs.kind() != Kind::Git {
+        if self.vcs.kind() != Kind::Git || !self.on_checked_out() {
             return;
         }
         // An open working-copy view follows the tree; its load updates

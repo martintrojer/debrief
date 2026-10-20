@@ -10,17 +10,20 @@ What debrief does and how to drive it. For in-app key help, see
 debrief                    # the repo holding the working directory
 debrief path/to/repo       # or any path inside a repo
 debrief src/app            # below the root: only commits touching it (a path filter)
+debrief --branch feat/x    # a branch (jj bookmark): its commits not in trunk
 debrief --revset 'main..'  # jj revset, or git revision range ([log] revset)
 debrief --limit 500        # commits to load at first and per page ([log] limit, default 200)
 debrief --no-snapshot      # jj: don't snapshot; @ as of the last jj command
 debrief --init-config      # write ~/.config/debrief/config.toml
 ```
 
-jj is used when a `.jj` is found above the path, else git. Both list the
-current commit and its ancestors by default: jj `::@` (not jj's own
-`revsets.log`), git `HEAD`. `[log] revset` and `[log] limit` in the
-[config file](#config) change the defaults; `--revset` and `--limit`
-override them.
+jj is used when a `.jj` is found above the path, else git. Both start on
+the [current branch](#branches): git's checked-out branch, jj's bookmark
+on `@` (else on `@-`). With no current branch they list the current commit
+and its ancestors: jj `::@` (not jj's own `revsets.log`), git `HEAD`.
+`[log] revset` and `[log] limit` in the [config file](#config) change the
+defaults; `--branch`, `--revset` and `--limit` override them. `--branch`
+and `--revset` together are a usage error, and so is an unknown branch.
 
 A `PATH` below the repo's root (a file, or a directory) also sets the
 log's [path filter](#path-filter); the root itself, or no `PATH`, lists
@@ -63,6 +66,7 @@ many have loaded. The commit list pages the same way.
 | `f` | filter; `Enter` keeps it, `Esc` clears it |
 | `F` | path filter: commits touching a file or directory |
 | `<leader>F` | clear the path and text filters |
+| `<leader>b` | pick the branch the log lists |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `<leader>rs` | list the saved review sessions |
@@ -85,6 +89,34 @@ matches and more may exist, the prompt and then the status line say
 `… more not loaded`. The filter narrows the list as you type,
 and the status line shows `filter: x (12/200)`. `m`, `Enter` and `]]` /
 `[[` act on the filtered list, and `r` keeps the filter.
+
+### Branches
+
+The log lists one branch (jj: bookmark) at a time: its commits not in
+trunk, or its whole history when it is trunk or already in it. Trunk is
+`[log] trunk` if set, else `origin/HEAD`'s target, `main` or `master`
+(jj: `trunk()`, else a `main` or `master` bookmark). Picking a branch
+never checks it out.
+
+A `⎇ main` row tops the log and the commit list's rule, and the status
+line shows `branch: main`; the commit view's header shows the branch
+after the short ID. Without a current branch it reads `⎇ HEAD` (jj
+`⎇ @`), and with `--revset` `⎇ revset: R`.
+
+`<leader>b` (on the log and the commit screen) opens the branch picker:
+`HEAD` (jj `@`), `revset: R` when one was given, then the local branches,
+the current one first and marked `(current)`, the rest most recently
+committed first. `●` marks the one listed. Type to filter, `Enter` lists
+it, `Esc` closes. The log reloads; the path and text filters stay; the
+cursor stays on its commit when it is listed. In the commit view the open
+diff stays, and when the new branch lacks it `]]` and `[[` step from its
+old place.
+
+- **Working copy:** git's working-copy row shows only on the checked-out
+  branch. jj lists `@` with its bookmark's commits when `@` sits on it.
+- **A branch that goes away:** on the next reload the log goes back to the
+  current branch and the status line says `branch NAME is gone`.
+- `r` and the watchers keep the branch and re-read where it points.
 
 ### Path filter
 
@@ -398,6 +430,9 @@ the view. There is one per repo root and commit, in
 `<state dir>/sessions/<16 hex of blake3(root)>/<commit id>.json`; the
 working copy's is `working-copy.json`. Nothing is saved automatically.
 
+- **Branch:** a session records the branch the log listed. Opening it
+  from `<leader>rs` lists that branch first; when it is gone it opens in
+  the current log and says so. The session list shows `on BRANCH`.
 - **Save:** `<leader>ss` in the commit view saves the batch's comments on
   that commit (for the working copy: its comments without a revision and
   removed-line comments on its base) and the view: context, layout, file
@@ -434,7 +469,10 @@ working copy's is `working-copy.json`. Nothing is saved automatically.
 
 Comments collect in one batch per repo root, in the cache dir.
 `<leader>rr` exports the batch as markdown and pipes it to `[send]
-command`, with `DEBRIEF_ROOT=<repo root>` in its environment. If no
+command`, with `DEBRIEF_ROOT=<repo root>` in its environment. Each item
+names its file, lines and revision, and a `- Branch:` line with the branch
+the log listed when the comment was made (none for `HEAD` / `@` or a
+revset). If no
 command is set, or it fails or takes over 10 s, the markdown goes to the
 clipboard (OSC 52). Once the review is delivered and marked sent in its
 sessions, the exported comments leave the batch; comments added during
@@ -484,7 +522,8 @@ on the status line: a launcher with a bad `key` is left unbound, and an
 empty or repeated `[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
-(highlighting), `[keys]`, `[mouse]`, `[log]` (which commits load),
+(highlighting), `[keys]`, `[mouse]`, `[log]` (which commits load: `revset`, `limit`, and `trunk`,
+where a branch's log stops),
 `[review]` (comment kinds), `[send]`
 (where `<leader>rr` goes) and `[[launch]]`.
 

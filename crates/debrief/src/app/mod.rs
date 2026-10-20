@@ -2,6 +2,7 @@
 //! `ui` draws. A new screen adds a [`Screen`] variant, its keymap arm in
 //! `keys`, its rows in `help::BINDINGS` and one draw call in `ui`.
 
+pub mod branch;
 mod clue;
 pub mod comment;
 pub mod commit;
@@ -68,6 +69,9 @@ pub struct StartOptions {
     /// The debrief state dir (saved review sessions live under it).
     pub state_dir: PathBuf,
     pub revset: Option<String>,
+    /// `--branch`: the branch (jj bookmark) to list at start; `None` is
+    /// the current one.
+    pub branch: Option<String>,
     /// The log's path filter: only commits touching this repo-relative
     /// file or directory load (`F` changes it).
     pub path: Option<String>,
@@ -84,6 +88,7 @@ impl StartOptions {
             state_dir: cache_dir.join("state"),
             cache_dir,
             revset: None,
+            branch: None,
             path: None,
             limit: DEFAULT_LIMIT,
             config: config::Config::defaults(),
@@ -211,6 +216,12 @@ pub struct App {
     /// The open commit a path change dropped from the log, and the log's
     /// commits before the change (for `]]` / `[[`).
     hidden_open: Option<(String, Vec<String>)>,
+    /// What the log lists (`<leader>b`).
+    selection: branch::Selection,
+    /// The selection's query: `None` is the default history.
+    query: Option<String>,
+    /// The checked-out branch (jj: the bookmark on `@` or `@-`).
+    branch_current: Option<String>,
     /// The log's stats pane.
     stat: stat::StatState,
     /// How many commits the log asks for, and the next page loading.
@@ -323,6 +334,9 @@ impl App {
             log_search: log_search::LogSearch::default(),
             path_edit: None,
             hidden_open: None,
+            selection: branch::Selection::Default,
+            query: None,
+            branch_current: None,
             stat: stat::StatState::default(),
             page: log::Paging::new(limit),
             cursor: 0,
@@ -383,6 +397,8 @@ impl App {
         if !errors.is_empty() {
             app.status = errors.join("; ");
         }
+        app.vcs.refresh(true).ok();
+        app.branch_start()?;
         let commits = app.load(true)?;
         if app.seen.is_fresh() {
             // The first run marks what it lists seen and, under a path
@@ -390,7 +406,7 @@ impl App {
             // unfiltered run starts caught up.
             let mut all = commits.clone();
             if app.opts.path.is_some() {
-                all.extend(app.vcs.log(app.opts.revset.as_deref(), app.opts.limit)?);
+                all.extend(app.vcs.log(app.query.as_deref(), app.opts.limit)?);
             }
             app.seen.mark_all(&all).context("cannot write seen state")?;
         }

@@ -32,7 +32,13 @@ pub enum PickerKind {
     Comments,
     /// `<leader>rs`: the saved review sessions.
     Sessions,
+    /// `<leader>b`: the branches (jj bookmarks) the log can list.
+    Branches,
 }
+/// The branch list's title.
+pub const BRANCHES_TITLE: &str = "Branches";
+/// The keys shown under the branch list.
+pub const BRANCHES_FOOTER: &str = "Enter list it  Esc close";
 /// Status when `<leader>rr` finds an empty batch.
 pub const NOTHING_TO_SEND: &str = "No comments to send";
 /// Status when Enter picks a diff comment whose commit isn't listed.
@@ -177,6 +183,7 @@ impl App {
         let (title, footer) = match p.kind {
             PickerKind::Comments => (PICKER_TITLE, PICKER_FOOTER),
             PickerKind::Sessions => (SESSIONS_TITLE, SESSIONS_FOOTER),
+            PickerKind::Branches => (BRANCHES_TITLE, BRANCHES_FOOTER),
         };
         Some(PickerView {
             kind: p.kind,
@@ -231,6 +238,7 @@ impl App {
                 .map(|r| r.comments().iter().map(item).collect())
                 .unwrap_or_default(),
             PickerKind::Sessions => self.session_items(),
+            PickerKind::Branches => self.branch_items(),
         };
         if let Some(p) = &mut self.picker {
             p.items = items;
@@ -291,6 +299,14 @@ impl App {
             }
             PickerAction::Next | PickerAction::Prev => {}
             PickerAction::Close => self.picker_close(),
+            PickerAction::Accept if p.kind == PickerKind::Branches => {
+                let key = p.selected_key();
+                self.picker_close();
+                if let Some(key) = key {
+                    self.branch_pick(&key);
+                }
+            }
+            PickerAction::Remove | PickerAction::Edit if p.kind == PickerKind::Branches => {}
             PickerAction::Accept if p.kind == PickerKind::Sessions => {
                 let key = p.selected_key();
                 self.picker_close();

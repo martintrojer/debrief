@@ -182,6 +182,8 @@ pub enum Action {
     SessionSave,
     /// `<leader>rs`: list the saved review sessions.
     SessionList,
+    /// `<leader>b`: list the branches.
+    BranchList,
     /// Keys in the quit prompt.
     QuitPrompt(super::session::QuitChoice),
     /// Keys in the `<leader>rl` picker.
@@ -359,7 +361,7 @@ impl App {
 
     /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
     /// prefix waits for more keys), then the built-ins (`e` on the commit
-    /// screen, `E`, `F`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
+    /// screen, `E`, `F`, `b`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
     /// the commit screen and the stats pane on the log; `E` the commit
     /// list under the file list's tree.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
@@ -375,6 +377,7 @@ impl App {
                 ['e'] => KeyResult::Action(Action::ToggleSidebar),
                 ['E'] => KeyResult::Action(Action::ToggleCommits),
                 ['F'] => KeyResult::Action(Action::FiltersClear),
+                ['b'] => KeyResult::Action(Action::BranchList),
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
                 ['r', 's'] => KeyResult::Action(Action::SessionList),
@@ -637,6 +640,7 @@ impl App {
                 | A::Picker(_)
                 | A::SessionSave
                 | A::SessionList
+                | A::BranchList
                 | A::QuitPrompt(_)
         );
         if matches!(self.screen, Screen::Commit(_)) && !shared && !self.list_search(action) {
@@ -647,6 +651,7 @@ impl App {
             A::QuitPrompt(c) => self.quit_choice(c),
             A::SessionSave => self.session_save(),
             A::SessionList => self.session_list(),
+            A::BranchList => self.branch_list(),
             A::Down(c) => self.vertical(n(c)),
             A::Up(c) => self.vertical(-n(c)),
             A::GotoTop(c) => self.goto_row(c.map_or(0, |c| c.saturating_sub(1))),
@@ -889,6 +894,7 @@ fn visual_ok(a: Action) -> bool {
             | A::ReviewSend
             | A::SessionSave
             | A::SessionList
+            | A::BranchList
             | A::FiltersClear
     )
 }

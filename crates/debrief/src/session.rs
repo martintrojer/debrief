@@ -117,6 +117,10 @@ pub struct Session {
     pub change: Option<String>,
     #[serde(default)]
     pub summary: String,
+    /// The branch (jj bookmark) the log listed when it was saved; opening
+    /// the session lists it again. `None` in sessions saved before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     /// Unix seconds.
     pub saved: u64,
     #[serde(default)]
@@ -323,6 +327,7 @@ mod tests {
             commit: commit.into(),
             change: None,
             summary: "s".into(),
+            branch: None,
             saved,
             comments: vec![SavedComment {
                 comment: Comment::on_file("a.txt", 1..=2, "x", "body"),

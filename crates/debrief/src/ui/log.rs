@@ -153,17 +153,39 @@ pub fn path_chip(path: &str, width: usize) -> String {
     format!("{PATH_MARKER} {}", super::status::elide_left(path, room))
 }
 
-/// The path filter's row over the log.
+/// The branch's marker before its name.
+pub const BRANCH_MARKER: &str = "⎇";
+
+/// The chips naming what the log lists, in `width` columns:
+/// `⎇ feat/x` and, under a path filter, `  ⌕ src/app`. The path is cut
+/// first (from the left), then the branch (from the right).
+pub fn chips(app: &App, width: usize) -> Vec<Span<'static>> {
+    use unicode_width::UnicodeWidthStr;
+    let branch = format!("{BRANCH_MARKER} {}", app.branch_label());
+    let branch = super::status::elide_right(&branch, width);
+    let mut out = vec![Span::styled(
+        branch.clone(),
+        Style::new().fg(palette::GREEN),
+    )];
+    let room = width.saturating_sub(branch.width() + 2);
+    if let Some(p) = app.path_filter()
+        && room > PATH_MARKER.chars().count() + 1
+    {
+        out.push(Span::raw("  "));
+        out.push(Span::styled(
+            path_chip(p, room),
+            Style::new().fg(palette::PEACH),
+        ));
+    }
+    out
+}
+
+/// The row over the log naming its branch and path filter.
 pub(super) fn draw_chip(frame: &mut Frame, app: &App, area: Rect) {
-    let Some(path) = app.path_filter() else {
-        return;
-    };
-    let text = format!(
-        " {}",
-        path_chip(path, (area.width as usize).saturating_sub(1))
-    );
-    let style = Style::new().fg(palette::PEACH).bg(palette::MANTLE);
-    frame.render_widget(Paragraph::new(text).style(style), area);
+    let mut spans = vec![Span::raw(" ")];
+    spans.extend(chips(app, (area.width as usize).saturating_sub(1)));
+    let style = Style::new().bg(palette::MANTLE);
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
 }
 
 /// The dim row ending the log and the commit list while more commits may

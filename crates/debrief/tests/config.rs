@@ -430,8 +430,8 @@ fn view_stats_sets_the_stats_pane_at_start() {
     let mut app = f.app("", 120);
     assert!(app.stats_visible());
     assert!(
-        screen(&mut app, 120)[0].contains('│'),
-        "pane beside the log"
+        screen(&mut app, 120)[1].contains('│'),
+        "pane beside the log (row 0 is the branch chip)"
     );
     let mut app = f.app("[view]\nstats = false\n", 120);
     assert!(!app.stats_visible());

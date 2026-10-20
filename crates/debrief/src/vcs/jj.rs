@@ -44,6 +44,39 @@ fn fileset(path: &str) -> String {
     format!("root:\"{quoted}\"")
 }
 
+/// `s` as a jj string literal.
+fn quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The tips a branch's log starts from: the bookmark, and `@` with it
+/// when the working copy is on that bookmark's line.
+fn heads_of(tip: &str, with_working_copy: bool) -> String {
+    if with_working_copy {
+        format!("({tip} | @)")
+    } else {
+        tip.to_string()
+    }
+}
+
+/// The revset of local bookmark `name`.
+fn bookmark(name: &str) -> String {
+    format!("bookmarks(exact:{})", quote(name))
+}
+
 pub struct Jj {
     root: PathBuf,
     opts: OpenOptions,
@@ -237,6 +270,91 @@ impl Vcs for Jj {
             .filter(|r| !r.trim().is_empty())
             .map(parse_record)
             .collect()
+    }
+
+    fn branches(&self) -> Result<Vec<String>> {
+        let out = self.jj(
+            &self.at_op()?,
+            &[
+                "bookmark",
+                "list",
+                "--sort=committer-date-",
+                "-T",
+                r#"if(!remote, stringify(name) ++ "\n")"#,
+            ],
+        )?;
+        let mut names: Vec<String> = Vec::new();
+        for l in out.lines().filter(|l| !l.is_empty()) {
+            if !names.iter().any(|n| n == l) {
+                names.push(l.to_string());
+            }
+        }
+        Ok(names)
+    }
+
+    fn current_branch(&self) -> Result<Option<String>> {
+        let op = self.at_op()?;
+        for rev in ["--revisions=@", "--revisions=@-"] {
+            let out = self.jj(
+                &op,
+                &[
+                    "log",
+                    "--no-graph",
+                    rev,
+                    "-T",
+                    r#"local_bookmarks.map(|b| stringify(b.name()) ++ "\n").join("")"#,
+                ],
+            )?;
+            let names: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+            match names[..] {
+                [] => continue,
+                [one] => return Ok(Some(one.to_string())),
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    fn branch_revset(
+        &self,
+        branch: &str,
+        trunk: Option<&str>,
+        with_working_copy: bool,
+    ) -> Result<String> {
+        let op = self.at_op()?;
+        let tip = bookmark(branch);
+        let has = |revset: &str| -> Result<bool> {
+            let rev = format!("--revisions={revset}");
+            let out = self.jj(&op, &["log", "--no-graph", "-n", "1", &rev, "-T", r#""x""#])?;
+            Ok(!out.is_empty())
+        };
+        if !has(&tip)? {
+            bail!("no such bookmark: {branch}");
+        }
+        // `trunk()` is the root commit when no remote names a trunk: then a
+        // local `main` or `master` bookmark is trunk, as for git.
+        let trunk = match trunk {
+            Some(t) => format!("({t})"),
+            None if has("trunk() ~ root()")? => "(trunk())".to_string(),
+            None => match ["main", "master"]
+                .into_iter()
+                .find(|b| has(&bookmark(b)).unwrap_or(false))
+            {
+                Some(b) if b == branch => {
+                    return Ok(format!("::{}", heads_of(&tip, with_working_copy)));
+                }
+                Some(b) => format!("({})", bookmark(b)),
+                None => return Ok(format!("::{}", heads_of(&tip, with_working_copy))),
+            },
+        };
+        let heads = heads_of(&tip, with_working_copy);
+        // Trunk's own bookmark (`main` for `main@origin`), even when ahead
+        // of it, and a bookmark merged into trunk: the whole history.
+        let own = format!("remote_bookmarks(exact:{}) & {trunk}", quote(branch));
+        if has(&own)? || has(&format!("{tip} & ::{trunk}"))? {
+            return Ok(format!("::{heads}"));
+        }
+        Ok(format!("{trunk}..{heads}"))
     }
 
     fn show(&self, commit: &str, context: DiffContext) -> Result<CommitDiff> {

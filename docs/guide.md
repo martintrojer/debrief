@@ -115,7 +115,9 @@ old place.
 - **Working copy:** git's working-copy row shows only on the checked-out
   branch. jj lists `@` with its bookmark's commits when `@` sits on it.
 - **A branch that goes away:** on the next reload the log goes back to the
-  current branch and the status line says `branch NAME is gone`.
+  current branch and the status line says `branch NAME is gone`. Branch
+  names are exact: `--branch main~1` is not a branch. A trunk that can't
+  be read keeps the branch and says why on the status line.
 - `r` and the watchers keep the branch and re-read where it points.
 
 ### Path filter
@@ -173,7 +175,9 @@ Uncommitted changes show in the log and take comments like any commit.
   view in place, keeping the cursor row. Any other commit's view stays as
   it was opened. git: with `[view] follow_working = true` the open
   working-copy view also reloads when files change, the cursor kept on its
-  line; it waits while a selection or comment box is open.
+  line. While a `V` selection or the comment box is open it waits (a
+  reload already on its way is dropped too), and catches up when they
+  close.
 
 ## The commit view
 
@@ -430,7 +434,8 @@ the view. There is one per repo root and commit, in
 `<state dir>/sessions/<16 hex of blake3(root)>/<commit id>.json`; the
 working copy's is `working-copy.json`. Nothing is saved automatically.
 
-- **Branch:** a session records the branch the log listed. Opening it
+- **Branch:** a session records the branch the log listed when the
+  commit was opened or last changed. Opening it
   from `<leader>rs` lists that branch first; when it is gone it opens in
   the current log and says so. The session list shows `on BRANCH`.
 - **Save:** `<leader>ss` in the commit view saves the batch's comments on
@@ -472,7 +477,8 @@ Comments collect in one batch per repo root, in the cache dir.
 command`, with `DEBRIEF_ROOT=<repo root>` in its environment. Each item
 names its file, lines and revision, and a `- Branch:` line with the branch
 the log listed when the comment was made (none for `HEAD` / `@` or a
-revset). If no
+revset). Control characters in a branch name are written escaped
+(`\n`), so the line stays one line. If no
 command is set, or it fails or takes over 10 s, the markdown goes to the
 clipboard (OSC 52). Once the review is delivered and marked sent in its
 sessions, the exported comments leave the batch; comments added during

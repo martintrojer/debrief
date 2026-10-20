@@ -688,6 +688,17 @@ impl App {
         {
             return;
         }
+        // A follow load that lands on a V selection or a draft would move
+        // their rows: drop it, and reload once they close.
+        if self.follow_request.take_if(|r| *r == request).is_some() && self.follow_held() {
+            if let Some(v) = &mut self.commit {
+                v.loading = false;
+                v.keep_row = None;
+                v.keep_anchor = None;
+            }
+            self.follow_stale = true;
+            return;
+        }
         match result {
             Ok(Some(w)) => {
                 if let Some(v) = &mut self.commit {
@@ -803,11 +814,13 @@ impl App {
     /// load still running is superseded, so the last change wins.
     /// Whether it started a load.
     pub(super) fn working_follow(&mut self) -> bool {
-        if !self.config.view.follow_working
-            || !matches!(self.screen, Screen::Commit(_))
-            || matches!(self.mode, Mode::Visual | Mode::Comment)
-        {
+        if !self.config.view.follow_working || !matches!(self.screen, Screen::Commit(_)) {
             return false;
+        }
+        if self.follow_held() {
+            // Reloaded once V or the comment box closes.
+            self.follow_stale = self.viewing_working_copy();
+            return self.follow_stale;
         }
         let Some(v) = self
             .commit
@@ -826,8 +839,25 @@ impl App {
             v.keep_row = Some(row);
             v.keep_anchor = anchor;
         }
+        self.follow_stale = false;
+        self.follow_request = Some(request);
         self.start_working(request);
         true
+    }
+
+    /// V or the comment box holds rows of the open diff: a follow reload
+    /// waits.
+    fn follow_held(&self) -> bool {
+        matches!(self.mode, Mode::Visual | Mode::Comment)
+    }
+
+    /// After a key: a tree change that waited on V or the comment box
+    /// reloads now that they are closed.
+    pub(super) fn follow_resume(&mut self) {
+        if self.follow_stale && !self.follow_held() {
+            self.follow_stale = false;
+            self.working_follow();
+        }
     }
 
     /// `T`: switch between hunks and the full file for this session and

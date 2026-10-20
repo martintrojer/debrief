@@ -101,13 +101,9 @@ impl Cli {
         Ok(StartOptions {
             cache_dir,
             state_dir,
-            // `--branch` replaces a configured revset as it does `--revset`.
-            revset: self.revset.clone().or_else(|| {
-                self.branch
-                    .is_none()
-                    .then(|| config.log.revset.clone())
-                    .flatten()
-            }),
+            // A configured revset stays for the picker's `revset:` entry;
+            // `--branch` is what the log starts on.
+            revset: self.revset.clone().or_else(|| config.log.revset.clone()),
             branch: self.branch.clone(),
             path: None,
             limit: self.limit.unwrap_or(config.log.limit),
@@ -201,9 +197,12 @@ mod tests {
         assert_eq!((o.revset.as_deref(), o.limit), (Some("main.."), 3));
         let o = opts(&["--revset", "::@"]);
         assert_eq!((o.revset.as_deref(), o.limit), (Some("::@"), 7));
-        // A branch replaces the configured revset.
+        // A branch starts the log; the configured revset stays pickable.
         let o = opts(&["--branch", "feat/x"]);
-        assert_eq!((o.revset, o.branch.as_deref()), (None, Some("feat/x")));
+        assert_eq!(
+            (o.revset.as_deref(), o.branch.as_deref()),
+            (Some("main.."), Some("feat/x"))
+        );
     }
 
     #[test]

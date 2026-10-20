@@ -407,6 +407,12 @@ impl App {
         }
         self.set_working(result);
         self.working_rows();
+        self.session_working_arrived(request);
+    }
+
+    /// git: a working-copy row read is in flight on a worker.
+    pub(super) fn working_pending(&self) -> bool {
+        self.vcs.kind() == Kind::Git && self.sender.is_some() && self.on_checked_out()
     }
 
     fn set_working(&mut self, result: Result<Option<WorkingStatus>, String>) {
@@ -680,6 +686,39 @@ impl App {
         if down && past {
             self.page_past(from, Move::By(delta), false);
         }
+    }
+
+    /// Reload the log after its query changed (the path filter, the
+    /// branch). The page size goes back to the first page's; the cursor
+    /// stays on its commit when it is still listed, else goes to the first
+    /// row; an open commit the new query drops stays open, and `]]` / `[[`
+    /// step from its old place. On `Err` the rows and the working copy are
+    /// as before; the caller puts its query back.
+    pub(super) fn requery(&mut self) -> anyhow::Result<()> {
+        let at = self.cursor_id();
+        let before: Vec<String> = self
+            .all_rows
+            .iter()
+            .map(|r| r.info.commit.clone())
+            .collect();
+        self.page_reset();
+        let working = self.working.take();
+        if let Err(e) = self.reload_strict(false) {
+            self.working = working;
+            return Err(e);
+        }
+        if at.is_none_or(|id| !self.rows.iter().any(|r| r.info.commit == id)) {
+            self.cursor = 0;
+        }
+        self.commit_reindex();
+        if let Some(v) = &self.commit
+            && matches!(self.screen, Screen::Commit(_))
+            && self.view_index(v).is_none()
+        {
+            self.hidden_open = Some((v.commit.clone(), before));
+        }
+        self.keep_visible();
+        Ok(())
     }
 
     /// Scroll so the cursor row is on screen (on the last row, the

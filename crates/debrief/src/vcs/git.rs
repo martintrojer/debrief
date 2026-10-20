@@ -7,8 +7,8 @@ use anyhow::{Context, Result, bail};
 
 use super::{
     CommitDiff, CommitInfo, CommitStat, Context as DiffContext, DiffLine, FULL_CONTEXT, FileDiff,
-    FileStat, Hunk, Kind, LineKind, OpenOptions, Vcs, WorkingCopy, WorkingStatus, parse_unified,
-    run,
+    FileStat, Hunk, Kind, LineKind, NoSuchBranch, OpenOptions, Vcs, WorkingCopy, WorkingStatus,
+    parse_unified, run,
 };
 
 /// Bytes of an untracked file sniffed for a NUL (binary).
@@ -338,9 +338,13 @@ impl Vcs for Git {
         trunk: Option<&str>,
         _with_working_copy: bool,
     ) -> Result<String> {
+        // An exact ref, never a revision: `main~1` is not a branch.
         let tip = format!("refs/heads/{branch}");
-        if !self.exists(&tip) {
-            bail!("no such branch: {branch}");
+        if self
+            .git(&["show-ref", "--verify", "--quiet", &tip])
+            .is_err()
+        {
+            return Err(NoSuchBranch(branch.to_string()).into());
         }
         let trunk = match trunk {
             Some(t) => {
@@ -369,11 +373,12 @@ impl Vcs for Git {
         let in_trunk = self
             .git(&["merge-base", "--is-ancestor", &tip, &trunk])
             .is_ok();
-        Ok(if in_trunk {
-            tip
-        } else {
-            format!("{trunk}..{tip}")
-        })
+        if in_trunk {
+            return Ok(tip);
+        }
+        // Trunk by commit ID: the query stays good if its ref goes away.
+        let trunk = self.resolve(&trunk)?;
+        Ok(format!("{trunk}..{tip}"))
     }
 
     fn show(&self, commit: &str, context: DiffContext) -> Result<CommitDiff> {

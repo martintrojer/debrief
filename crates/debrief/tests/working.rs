@@ -382,9 +382,50 @@ fn a_tree_change_waits_while_a_selection_or_draft_is_open() {
     app.event(AppEvent::WorkingChanged);
     assert_eq!(app.commit_rows(), before, "the selection's rows stay");
     assert_eq!(app.mode(), Mode::Visual);
+    // Esc alone reloads the change that waited: no second event.
     press(&mut app, KeyCode::Esc);
-    app.event(AppEvent::WorkingChanged);
     row_of(&app, "n0", RowKind::Line(LineKind::Added));
+}
+
+#[test]
+fn a_tree_change_waits_while_the_comment_box_is_open() {
+    let f = fixture();
+    let mut app = f.open_following();
+    let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    keys(&mut app, "cc");
+    assert_eq!(app.mode(), Mode::Comment);
+    let before = app.commit_rows().to_vec();
+    std::fs::write(f.root.join("new.txt"), "n0\nn1\nn2\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    assert_eq!(app.commit_rows(), before, "the draft's rows stay");
+    keys(&mut app, "why");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(f.comments()[0].lines, (2, 2), "the comment on n2 as shown");
+    row_of(&app, "n0", RowKind::Line(LineKind::Added));
+}
+
+#[test]
+fn a_follow_load_in_flight_waits_for_a_selection_made_meanwhile() {
+    let f = fixture();
+    let (mut app, _reads, rx) = f.counting_with(f.follow_opts());
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    settle_events(&mut app, &rx);
+    let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
+    goto(&mut app, r);
+    // The load starts, then V comes before it lands.
+    std::fs::write(f.root.join("a.txt"), "a1\nA2\nX\nY\nZ\na3\na5\n").unwrap();
+    app.event(AppEvent::WorkingChanged);
+    keys(&mut app, "V");
+    let sel = app.selection_rows();
+    let before = app.commit_rows().to_vec();
+    settle_events(&mut app, &rx);
+    assert_eq!(app.commit_rows(), before, "the selection's rows stay");
+    assert_eq!(app.selection_rows(), sel);
+    press(&mut app, KeyCode::Esc);
+    settle_events(&mut app, &rx);
+    row_of(&app, "X", RowKind::Line(LineKind::Added));
 }
 
 #[test]

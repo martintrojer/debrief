@@ -68,9 +68,11 @@ pub struct StartOptions {
     pub cache_dir: PathBuf,
     /// The debrief state dir (saved review sessions live under it).
     pub state_dir: PathBuf,
+    /// `--revset` / `[log] revset`: what the log lists at start unless a
+    /// `branch` is given; the `<leader>b` picker offers it either way.
     pub revset: Option<String>,
-    /// `--branch`: the branch (jj bookmark) to list at start; `None` is
-    /// the current one.
+    /// `--branch`: the branch (jj bookmark) to list at start (before a
+    /// revset); `None` is the revset, else the current branch.
     pub branch: Option<String>,
     /// The log's path filter: only commits touching this repo-relative
     /// file or directory load (`F` changes it).
@@ -250,6 +252,11 @@ pub struct App {
     working: Option<WorkingStatus>,
     /// The last working-copy row request number.
     working_request: u64,
+    /// `[view] follow_working`: the request of the follow load in flight.
+    follow_request: Option<u64>,
+    /// `[view] follow_working`: a tree change waits for V or the comment
+    /// box to close.
+    follow_stale: bool,
     /// jj: the commit ID of `@` at the pinned operation.
     working_commit: Option<String>,
     /// The open commit (on `Screen::Commit`).
@@ -356,6 +363,8 @@ impl App {
             tree_watcher: None,
             working: None,
             working_request: 0,
+            follow_request: None,
+            follow_stale: false,
             working_commit: None,
             commit: None,
             next_request: 0,
@@ -435,7 +444,10 @@ impl App {
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
             AppEvent::LogPage { request, result } => self.page_loaded(request, result),
-            AppEvent::Mouse(m) => self.mouse(m, Instant::now()),
+            AppEvent::Mouse(m) => {
+                self.mouse(m, Instant::now());
+                self.follow_resume();
+            }
         }
     }
 

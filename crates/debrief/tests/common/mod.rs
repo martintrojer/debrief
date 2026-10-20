@@ -9,6 +9,7 @@ use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::App;
+use debrief::vcs;
 
 /// Press `code` with no modifiers.
 pub fn press(app: &mut App, code: KeyCode) {
@@ -212,4 +213,34 @@ impl JjEnv {
         v.sort();
         v
     }
+}
+
+/// git: `main`: first, second; `feat/x` off second: f1, f2; checked out
+/// on `main`.
+pub fn git_branch_repo() -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("a.txt"), "1\n").unwrap();
+    commit(&root, "first");
+    std::fs::write(root.join("a.txt"), "2\n").unwrap();
+    commit(&root, "second");
+    git(&root, &["checkout", "-q", "-b", "feat/x"]);
+    std::fs::write(root.join("f.txt"), "1\n").unwrap();
+    commit(&root, "f1");
+    std::fs::write(root.join("f.txt"), "2\n").unwrap();
+    commit(&root, "f2");
+    git(&root, &["checkout", "-q", "main"]);
+    let root = root.canonicalize().unwrap();
+    (tmp, root)
+}
+
+/// The summaries `revset` lists, newest first.
+pub fn summaries_of(v: &dyn vcs::Vcs, revset: &str) -> Vec<String> {
+    v.log(Some(revset), 200)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect()
 }

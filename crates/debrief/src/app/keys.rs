@@ -235,6 +235,7 @@ impl App {
     /// Handle one key press.
     pub fn key(&mut self, key: KeyEvent) {
         self.key_inner(key);
+        self.follow_resume();
         self.stat_follow();
         self.clue_sync();
     }

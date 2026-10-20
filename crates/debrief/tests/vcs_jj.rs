@@ -1,6 +1,6 @@
 mod common;
 
-use common::{JjEnv as Env, assert_same, have_jj, snapshot};
+use common::{JjEnv as Env, assert_same, have_jj, snapshot, summaries_of};
 use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
 
 /// The strict read-only tests open without snapshots.
@@ -503,14 +503,6 @@ fn branchy() -> Env {
     e
 }
 
-fn summaries_of(v: &dyn vcs::Vcs, revset: &str) -> Vec<String> {
-    v.log(Some(revset), 200)
-        .unwrap()
-        .into_iter()
-        .map(|c| c.summary)
-        .collect()
-}
-
 #[test]
 fn bookmarks_and_the_current_one() {
     if !have_jj() {
@@ -587,4 +579,73 @@ fn odd_bookmark_names_are_literals() {
         ["second", "first"]
     );
     assert!(v.branch_revset("main | all()", None, false).is_err());
+}
+
+/// `branchy` with an `origin` remote whose `main` sits on `first`:
+/// `trunk()` is `main@origin`, one behind the local `main`.
+fn branchy_with_remote() -> (Env, tempfile::TempDir) {
+    let e = branchy();
+    let remote = tempfile::tempdir().unwrap();
+    let origin = remote.path().join("origin.git");
+    common::sh(
+        remote.path(),
+        "git",
+        &["init", "-q", "--bare", "origin.git"],
+    );
+    e.jj(&[
+        "--quiet",
+        "git",
+        "remote",
+        "add",
+        "origin",
+        origin.to_str().unwrap(),
+    ]);
+    e.jj(&[
+        "--quiet",
+        "bookmark",
+        "set",
+        "main",
+        "-r",
+        "main-",
+        "--allow-backwards",
+    ]);
+    e.jj(&["--quiet", "git", "push", "-b", "main"]);
+    e.jj(&["--quiet", "bookmark", "set", "main", "-r", "feat/x--"]);
+    (e, remote)
+}
+
+#[test]
+fn a_remote_trunk_bounds_bookmarks_and_trunks_own_bookmark_shows_whole() {
+    if !have_jj() {
+        return;
+    }
+    let (e, _remote) = branchy_with_remote();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    // trunk() is main@origin (first): feat/x lacks second, f1, f2.
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &feat), ["f2", "f1", "second"]);
+    // main is trunk's own bookmark, one ahead of it: its whole history.
+    let main = v.branch_revset("main", None, false).unwrap();
+    assert_eq!(
+        summaries_of(v.as_ref(), &format!("{main} ~ root()")),
+        ["second", "first"]
+    );
+}
+
+#[test]
+fn without_a_remote_a_master_bookmark_is_trunk_and_without_one_the_whole_history() {
+    if !have_jj() {
+        return;
+    }
+    let e = branchy();
+    e.jj(&["--quiet", "bookmark", "rename", "main", "master"]);
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(summaries_of(v.as_ref(), &feat), ["f2", "f1"]);
+    e.jj(&["--quiet", "bookmark", "rename", "master", "trunkless"]);
+    let feat = v.branch_revset("feat/x", None, false).unwrap();
+    assert_eq!(
+        summaries_of(v.as_ref(), &format!("{feat} ~ root()")),
+        ["f2", "f1", "second", "first"]
+    );
 }

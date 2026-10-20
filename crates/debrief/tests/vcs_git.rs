@@ -2,7 +2,9 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::{assert_same, commit, git, git_dir_snapshot, sh, snapshot};
+use common::{
+    assert_same, commit, git, git_branch_repo, git_dir_snapshot, sh, snapshot, summaries_of,
+};
 use debrief::vcs::{self, Context, Kind, LineKind};
 
 /// A repo with three commits: add, modify + add, rename with edit.
@@ -726,37 +728,9 @@ fn full_context_working_copy() {
     assert_eq!(new_lines(&w.diff.files[0]), (1..=40).collect::<Vec<_>>());
 }
 
-/// `main`: first, second; `feat/x` off second: f1, f2; back on `main`.
-fn branchy() -> (tempfile::TempDir, PathBuf) {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q", "-b", "main"]);
-    std::fs::write(root.join("a.txt"), "1\n").unwrap();
-    commit(&root, "first");
-    std::fs::write(root.join("a.txt"), "2\n").unwrap();
-    commit(&root, "second");
-    git(&root, &["checkout", "-q", "-b", "feat/x"]);
-    std::fs::write(root.join("f.txt"), "1\n").unwrap();
-    commit(&root, "f1");
-    std::fs::write(root.join("f.txt"), "2\n").unwrap();
-    commit(&root, "f2");
-    git(&root, &["checkout", "-q", "main"]);
-    let root = root.canonicalize().unwrap();
-    (tmp, root)
-}
-
-fn summaries_of(v: &dyn vcs::Vcs, revset: &str) -> Vec<String> {
-    v.log(Some(revset), 200)
-        .unwrap()
-        .into_iter()
-        .map(|c| c.summary)
-        .collect()
-}
-
 #[test]
 fn branches_and_the_current_one() {
-    let (_t, root) = branchy();
+    let (_t, root) = git_branch_repo();
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     let mut b = v.branches().unwrap();
     b.sort();
@@ -768,7 +742,7 @@ fn branches_and_the_current_one() {
 
 #[test]
 fn a_branch_lists_what_trunk_lacks_and_trunk_its_whole_history() {
-    let (_t, root) = branchy();
+    let (_t, root) = git_branch_repo();
     git(&root, &["branch", "-q", "old", "main~1"]);
     let before = git_snapshot(&root);
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
@@ -790,7 +764,7 @@ fn a_branch_lists_what_trunk_lacks_and_trunk_its_whole_history() {
 
 #[test]
 fn trunk_falls_back_to_master_and_to_the_whole_history() {
-    let (_t, root) = branchy();
+    let (_t, root) = git_branch_repo();
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     git(&root, &["branch", "-q", "-m", "main", "master"]);
     let feat = v.branch_revset("feat/x", None, false).unwrap();
@@ -805,7 +779,7 @@ fn trunk_falls_back_to_master_and_to_the_whole_history() {
 
 #[test]
 fn origin_head_is_trunk_and_its_own_branch_shows_whole_even_ahead() {
-    let (_t, root) = branchy();
+    let (_t, root) = git_branch_repo();
     // A fake remote-tracking trunk one commit behind main.
     git(&root, &["update-ref", "refs/remotes/origin/main", "main~1"]);
     git(
@@ -825,7 +799,7 @@ fn origin_head_is_trunk_and_its_own_branch_shows_whole_even_ahead() {
 
 #[test]
 fn option_like_branch_names_stay_names() {
-    let (_t, root) = branchy();
+    let (_t, root) = git_branch_repo();
     let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
     assert!(v.branch_revset("--all", None, false).is_err());
     assert!(v.branch_revset("-n1", None, false).is_err());

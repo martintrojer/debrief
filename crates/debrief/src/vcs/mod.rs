@@ -240,6 +240,19 @@ impl From<&WorkingCopy> for WorkingStatus {
     }
 }
 
+/// [`Vcs::branch_revset`]'s error when the branch itself does not exist
+/// (as opposed to a trunk that can't be read): the caller falls back.
+#[derive(Debug)]
+pub struct NoSuchBranch(pub String);
+
+impl std::fmt::Display for NoSuchBranch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no such branch: {}", self.0)
+    }
+}
+
+impl std::error::Error for NoSuchBranch {}
+
 pub trait Vcs {
     fn kind(&self) -> Kind;
     fn root(&self) -> &Path;
@@ -308,7 +321,8 @@ pub trait Vcs {
     /// The revset (jj) or revision range (git) listing `branch`: its
     /// commits not in trunk, or its whole history when it is in trunk or
     /// no trunk is found. `trunk` overrides trunk detection (a revision
-    /// for git, a revset for jj). `with_working_copy` (jj, the current
+    /// for git, a revset for jj). A branch that doesn't exist (by exact
+    /// name) is a [`NoSuchBranch`] error. `with_working_copy` (jj, the current
     /// bookmark): `@` is listed too.
     fn branch_revset(
         &self,
@@ -316,7 +330,7 @@ pub trait Vcs {
         _trunk: Option<&str>,
         _with_working_copy: bool,
     ) -> Result<String> {
-        bail!("no branches here: {branch}")
+        Err(NoSuchBranch(branch.to_string()).into())
     }
     /// `commit` is a commit ID (as returned by `log`) or, for git, any
     /// revision naming one commit. `context`: hunks or the whole file.

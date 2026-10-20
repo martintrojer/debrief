@@ -52,6 +52,10 @@ pub(super) struct Visit {
     view: Option<View>,
     summary: String,
     change: Option<String>,
+    /// The branch the log listed when the commit was last opened or
+    /// changed (`Some(None)`: the default history or a revset); `None`
+    /// until then, when a save takes the comments' branch.
+    branch: Option<Option<String>>,
     /// The session's unsent comments were put in the batch (or there were
     /// none); until then a save restores them first.
     restored: bool,
@@ -81,6 +85,9 @@ pub(super) struct Sessions {
     quit_from: Mode,
     /// Unreadable session files already reported (once per run).
     reported: std::collections::HashSet<String>,
+    /// git: the working copy's session waits for its row, read on a worker
+    /// after a branch switch; the working-copy request it waits on.
+    pending_working: Option<u64>,
 }
 
 impl Sessions {
@@ -91,6 +98,7 @@ impl Sessions {
             visits: HashMap::new(),
             quit_from: Mode::Normal,
             reported: Default::default(),
+            pending_working: None,
         }
     }
 }
@@ -366,9 +374,11 @@ impl App {
     pub(super) fn session_enter(&mut self, i: usize) {
         let Some(key) = self.row_key(i) else { return };
         let info = self.rows[i].info.clone();
+        let branch = self.selection_branch();
         let visit = self.sessions.visits.entry(key.clone()).or_default();
         visit.summary = info.summary.clone();
         visit.change = info.change.clone();
+        visit.branch = Some(branch);
         let captured = visit.view.clone();
         let restored = visit.restored;
         let mut status = None;
@@ -543,8 +553,14 @@ impl App {
     }
 
     fn session_touch(&mut self, key: &str) {
+        let branch = self.selection_branch();
+        let open = self.open_key().as_deref() == Some(key);
         if let Some(v) = self.sessions.visits.get_mut(key) {
             v.dirty = true;
+            // Changed in the open view: reviewed under this log's branch.
+            if open {
+                v.branch = Some(branch);
+            }
         }
     }
 
@@ -748,6 +764,9 @@ impl App {
             .unwrap_or_default();
         comments.retain(|c| !batch.iter().any(|b| b.id == c.comment.id));
         let n = batch.len();
+        let batch_branch = batch
+            .iter()
+            .find_map(|c| c.rev.as_ref().and_then(|r| r.branch.clone()));
         comments.extend(batch.into_iter().map(|comment| SavedComment {
             comment,
             sent: None,
@@ -765,10 +784,12 @@ impl App {
             } else {
                 visit.summary.clone()
             },
-            branch: self
-                .branch_name()
-                .map(str::to_string)
-                .or_else(|| old.and_then(|s| s.branch.clone())),
+            // The branch it was reviewed under: the visit's, else its
+            // comments', else what was saved before.
+            branch: match &visit.branch {
+                Some(b) => b.clone(),
+                None => batch_branch.or_else(|| old.and_then(|s| s.branch.clone())),
+            },
             saved: session::now(),
             comments,
             view,
@@ -870,6 +891,11 @@ impl App {
         };
         match i {
             Some(i) => self.open_index(i),
+            // git's row is on its way (read off the UI thread): open it
+            // when it lands.
+            None if key == WORKING && self.working_pending() => {
+                self.sessions.pending_working = Some(self.working_request);
+            }
             None => self.set_status(SESSION_NOT_IN_LOG),
         }
         if let Some(n) = note {
@@ -879,6 +905,23 @@ impl App {
                 format!("{n}; {}", self.status)
             };
             self.set_status(s);
+        }
+    }
+
+    /// git's working-copy row for `request` arrived: open the working
+    /// copy's session if it waits on it (and the row is there).
+    pub(super) fn session_working_arrived(&mut self, request: u64) {
+        if self
+            .sessions
+            .pending_working
+            .take_if(|r| *r == request)
+            .is_none()
+        {
+            return;
+        }
+        match self.working_index() {
+            Some(i) => self.open_index(i),
+            None => self.set_status(SESSION_NOT_IN_LOG),
         }
     }
 

@@ -8,7 +8,7 @@
 //! [`crate::vcs::Vcs::log_in`]), so `--limit` and paging count matching
 //! commits; the `f` filter then narrows what loaded.
 
-use super::{App, Mode, Screen};
+use super::{App, Mode};
 
 /// `path` as typed, relative to the repo's `root`: trimmed,
 /// `/`-separated, without `.` or empty segments or a trailing `/`. An
@@ -114,32 +114,10 @@ impl App {
             return;
         }
         let old = std::mem::replace(&mut self.opts.path, path);
-        let at = self.cursor_id();
-        // Where the open commit was, for `]]` / `[[` should the new path
-        // hide it.
-        let before: Vec<String> = self
-            .all_rows
-            .iter()
-            .map(|r| r.info.commit.clone())
-            .collect();
-        self.page_reset();
-        let working = self.working.take();
-        if let Err(e) = self.reload_strict(false) {
+        if let Err(e) = self.requery() {
             self.opts.path = old;
-            self.working = working;
-            return self.set_status(format!("path filter not applied: {e:#}"));
+            self.set_status(format!("path filter not applied: {e:#}"));
         }
-        if at.is_none_or(|id| !self.rows.iter().any(|r| r.info.commit == id)) {
-            self.cursor = 0;
-        }
-        self.commit_reindex();
-        if let Some(v) = &self.commit
-            && matches!(self.screen, Screen::Commit(_))
-            && self.view_index(v).is_none()
-        {
-            self.hidden_open = Some((v.commit.clone(), before));
-        }
-        self.keep_visible();
     }
 }
 

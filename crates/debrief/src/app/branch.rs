@@ -7,9 +7,9 @@
 //! Like the path filter it is part of the VCS query: picking reloads the
 //! log, `r` and the watchers keep it. It never checks anything out.
 
+use super::App;
 use super::picker::{PickerItem, PickerKind};
-use super::{App, Screen};
-use crate::vcs::Kind;
+use crate::vcs::{Kind, NoSuchBranch};
 
 /// What the log lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,11 +78,16 @@ impl App {
 
     /// Before a reload: re-read the current branch and the selection's
     /// query (branch tips move). A selected branch that is gone falls back
-    /// to the current branch, saying so.
+    /// to the current branch, saying so. Any other error (a trunk that
+    /// can't be read) keeps the selection and its last query, and says
+    /// why.
     pub(super) fn branch_refresh(&mut self) {
         self.branch_current = self.vcs.current_branch().unwrap_or(None);
         match self.selection_revset() {
             Ok(r) => self.query = r,
+            Err(e) if !e.is::<NoSuchBranch>() => {
+                self.set_status(format!("{e:#}"));
+            }
             Err(_) => {
                 let name = self.branch_name().unwrap_or_default().to_string();
                 self.selection = match &self.branch_current {
@@ -105,6 +110,12 @@ impl App {
             Selection::Branch(b) => Some(b),
             _ => None,
         }
+    }
+
+    /// The branch reviews made now record: the selected branch, `None`
+    /// for the default history and a revset.
+    pub(super) fn selection_branch(&self) -> Option<String> {
+        self.branch_name().map(str::to_string)
     }
 
     /// What the log lists, as the branch row and status line name it:
@@ -249,29 +260,9 @@ impl App {
                 return self.set_status(format!("branch not selected: {e:#}"));
             }
         };
-        let at = self.cursor_id();
-        let before: Vec<String> = self
-            .all_rows
-            .iter()
-            .map(|r| r.info.commit.clone())
-            .collect();
-        self.page_reset();
-        let working = self.working.take();
-        if let Err(e) = self.reload_strict(false) {
+        if let Err(e) = self.requery() {
             (self.selection, self.query) = old;
-            self.working = working;
-            return self.set_status(format!("branch not selected: {e:#}"));
+            self.set_status(format!("branch not selected: {e:#}"));
         }
-        if at.is_none_or(|id| !self.rows.iter().any(|r| r.info.commit == id)) {
-            self.cursor = 0;
-        }
-        self.commit_reindex();
-        if let Some(v) = &self.commit
-            && matches!(self.screen, Screen::Commit(_))
-            && self.view_index(v).is_none()
-        {
-            self.hidden_open = Some((v.commit.clone(), before));
-        }
-        self.keep_visible();
     }
 }

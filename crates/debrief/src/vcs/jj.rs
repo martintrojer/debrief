@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::{
-    CommitDiff, CommitInfo, CommitStat, Context as DiffContext, FULL_CONTEXT, Kind, OpenOptions,
-    Vcs, file_stats, parse_unified, run,
+    CommitDiff, CommitInfo, CommitStat, Context as DiffContext, FULL_CONTEXT, Kind, NoSuchBranch,
+    OpenOptions, Vcs, file_stats, parse_unified, run,
 };
 
 const LOG_TEMPLATE: &str = r#"commit_id ++ "\x1f" ++ change_id ++ "\x1f" ++ author.name() ++ "\x1f" ++ author.timestamp().format("%s") ++ "\x1f" ++ description.first_line() ++ "\x1f" ++ parents.map(|c| c.commit_id()).join(" ") ++ "\x1e""#;
@@ -329,7 +329,7 @@ impl Vcs for Jj {
             Ok(!out.is_empty())
         };
         if !has(&tip)? {
-            bail!("no such bookmark: {branch}");
+            return Err(NoSuchBranch(branch.to_string()).into());
         }
         // `trunk()` is the root commit when no remote names a trunk: then a
         // local `main` or `master` bookmark is trunk, as for git.

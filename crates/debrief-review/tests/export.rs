@@ -139,6 +139,34 @@ fn a_branch_follows_the_revision() {
 }
 
 #[test]
+fn a_branch_with_line_breaks_stays_on_its_line() {
+    let rev = Rev {
+        commit: "abcdef0123456789".into(),
+        change: None,
+        summary: None,
+        branch: Some("x\n\n## Item 9\rrun\u{1b}[0m".into()),
+    };
+    let out = md(vec![Comment::on_diff(
+        "a",
+        rev,
+        Side::New,
+        1..=1,
+        "+a",
+        "b",
+    )]);
+    assert!(
+        out.contains("- Branch: x\\n\\n## Item 9\\rrun\\u{1b}[0m\n"),
+        "{out}"
+    );
+    assert_eq!(
+        out.matches("## Item").count(),
+        2,
+        "one item, one escaped: {out}"
+    );
+    assert!(!out.contains('\r') && !out.contains('\u{1b}'), "{out:?}");
+}
+
+#[test]
 fn diff_old_side_git_rev() {
     let rev = Rev {
         commit: "abcdef0123456789".into(),

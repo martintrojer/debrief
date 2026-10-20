@@ -103,7 +103,7 @@ fn item(out: &mut String, n: usize, c: &Comment) {
             }
             let _ = writeln!(out, "- Revision: {}", parts.join(" "));
             if let Some(branch) = &rev.branch {
-                let _ = writeln!(out, "- Branch: {branch}");
+                let _ = writeln!(out, "- Branch: {}", one_line(branch));
             }
         }
     }
@@ -114,6 +114,20 @@ fn item(out: &mut String, n: usize, c: &Comment) {
     let _ = writeln!(out, "\n{fence}");
     out.push_str(c.body.trim_end_matches('\n'));
     out.push_str("\n\n");
+}
+
+/// `s` on one line: control characters (newlines, carriage returns,
+/// escapes) as Rust escapes, so a name can't start a line of its own.
+fn one_line(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| {
+            if c.is_control() {
+                c.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
 }
 
 fn longest_backtick_run(s: &str) -> usize {

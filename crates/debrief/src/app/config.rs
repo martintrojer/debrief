@@ -3,8 +3,9 @@
 //! `[review]` (the comment kinds, the same shape as ramble's), `[render]`
 //! (syntax highlighting), `[view]` (what shows at start: the stats pane,
 //! hunks or the full file, unified or side by side), `[log]` (which
-//! commits load), `[mouse]` (capture on or off) and `[[launch]]` (commands
-//! run with the TUI suspended, like ramble's).
+//! commits load), `[vcs]` (the git program), `[mouse]` (capture on or
+//! off) and `[[launch]]` (commands run with the TUI suspended, like
+//! ramble's).
 //!
 //! `[[launch]]` entries merge into the defaults by name; `disabled = true`
 //! drops one. `config.default.toml` documents every key with its default
@@ -33,6 +34,7 @@ pub struct Config {
     pub keys: KeysConfig,
     pub mouse: MouseConfig,
     pub log: LogConfig,
+    pub vcs: VcsConfig,
     /// `[theme]`, unresolved: [`ThemeConfig::resolve`] builds the colours.
     pub theme: ThemeConfig,
     pub launch: Vec<Launcher>,
@@ -147,6 +149,20 @@ impl Default for LogConfig {
             limit: crate::app::DEFAULT_LIMIT,
             trunk: None,
         }
+    }
+}
+
+/// `[vcs]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VcsConfig {
+    /// The git program: a name looked up on `PATH`, or a path.
+    /// `$DEBRIEF_GIT` overrides it (see [`crate::vcs::set_git_program`]).
+    pub git: String,
+}
+
+impl Default for VcsConfig {
+    fn default() -> Self {
+        VcsConfig { git: "git".into() }
     }
 }
 
@@ -407,6 +423,7 @@ impl Config {
             keys: KeysConfig::default(),
             mouse: MouseConfig::default(),
             log: LogConfig::default(),
+            vcs: VcsConfig::default(),
             theme: ThemeConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
@@ -512,6 +529,9 @@ impl Config {
             if l.trunk.is_some() {
                 c.log.trunk = l.trunk;
             }
+        }
+        if let Some(g) = raw.vcs.and_then(|v| v.git) {
+            c.vcs.git = g;
         }
         if let Some(v) = raw.view {
             set(&mut c.view.sidebar, v.sidebar);
@@ -684,6 +704,7 @@ struct RawConfig {
     keys: Option<RawKeys>,
     mouse: Option<RawMouse>,
     log: Option<RawLog>,
+    vcs: Option<RawVcs>,
     theme: Option<RawTheme>,
     launch: Option<Vec<RawLauncher>>,
 }
@@ -762,6 +783,13 @@ fn non_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D
         return Err(serde::de::Error::custom("expected a non-empty string"));
     }
     Ok(Some(s))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawVcs {
+    #[serde(default, deserialize_with = "non_empty")]
+    git: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1195,6 +1223,15 @@ kinds = [
                 .tmux_zoom
         );
         assert!(Config::parse("[view]\ntmux_zoom = \"yes\"\n").is_err());
+    }
+
+    #[test]
+    fn vcs_git_defaults_to_git_on_path() {
+        assert_eq!(Config::defaults().vcs.git, "git");
+        let c = Config::parse("[vcs]\ngit = \"/opt/git/bin/git\"\n").unwrap();
+        assert_eq!(c.vcs.git, "/opt/git/bin/git");
+        assert!(Config::parse("[vcs]\ngit = \" \"\n").is_err());
+        assert!(Config::parse("[vcs]\njj = \"jj\"\n").is_err());
     }
 
     #[test]

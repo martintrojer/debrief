@@ -623,7 +623,7 @@ pub(crate) mod test_support {
     use super::{App, StartOptions};
 
     fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = Command::new("git")
+        let out = Command::new(crate::vcs::git_program())
             .current_dir(dir)
             .args(["-c", "user.name=t", "-c", "user.email=t@t"])
             .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])

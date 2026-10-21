@@ -535,9 +535,22 @@ empty or repeated `[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
 (highlighting), `[theme]` (colours), `[keys]`, `[mouse]`, `[log]` (which commits load: `revset`, `limit`, and `trunk`,
-where a branch's log stops),
+where a branch's log stops), `[vcs]` (the git program),
 `[review]` (comment kinds), `[send]`
 (where `<leader>rr` goes) and `[[launch]]`.
+
+### Git program
+
+debrief runs `git` from `PATH` many times: at start, on each refresh and
+for each diff. When that `git` is a slow wrapper, point `[vcs] git` at a
+faster one, a name looked up on `PATH` or a path. `$DEBRIEF_GIT`
+overrides it for one run. A path is used as is (no `~` expansion). For
+example, after `mise use -g conda:git`, the path `mise which git` prints:
+
+```toml
+[vcs]
+git = "/Users/me/.local/share/mise/installs/conda-git/2.56.0/bin/git"
+```
 
 ### Theme
 

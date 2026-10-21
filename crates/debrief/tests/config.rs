@@ -116,6 +116,7 @@ fn uncommented_default_file_is_the_defaults() {
         "[keys]",
         "[mouse]",
         "[log]",
+        "[vcs]",
         "[theme]",
         "[theme.colors]",
         "[review]",

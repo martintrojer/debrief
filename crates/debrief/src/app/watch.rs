@@ -86,7 +86,7 @@ pub fn watch_targets(vcs: &dyn Vcs) -> Result<WatchTargets> {
 /// output lines cannot be split when the path itself may contain newlines,
 /// so strip exactly the one trailing newline git appends.
 fn git_path(root: &Path, name: &str) -> Result<PathBuf> {
-    let out = Command::new("git")
+    let out = Command::new(crate::vcs::git_program())
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(root)
@@ -278,7 +278,7 @@ impl TreeFilter {
 
     fn refresh_tracked(&mut self) {
         // `ls-files` reads the index and never writes it.
-        let out = Command::new("git")
+        let out = Command::new(crate::vcs::git_program())
             .arg("--no-optional-locks")
             .arg("-C")
             .arg(&self.root)
@@ -442,7 +442,7 @@ fn default_excludes() -> Option<PathBuf> {
 
 /// One line of git output (`None` when empty; `Err` when git fails).
 fn git_line(root: &Path, args: &[&str]) -> Result<Option<String>> {
-    let out = Command::new("git")
+    let out = Command::new(crate::vcs::git_program())
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(root)

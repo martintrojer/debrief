@@ -39,6 +39,7 @@ fn start(cli: &Cli) -> Result<App, StartError> {
         debrief::session::state_dir(),
         debrief::app::config::Config::default_path(),
     )?;
+    debrief::vcs::set_git_program(&opts.config.vcs.git);
     let vcs = debrief::vcs::open(&cli.path(), cli.open_options()).map_err(|e| open_error(&e))?;
     opts.path = cli.path_filter(vcs.root())?;
     App::new(vcs, opts).map_err(|e| open_error(&e))

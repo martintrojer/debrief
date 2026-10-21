@@ -11,9 +11,10 @@ mod diff;
 mod git;
 mod jj;
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use anyhow::{Context as _, Result, bail};
 
@@ -423,12 +424,35 @@ fn find_up(start: &Path, marker: &str) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+static GIT_PROGRAM: OnceLock<OsString> = OnceLock::new();
+
+/// Set the git program for the process from `[vcs] git` (`$DEBRIEF_GIT`
+/// wins); call once, before [`open`]. Unset, [`git_program`] is
+/// `$DEBRIEF_GIT` or `git`.
+pub fn set_git_program(config: &str) {
+    let _ = GIT_PROGRAM.set(resolve_git_program(std::env::var_os("DEBRIEF_GIT"), config));
+}
+
+/// The git program every git command runs: a name looked up on `PATH`,
+/// or a path.
+pub fn git_program() -> &'static OsStr {
+    GIT_PROGRAM.get_or_init(|| resolve_git_program(std::env::var_os("DEBRIEF_GIT"), "git"))
+}
+
+/// `env` (`$DEBRIEF_GIT`) when set and non-empty, else `config`.
+fn resolve_git_program(env: Option<OsString>, config: &str) -> OsString {
+    env.filter(|e| !e.is_empty())
+        .unwrap_or_else(|| config.into())
+}
+
 /// Run a VCS command and return its stdout; a failure carries stderr.
-fn run<I, S>(program: &str, args: I) -> Result<String>
+fn run<P, I, S>(program: P, args: I) -> Result<String>
 where
+    P: AsRef<OsStr>,
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let program = program.as_ref();
     let mut cmd = Command::new(program);
     cmd.args(args)
         .env("GIT_PAGER", "cat")
@@ -439,18 +463,33 @@ where
         .stdin(std::process::Stdio::null());
     let out = cmd
         .output()
-        .with_context(|| format!("failed to run {program}"))?;
+        .with_context(|| format!("failed to run {}", program.display()))?;
     if !out.status.success() {
         let args: Vec<String> = cmd
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         bail!(
-            "{program} {} failed ({}): {}",
+            "{} {} failed ({}): {}",
+            program.display(),
             args.join(" "),
             out.status,
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debrief_git_wins_over_config() {
+        let env = |s: &str| Some(OsString::from(s));
+        assert_eq!(resolve_git_program(None, "git"), "git");
+        assert_eq!(resolve_git_program(None, "/opt/git"), "/opt/git");
+        assert_eq!(resolve_git_program(env("/env/git"), "/opt/git"), "/env/git");
+        assert_eq!(resolve_git_program(env(""), "/opt/git"), "/opt/git");
+    }
 }

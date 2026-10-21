@@ -256,7 +256,7 @@ fn git_in(dir: &Path, args: &[&str]) -> Result<String> {
         argv.push(c.as_ref());
     }
     argv.extend(args.iter().map(OsStr::new));
-    run("git", argv)
+    run(super::git_program(), argv)
 }
 
 impl Vcs for Git {

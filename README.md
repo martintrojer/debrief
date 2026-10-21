@@ -51,8 +51,8 @@ agent as one markdown review.
 cargo install debrief
 ```
 
-Prebuilt binaries for macOS (Apple silicon) and Linux (x86_64) are on the
-[releases page](https://github.com/martintrojer/debrief/releases), or with
+Prebuilt binaries for macOS (Apple silicon) and Linux (x86_64, aarch64)
+are on the [releases page](https://github.com/martintrojer/debrief/releases), or with
 [mise](https://mise.jdx.dev): `mise use -g github:martintrojer/debrief`. From a
 checkout: `cargo install --path crates/debrief`.
 

@@ -600,8 +600,9 @@ the jj and end-to-end tests run.
 ## Releases
 
 Pushing a tag that starts with `v` runs `.github/workflows/release.yml`.
-It builds `debrief` for `aarch64-apple-darwin` (macOS 15) and
-`x86_64-unknown-linux-gnu` (Ubuntu 24.04, so it runs with glibc 2.39 or
+It builds `debrief` for `aarch64-apple-darwin` (macOS 15),
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` (natively on
+Ubuntu 24.04 and its arm64 runner, so they run with glibc 2.39 or
 newer) and attaches `debrief-<tag>-<target>.tar.gz` (binary, README,
 LICENSE, THIRD-PARTY.md) and its `.sha256` to a GitHub Release named after
 the tag.

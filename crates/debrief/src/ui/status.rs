@@ -189,7 +189,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// The commit screen: mode, commit ID, the log's path filter and kept
-/// text filter, loading/status message, position.
+/// text filter, loading/status message, the repo root, position.
 fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     let id = app.commit_id().unwrap_or("");
     let id = if app.commit_id() == Some(crate::app::WORKING_ID) {
@@ -238,16 +238,30 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     let hint_w = HELP_HINT.len();
     let hint = left_w + right_w + hint_w + 2 <= area.width as usize;
     let used = left_w + right_w + if hint { hint_w } else { 0 };
+    // The repo root, as on the log, so two debriefs tell apart: what the
+    // rest leaves (two spaces each side), cut from the left; dropped
+    // under ROOT_MIN columns.
+    let room = (area.width as usize).saturating_sub(used + 4);
+    let root = (room >= ROOT_MIN).then(|| elide_left(&app.root_label(), room));
+    let root_w = root.as_ref().map_or(0, |r| r.width() + 2);
     spans.push(Span::styled(
-        " ".repeat((area.width as usize).saturating_sub(used)),
+        " ".repeat((area.width as usize).saturating_sub(used + root_w)),
         base,
     ));
+    if let Some(root) = root {
+        spans.push(Span::styled(root, base.fg(palette::BLUE)));
+        spans.push(Span::styled("  ", base));
+    }
     if hint {
         spans.push(Span::styled(HELP_HINT, base.fg(palette::OVERLAY)));
     }
     spans.push(Span::styled(right, base.fg(palette::TEAL)));
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
+
+/// The fewest columns the commit screen gives the repo root; less room
+/// drops it.
+const ROOT_MIN: usize = 8;
 
 #[cfg(test)]
 mod tests {

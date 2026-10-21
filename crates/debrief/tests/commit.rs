@@ -223,6 +223,15 @@ fn renders_gutter_colours_and_sidebar() {
     assert!(s[29].starts_with(&format!(" {id}")), "{}", s[29]);
     let n = app.commit_rows().len();
     assert!(s[29].ends_with(&format!("g? help 1/{n}")), "{}", s[29]);
+    // The repo root sits before the hint, as on the log, so two debriefs
+    // tell apart.
+    let root = app.root_label();
+    let tail = &root[root.len() - 10..];
+    assert!(
+        s[29].contains(&format!("{tail}  g? help")),
+        "{root}: {}",
+        s[29]
+    );
     // Colours: added green, removed red, headers bold.
     let mut t = Terminal::new(TestBackend::new(100, 30)).unwrap();
     t.draw(|f| app.render(f)).unwrap();

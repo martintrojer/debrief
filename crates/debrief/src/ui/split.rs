@@ -14,12 +14,12 @@ use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 
 use super::commit::{Pane, diff_line, draw_row, sign_of};
-use super::palette;
 use crate::app::commit::side_gutter_width;
 use crate::app::split::spans_both;
 use crate::app::{App, DiffRow, Focus, Mode};
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    let pal = &app.theme().palette;
     let Some(mine) = app.split_side() else { return };
     let num_w = app.commit_num_width();
     let cur = app.commit_cursor();
@@ -47,7 +47,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                     Side::New => l.new,
                 });
                 match n {
-                    Some(n) => (format!("{n:>num_w$} "), Some(sign_of(r.kind))),
+                    Some(n) => (format!("{n:>num_w$} "), Some(sign_of(pal, r.kind))),
                     None => (" ".repeat(side_gutter_width(num_w)), None),
                 }
             }),
@@ -90,7 +90,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         }
         if rrect.x > lrect.right() {
             frame.render_widget(
-                Paragraph::new("│").style(Style::new().fg(palette::SURFACE)),
+                Paragraph::new("│").style(Style::new().fg(pal.surface0)),
                 Rect::new(lrect.right(), y, 1, 1),
             );
         }

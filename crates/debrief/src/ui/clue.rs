@@ -2,11 +2,10 @@
 //! can follow the pending sequence. Rows wrap into columns; what still
 //! doesn't fit ends in `… N more`.
 
-use super::palette;
 use crate::app::{App, ClueRow};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -14,7 +13,6 @@ fn width(s: &str) -> usize {
     Span::raw(s).width()
 }
 
-const BG: Color = palette::BASE;
 /// Columns between a key and its description, and between columns.
 const GAP: usize = 2;
 
@@ -107,6 +105,7 @@ fn title(app: &App) -> String {
 
 /// Draw the key clue box.
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    let pal = &app.theme().palette;
     if !shown(app, area) {
         return;
     }
@@ -114,10 +113,10 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let title = title(app);
     let (cols, rect) = placed(&rows, &title, area);
     frame.render_widget(Clear, rect);
-    let base = Style::new().fg(palette::TEXT).bg(BG);
+    let base = Style::new().fg(pal.text).bg(pal.bg);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(palette::OVERLAY))
+        .border_style(Style::new().fg(pal.muted))
         .title(title)
         .style(base);
     let inner = block.inner(rect);
@@ -130,13 +129,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .map(|(k, d, group)| {
                 let pad = " ".repeat(col.key_w - width(k) + GAP);
-                let ds = if *group {
-                    base.fg(palette::MAUVE)
-                } else {
-                    base
-                };
+                let ds = if *group { base.fg(pal.purple) } else { base };
                 Line::from(vec![
-                    Span::styled(format!("{k}{pad}"), base.fg(palette::BLUE)),
+                    Span::styled(format!("{k}{pad}"), base.fg(pal.blue)),
                     Span::styled(d.clone(), ds),
                 ])
             })

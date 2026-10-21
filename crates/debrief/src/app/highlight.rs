@@ -11,7 +11,7 @@
 //! The result is foreground colours only, as byte ranges into
 //! `DiffLine::text`; the add/remove row backgrounds stay the renderer's.
 //! The syntect setup is ramble's (`render.rs`): two-face's syntax set and
-//! its Catppuccin Mocha theme.
+//! the theme's `syntax` colours (`[theme] syntax`), passed in by the caller.
 
 use std::ops::Range;
 use std::path::Path;
@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 
 use ratatui::style::{Color, Modifier, Style};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::FontStyle;
+use syntect::highlighting::{FontStyle, Theme as SyntaxTheme};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use crate::vcs::{CommitDiff, FileDiff, Hunk, LineKind};
@@ -49,15 +49,6 @@ pub type DiffSpans = Vec<Vec<HunkSpans>>;
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     SET.get_or_init(two_face::syntax::extra_newlines)
-}
-
-fn code_theme() -> &'static syntect::highlighting::Theme {
-    static THEME: OnceLock<syntect::highlighting::Theme> = OnceLock::new();
-    THEME.get_or_init(|| {
-        two_face::theme::extra()
-            .get(two_face::theme::EmbeddedThemeName::CatppuccinMocha)
-            .clone()
-    })
 }
 
 fn syntect_style(st: syntect::highlighting::Style) -> Style {
@@ -117,8 +108,12 @@ fn first_line(f: &FileDiff) -> Option<&str> {
 
 /// Colours for every line of `diff`; `None` when no line has any (all
 /// plain text, or too large), so there is nothing to send.
-pub fn highlight_diff(diff: &CommitDiff) -> Option<DiffSpans> {
-    let spans: DiffSpans = diff.files.iter().map(highlight_file).collect();
+pub fn highlight_diff(diff: &CommitDiff, theme: &SyntaxTheme) -> Option<DiffSpans> {
+    let spans: DiffSpans = diff
+        .files
+        .iter()
+        .map(|f| highlight_file(f, theme))
+        .collect();
     let any = spans
         .iter()
         .flatten()
@@ -128,7 +123,7 @@ pub fn highlight_diff(diff: &CommitDiff) -> Option<DiffSpans> {
 
 /// Colours for one file's hunks; all `None` for plain text and for files
 /// over [`MAX_FILE_LINES`].
-pub fn highlight_file(f: &FileDiff) -> Vec<HunkSpans> {
+pub fn highlight_file(f: &FileDiff, theme: &SyntaxTheme) -> Vec<HunkSpans> {
     let plain = || {
         f.hunks
             .iter()
@@ -144,16 +139,20 @@ pub fn highlight_file(f: &FileDiff) -> Vec<HunkSpans> {
     }
     let path = super::commit::file_path(f);
     match syntax_for(path, first_line(f)) {
-        Some(syntax) => f.hunks.iter().map(|h| highlight_hunk(h, syntax)).collect(),
+        Some(syntax) => f
+            .hunks
+            .iter()
+            .map(|h| highlight_hunk(h, syntax, theme))
+            .collect(),
         None => plain(),
     }
 }
 
 /// One hunk, from a fresh state: the old side and the new side apart.
-fn highlight_hunk(h: &Hunk, syntax: &SyntaxReference) -> HunkSpans {
+fn highlight_hunk(h: &Hunk, syntax: &SyntaxReference, theme: &SyntaxTheme) -> HunkSpans {
     let ss = syntaxes();
-    let mut old = HighlightLines::new(syntax, code_theme());
-    let mut new = HighlightLines::new(syntax, code_theme());
+    let mut old = HighlightLines::new(syntax, theme);
+    let mut new = HighlightLines::new(syntax, theme);
     let run = |hl: &mut HighlightLines, text: &str| -> Option<Spans> {
         if text.len() > MAX_LINE_BYTES {
             return None;
@@ -199,6 +198,10 @@ pub fn style_at(spans: &[(Style, Range<usize>)], b: usize) -> Option<Style> {
 
 #[cfg(test)]
 mod tests {
+    fn theme() -> syntect::highlighting::Theme {
+        crate::theme::Theme::default().syntax
+    }
+
     use super::*;
     use crate::vcs::DiffLine;
 
@@ -243,7 +246,7 @@ mod tests {
             line(LineKind::Context, "let x = 3;"),
         ];
         let f = file("src/a.rs", 1, lines);
-        let s = &highlight_file(&f)[0].lines;
+        let s = &highlight_file(&f, &theme())[0].lines;
         let rem = fg_of(s, 0, "fn old", "fn").unwrap();
         let add = fg_of(s, 1, "fn new", "fn").unwrap();
         let name = fg_of(s, 1, "fn new", "new").unwrap();
@@ -260,7 +263,7 @@ mod tests {
             line(LineKind::Added, "    return y;"),
         ];
         let f = file("lib.rs", 40, lines);
-        let s = &highlight_file(&f)[0].lines;
+        let s = &highlight_file(&f, &theme())[0].lines;
         let kw = fg_of(s, 2, "    return y;", "return").unwrap();
         let var = fg_of(s, 2, "    return y;", "y").unwrap();
         assert_ne!(kw, var);
@@ -273,7 +276,7 @@ mod tests {
             line(LineKind::Removed, "/* opened"),
             line(LineKind::Added, "fn ok() {}"),
         ];
-        let s = &highlight_file(&file("a.rs", 1, lines))[0].lines;
+        let s = &highlight_file(&file("a.rs", 1, lines), &theme())[0].lines;
         let comment = fg_of(s, 0, "/* opened", "opened").unwrap();
         assert_ne!(fg_of(s, 1, "fn ok() {}", "fn"), Some(comment));
     }
@@ -285,7 +288,7 @@ mod tests {
             line(LineKind::Added, "// head"),
             line(LineKind::Context, "int shared = 1;"),
         ];
-        let h = &highlight_file(&file("x.c", 1, lines))[0];
+        let h = &highlight_file(&file("x.c", 1, lines), &theme())[0];
         let t = "int shared = 1;";
         let new = fg_of(&h.lines, 2, t, "int").unwrap();
         let old = fg_of(&h.old, 2, t, "int").unwrap();
@@ -298,7 +301,7 @@ mod tests {
     #[test]
     fn unknown_extension_and_shebang() {
         let f = file("notes.zzzz", 1, vec![line(LineKind::Added, "fn x() {}")]);
-        assert_eq!(highlight_file(&f)[0].lines, [None]);
+        assert_eq!(highlight_file(&f, &theme())[0].lines, [None]);
         let f = file(
             "run",
             1,
@@ -307,9 +310,12 @@ mod tests {
                 line(LineKind::Added, "echo hi"),
             ],
         );
-        assert!(highlight_file(&f)[0].lines[1].is_some(), "shebang picks sh");
+        assert!(
+            highlight_file(&f, &theme())[0].lines[1].is_some(),
+            "shebang picks sh"
+        );
         let f = file("Makefile", 5, vec![line(LineKind::Added, "all: x")]);
-        assert!(highlight_file(&f)[0].lines[0].is_some());
+        assert!(highlight_file(&f, &theme())[0].lines[0].is_some());
     }
 
     #[test]
@@ -322,7 +328,7 @@ mod tests {
         let mut f = file("run", 1, gone);
         f.hunks[0].new_start = 0;
         f.new_path = None;
-        let s = &highlight_file(&f)[0].lines;
+        let s = &highlight_file(&f, &theme())[0].lines;
         assert!(s.iter().all(Option::is_some), "shell colours: {s:?}");
         let echo = fg_of(s, 1, "echo hello", "echo").unwrap();
         assert_ne!(fg_of(s, 1, "echo hello", "hello"), Some(echo));
@@ -336,7 +342,7 @@ mod tests {
                 line(LineKind::Removed, "echo hello"),
             ],
         );
-        assert!(highlight_file(&f)[0].lines[2].is_some());
+        assert!(highlight_file(&f, &theme())[0].lines[2].is_some());
     }
 
     #[test]
@@ -350,20 +356,24 @@ mod tests {
                 line(LineKind::Added, "fn a() {}"),
             ],
         );
-        let s = &highlight_file(&f)[0].lines;
+        let s = &highlight_file(&f, &theme())[0].lines;
         assert!(s[0].is_none());
         assert!(s[1].is_some());
         let many = (0..=MAX_FILE_LINES)
             .map(|_| line(LineKind::Added, "fn a() {}"))
             .collect();
-        let s = highlight_file(&file("a.rs", 1, many));
+        let s = highlight_file(&file("a.rs", 1, many), &theme());
         assert!(s[0].lines.iter().all(Option::is_none));
     }
 
     #[test]
     fn spans_cover_the_text_without_its_newline() {
         let text = "let s = \"hi\";\r";
-        let s = &highlight_file(&file("a.rs", 1, vec![line(LineKind::Added, text)]))[0].lines;
+        let s = &highlight_file(
+            &file("a.rs", 1, vec![line(LineKind::Added, text)]),
+            &theme(),
+        )[0]
+        .lines;
         let spans = s[0].as_ref().unwrap();
         assert_eq!(spans.first().unwrap().1.start, 0);
         assert_eq!(spans.last().unwrap().1.end, text.len());

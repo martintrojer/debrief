@@ -12,9 +12,11 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use debrief_review::Side;
 use ratatui::layout::Rect;
+use syntect::highlighting::Theme as SyntaxTheme;
 
 use crate::vcs::{
     CommitDiff, CommitInfo, Context, FileDiff, Kind, LineKind, OpenOptions, WorkingCopy,
@@ -483,18 +485,21 @@ fn spawn_show(
     commit: String,
     context: Context,
     request: u64,
-    colour: bool,
+    colour: Option<Arc<SyntaxTheme>>,
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
             .and_then(|v| v.show(&commit, context))
             .map_err(|e| format!("{e:#}"));
-        let diff = result.as_ref().ok().filter(|_| colour).cloned();
+        let diff = result.as_ref().ok().filter(|_| colour.is_some()).cloned();
         if tx.send(AppEvent::Loaded { request, result }).is_err() {
             return;
         }
-        if let Some(spans) = diff.as_ref().and_then(highlight::highlight_diff) {
+        let spans = colour
+            .as_deref()
+            .and_then(|t| diff.as_ref().and_then(|d| highlight::highlight_diff(d, t)));
+        if let Some(spans) = spans {
             let _ = tx.send(AppEvent::Highlighted { request, spans });
         }
     });
@@ -507,7 +512,7 @@ fn spawn_working(
     (root, opts): (PathBuf, OpenOptions),
     context: Context,
     request: u64,
-    colour: bool,
+    colour: Option<Arc<SyntaxTheme>>,
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
@@ -518,7 +523,7 @@ fn spawn_working(
             .as_ref()
             .ok()
             .and_then(Option::as_ref)
-            .filter(|_| colour)
+            .filter(|_| colour.is_some())
             .map(working_diff);
         if tx
             .send(AppEvent::WorkingLoaded { request, result })
@@ -526,7 +531,10 @@ fn spawn_working(
         {
             return;
         }
-        if let Some(spans) = diff.as_ref().and_then(highlight::highlight_diff) {
+        let spans = colour
+            .as_deref()
+            .and_then(|t| diff.as_ref().and_then(|d| highlight::highlight_diff(d, t)));
+        if let Some(spans) = spans {
             let _ = tx.send(AppEvent::Highlighted { request, spans });
         }
     });
@@ -627,7 +635,7 @@ impl App {
                     self.vcs.open_options(),
                     self.vcs.pinned_op(),
                 );
-                let colour = self.config.render.highlight;
+                let colour = self.config.render.highlight.then(|| self.syntax.clone());
                 spawn_show(at, id, self.context, request, colour, tx)
             }
             None => {
@@ -653,7 +661,7 @@ impl App {
         match self.sender.clone() {
             Some(tx) => {
                 let at = (self.vcs.root().to_path_buf(), self.vcs.open_options());
-                let colour = self.config.render.highlight;
+                let colour = self.config.render.highlight.then(|| self.syntax.clone());
                 spawn_working(at, self.context, request, colour, tx)
             }
             None => {
@@ -741,14 +749,15 @@ impl App {
         }
         match self.sender.clone() {
             Some(tx) => {
+                let theme = self.syntax.clone();
                 std::thread::spawn(move || {
-                    if let Some(spans) = highlight::highlight_diff(&diff) {
+                    if let Some(spans) = highlight::highlight_diff(&diff, &theme) {
                         let _ = tx.send(AppEvent::Highlighted { request, spans });
                     }
                 });
             }
             None => {
-                if let Some(spans) = highlight::highlight_diff(&diff) {
+                if let Some(spans) = highlight::highlight_diff(&diff, &self.syntax) {
                     self.highlighted(request, spans);
                 }
             }

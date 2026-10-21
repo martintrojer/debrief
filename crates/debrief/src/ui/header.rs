@@ -10,22 +10,22 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthChar;
 
-use super::palette;
 use crate::app::App;
+use crate::theme::Palette;
 
 /// The badge colour of a conventional-commit type.
-fn type_color(ty: &str) -> Color {
+fn type_color(pal: &Palette, ty: &str) -> Color {
     match ty {
-        "feat" => palette::GREEN,
-        "fix" => palette::RED,
-        "perf" => palette::PEACH,
-        "refactor" => palette::MAUVE,
-        "docs" => palette::BLUE,
-        "test" | "tests" => palette::TEAL,
-        "build" | "ci" => palette::SKY,
-        "revert" => palette::PINK,
-        "style" => palette::YELLOW,
-        _ => palette::OVERLAY,
+        "feat" => pal.green,
+        "fix" => pal.red,
+        "perf" => pal.orange,
+        "refactor" => pal.purple,
+        "docs" => pal.blue,
+        "test" | "tests" => pal.cyan,
+        "build" | "ci" => pal.sky,
+        "revert" => pal.pink,
+        "style" => pal.yellow,
+        _ => pal.muted,
     }
 }
 
@@ -52,7 +52,8 @@ fn fit(s: &str, max: usize) -> String {
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
-    let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
+    let pal = &app.theme().palette;
+    let base = Style::new().fg(pal.text).bg(pal.bg_dark);
     let Some((id, subject)) = app.commit_header() else {
         return;
     };
@@ -84,8 +85,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             mid.push(Span::styled(
                 badge,
                 Style::new()
-                    .fg(palette::BASE)
-                    .bg(type_color(subject.ty))
+                    .fg(pal.bg)
+                    .bg(type_color(pal, subject.ty))
                     .add_modifier(Modifier::BOLD),
             ));
             mid_w += w;
@@ -108,9 +109,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             " ".repeat(width - pad - mid_w - right_w),
             base,
         ));
-        spans.push(Span::styled(right, base.fg(palette::MAUVE)));
+        spans.push(Span::styled(right, base.fg(pal.purple)));
         if let Some(b) = branch {
-            spans.push(Span::styled(b, base.fg(palette::OVERLAY)));
+            spans.push(Span::styled(b, base.fg(pal.muted)));
         }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);

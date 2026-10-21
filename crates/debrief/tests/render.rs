@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::{App, Screen, StartOptions};
-use debrief::ui::palette;
+use debrief::theme::MOCHA;
 use debrief::vcs::{
     self, CommitDiff, CommitInfo, Context, DiffLine, FileDiff, Hunk, Kind, LineKind, OpenOptions,
     Vcs,
@@ -223,9 +223,9 @@ fn tabs_render_at_tab_stops_with_cursor_and_search_on_the_right_cells() {
     keys(&mut app, "k");
     let buf = draw(&mut app, 100, 12);
     for x in 8..11 {
-        assert_eq!(buf[(x0 + x, y)].style().bg, Some(palette::YELLOW), "{x}");
+        assert_eq!(buf[(x0 + x, y)].style().bg, Some(MOCHA.yellow), "{x}");
     }
-    assert_ne!(buf[(x0 + 7, y)].style().bg, Some(palette::YELLOW));
+    assert_ne!(buf[(x0 + 7, y)].style().bg, Some(MOCHA.yellow));
 }
 
 #[test]
@@ -250,9 +250,9 @@ fn a_tab_cut_by_the_viewport_edge_keeps_its_search_hit_and_cursor() {
     let y = row_of(&buf, "ZZZ");
     let first_z = (0..79).find(|&x| buf[(x, y)].symbol() == "Z").unwrap();
     for x in first_z - 3..first_z {
-        assert_eq!(buf[(x, y)].style().bg, Some(palette::YELLOW), "{x}");
+        assert_eq!(buf[(x, y)].style().bg, Some(MOCHA.yellow), "{x}");
     }
-    assert_ne!(buf[(first_z - 4, y)].style().bg, Some(palette::YELLOW));
+    assert_ne!(buf[(first_z - 4, y)].style().bg, Some(MOCHA.yellow));
 
     // A pane narrower than the tab: the cursor on it stays visible.
     for width in 13..20 {
@@ -294,7 +294,7 @@ fn cr_and_control_characters() {
     let y = row_of(&buf, "a   b");
     assert_eq!(cells(y, 8), "a   b?c ");
     let q = buf[(x0 + 5, y)].style();
-    assert_eq!(q.fg, Some(palette::OVERLAY));
+    assert_eq!(q.fg, Some(MOCHA.muted));
     assert!(q.add_modifier.contains(Modifier::DIM));
     let y = row_of(&buf, "esc");
     assert_eq!(cells(y, 6), "esc?! ");
@@ -351,13 +351,13 @@ fn backgrounds_fill_the_pane_and_the_sign_is_coloured() {
     let hunk = row_of(&buf, "@@ -1 +1 @@");
     let ctx = row_of(&buf, "  z");
     let header = row_of(&buf, "── a ──");
-    assert_eq!(buf[(last, del)].style().bg, Some(palette::DEL_BG));
-    assert_eq!(buf[(last, add)].style().bg, Some(palette::ADD_BG));
-    assert_eq!(buf[(last, hunk)].style().bg, Some(palette::HUNK_BG));
-    assert_ne!(buf[(last, ctx)].style().bg, Some(palette::ADD_BG));
+    assert_eq!(buf[(last, del)].style().bg, Some(MOCHA.del_bg));
+    assert_eq!(buf[(last, add)].style().bg, Some(MOCHA.add_bg));
+    assert_eq!(buf[(last, hunk)].style().bg, Some(MOCHA.hunk_bg));
+    assert_ne!(buf[(last, ctx)].style().bg, Some(MOCHA.add_bg));
     // The cursor row (the header at first) is surface to the edge.
     assert_eq!(app.commit_cursor().row, 0);
-    assert_eq!(buf[(last, header)].style().bg, Some(palette::SURFACE));
+    assert_eq!(buf[(last, header)].style().bg, Some(MOCHA.cursor_bg));
     assert_eq!(
         buf[(last, header)].symbol(),
         "─",
@@ -370,15 +370,15 @@ fn backgrounds_fill_the_pane_and_the_sign_is_coloured() {
             .position(|c| c == '+' || c == '-')
             .unwrap() as u16
     };
-    assert_eq!(buf[(sx(add), add)].style().fg, Some(palette::GREEN));
-    assert_eq!(buf[(sx(del), del)].style().fg, Some(palette::RED));
+    assert_eq!(buf[(sx(add), add)].style().fg, Some(MOCHA.green));
+    assert_eq!(buf[(sx(del), del)].style().fg, Some(MOCHA.red));
     // Moving the cursor onto the short added line paints it surface to
     // the edge.
     let r = diff_row(&app, "y");
     goto(&mut app, r);
     let buf = draw(&mut app, w, 12);
-    assert_eq!(buf[(last, add)].style().bg, Some(palette::SURFACE));
-    assert_eq!(buf[(last, del)].style().bg, Some(palette::DEL_BG));
+    assert_eq!(buf[(last, add)].style().bg, Some(MOCHA.cursor_bg));
+    assert_eq!(buf[(last, del)].style().bg, Some(MOCHA.del_bg));
 }
 
 #[test]
@@ -400,12 +400,12 @@ fn sidebar_letters_mode_changes_and_empty_files() {
     let buf = draw(&mut app, 100, 40);
     // Top-level files: the tree lists them alphabetically.
     let want = [
-        ('A', "added.rs", palette::GREEN),
-        ('C', "copy.rs", palette::TEAL),
-        ('D', "gone.rs", palette::RED),
-        ('M', "mod.rs", palette::YELLOW),
-        ('R', "new.rs", palette::PINK),
-        ('M', "run.sh", palette::YELLOW),
+        ('A', "added.rs", MOCHA.green),
+        ('C', "copy.rs", MOCHA.cyan),
+        ('D', "gone.rs", MOCHA.red),
+        ('M', "mod.rs", MOCHA.yellow),
+        ('R', "new.rs", MOCHA.pink),
+        ('M', "run.sh", MOCHA.yellow),
     ];
     for (y, (letter, path, color)) in want.into_iter().enumerate() {
         let y = y as u16;
@@ -487,11 +487,11 @@ fn a_rust_hunk_gets_keyword_colours_under_the_row_backgrounds() {
     let (xd, xa) = (text_x(&buf, del, "fn old"), text_x(&buf, add, "fn new"));
     let kw = buf[(xa, add)].style().fg;
     assert!(kw.is_some());
-    assert_ne!(kw, Some(palette::GREEN), "a syntax colour, not the row's");
+    assert_ne!(kw, Some(MOCHA.green), "a syntax colour, not the row's");
     assert_eq!(buf[(xd, del)].style().fg, kw, "the removed side too");
     assert_ne!(buf[(xa + 3, add)].style().fg, kw, "the name differs");
-    assert_eq!(buf[(xa, add)].style().bg, Some(palette::ADD_BG));
-    assert_eq!(buf[(xd, del)].style().bg, Some(palette::DEL_BG));
+    assert_eq!(buf[(xa, add)].style().bg, Some(MOCHA.add_bg));
+    assert_eq!(buf[(xd, del)].style().bg, Some(MOCHA.del_bg));
 
     // t9's display rules stay: a tab's cells share its span's colour; a
     // control character is still a dimmed `?`.
@@ -505,7 +505,7 @@ fn a_rust_hunk_gets_keyword_colours_under_the_row_backgrounds() {
     let s = text(&buf, y);
     let q = s.chars().position(|c| c == '?').unwrap() as u16;
     let qs = buf[(q, y)].style();
-    assert_eq!(qs.fg, Some(palette::OVERLAY));
+    assert_eq!(qs.fg, Some(MOCHA.muted));
     assert!(qs.add_modifier.contains(Modifier::DIM));
     // The tab inside the string takes the string's colour.
     let chars: Vec<char> = s.chars().collect();
@@ -522,7 +522,7 @@ fn a_rust_hunk_gets_keyword_colours_under_the_row_backgrounds() {
     let r = diff_row(&app, "fn new() {}");
     goto(&mut app, r);
     let buf = draw(&mut app, 100, 12);
-    assert_eq!(buf[(xa + 3, add)].style().bg, Some(palette::SURFACE));
+    assert_eq!(buf[(xa + 3, add)].style().bg, Some(MOCHA.cursor_bg));
     assert!(
         buf[(xa, add)]
             .style()
@@ -538,10 +538,10 @@ fn highlight_false_and_unknown_extensions_render_plain() {
         let buf = draw(&mut app, 100, 12);
         let add = row_of(&buf, "fn new");
         let xa = text_x(&buf, add, "fn new");
-        assert_eq!(buf[(xa, add)].style().fg, Some(palette::GREEN), "{path}");
+        assert_eq!(buf[(xa, add)].style().fg, Some(MOCHA.green), "{path}");
         let del = row_of(&buf, "fn old");
         let xd = text_x(&buf, del, "fn old");
-        assert_eq!(buf[(xd, del)].style().fg, Some(palette::RED), "{path}");
+        assert_eq!(buf[(xd, del)].style().fg, Some(MOCHA.red), "{path}");
     }
 }
 
@@ -560,11 +560,7 @@ fn the_header_centres_a_type_badge_and_the_subject_with_the_id_right() {
     let top = text(&buf, 0);
     assert!(top.ends_with(" c0ffee00"), "{top:?}");
     let x = top.find("feat(ui)").expect("badge") as u16;
-    assert_eq!(
-        buf[(x, 0)].style().bg,
-        Some(palette::GREEN),
-        "feat is green"
-    );
+    assert_eq!(buf[(x, 0)].style().bg, Some(MOCHA.green), "feat is green");
     let mid = top
         .find(" feat(ui)  a header row")
         .expect("badge then subject");

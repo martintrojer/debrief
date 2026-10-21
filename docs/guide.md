@@ -534,10 +534,33 @@ on the status line: a launcher with a bad `key` is left unbound, and an
 empty or repeated `[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
-(highlighting), `[keys]`, `[mouse]`, `[log]` (which commits load: `revset`, `limit`, and `trunk`,
+(highlighting), `[theme]` (colours), `[keys]`, `[mouse]`, `[log]` (which commits load: `revset`, `limit`, and `trunk`,
 where a branch's log stops),
 `[review]` (comment kinds), `[send]`
 (where `<leader>rr` goes) and `[[launch]]`.
+
+### Theme
+
+`[theme] name` picks a built-in scheme (`catppuccin-mocha`, the default,
+`catppuccin-macchiato`, `catppuccin-frappe`, `catppuccin-latte`,
+`solarized-dark`, `solarized-light`, `gruvbox-dark`, `gruvbox-light`) or
+a path to a base16 or base24 scheme file (relative paths are relative to the
+config file). `[theme.colors]` replaces single colours of whatever `name`
+selected, `syntax` picks the code-highlighting theme, and `fill = true`
+paints the theme background, for a light scheme on a dark terminal:
+
+```toml
+[theme]
+name = "gruvbox-dark"
+fill = true
+
+[theme.colors]
+cursor_bg = "#585b70"
+```
+
+The keys are in
+[config.default.toml](../crates/debrief/config.default.toml); the full rules
+are in [the theming spec](specs/2026-10-21-theming.md).
 
 ### Toggles
 

@@ -104,10 +104,108 @@
 
 # [render]
 
-# Syntax-highlight diff lines (catppuccin-mocha). Each hunk is coloured on
-# its own, the old and new side apart; files over 10k diff lines and lines
-# over 2k bytes stay plain.
+# Syntax-highlight diff lines (the colours come from [theme] syntax). Each
+# hunk is coloured on its own, the old and new side apart; files over 10k
+# diff lines and lines over 2k bytes stay plain.
 # highlight = true
+
+
+# ── Theme ───────────────────────────────────────────────────────────────────
+
+# [theme]
+
+# The colour scheme: a built-in (catppuccin-mocha, catppuccin-macchiato,
+# catppuccin-frappe, catppuccin-latte, solarized-dark, solarized-light,
+# gruvbox-dark, gruvbox-light), or the path to a base16 or base24 scheme
+# file (tinted-theming YAML). A name with a "/" or ending in .yaml or .yml
+# is a path: "~" is your home directory, and a relative path is relative to
+# this file's directory.
+# name = "catppuccin-mocha"
+
+# The code-highlighting theme, a two-face theme name matched without regard
+# to case (for example "Nord", "Dracula", "gruvbox-dark"). Unset, it
+# follows `name`.
+# syntax = "Catppuccin Mocha"
+
+# Paint the theme background behind everything and draw text in the theme's
+# text colour. Needed for a light scheme on a dark terminal, or the
+# reverse. false leaves the terminal's own background.
+# fill = false
+
+# Overrides: any subset of the keys below, each replacing one colour of
+# whatever `name` selected. Values are "#rrggbb" or "rrggbb". The role
+# keys (cursor_bg, selection_bg, add_bg, del_bg, hunk_bg) follow the
+# palette when unset; their values here are Mocha's.
+# For example, Mocha with a stronger cursor row:
+#   [theme.colors]
+#   cursor_bg = "#585b70"
+
+# [theme.colors]
+
+# Main background; popups, and dark text on coloured badges.
+# bg = "#1e1e2e"
+
+# Status line, and the chip row over the log.
+# bg_dark = "#181825"
+
+# Subtle highlight; the split divider.
+# surface0 = "#313244"
+
+# Stronger highlight.
+# surface1 = "#45475a"
+
+# Strongest highlight.
+# surface2 = "#585b70"
+
+# Borders, hints and dim text.
+# muted = "#6c7086"
+
+# Text.
+# text = "#cdd6f4"
+
+# Accent; removed lines.
+# red = "#f38ba8"
+
+# Accent.
+# orange = "#fab387"
+
+# Accent.
+# yellow = "#f9e2af"
+
+# Accent; added lines.
+# green = "#a6e3a1"
+
+# Accent.
+# cyan = "#94e2d5"
+
+# Accent.
+# sky = "#89dceb"
+
+# Accent.
+# blue = "#89b4fa"
+
+# Accent.
+# purple = "#cba6f7"
+
+# Accent.
+# pink = "#f5c2e7"
+
+# Cursor row (log, diff, file and commit lists, picker), and the open
+# commit's row. Unset, it follows surface0.
+# cursor_bg = "#313244"
+
+# Visual selection, and the rows of a comment being typed. Unset, it
+# follows surface2.
+# selection_bg = "#585b70"
+
+# Background of added rows. Unset, green blended 20% over bg.
+# add_bg = "#394545"
+
+# Background of removed rows. Unset, red blended 20% over bg.
+# del_bg = "#483346"
+
+# Background of hunk headers. Unset, purple blended 12% over bg.
+# hunk_bg = "#322e46"
 
 
 # ── Keys ────────────────────────────────────────────────────────────────────

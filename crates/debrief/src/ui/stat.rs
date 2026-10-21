@@ -9,8 +9,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::palette;
 use crate::app::{App, StatPane, WORKING_ID, age};
+use crate::theme::Palette;
 use crate::vcs::{CommitStat, FileStat};
 
 /// `(plus, minus)` bar lengths for a file's counts, scaled so the
@@ -110,7 +110,7 @@ fn fit_start(s: &str, w: usize) -> String {
 }
 
 /// The `path | N ++--` rows for a pane `width` columns wide.
-pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
+pub fn file_lines(pal: &Palette, files: &[FileStat], width: usize) -> Vec<Line<'static>> {
     let changed =
         |f: &FileStat| u64::from(f.added.unwrap_or(0)) + u64::from(f.removed.unwrap_or(0));
     let max = files.iter().map(changed).max().unwrap_or(0);
@@ -134,24 +134,24 @@ pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
             ))
             .max(1);
     let bar_w = width.saturating_sub(path_w + 3 + num_w + 1).max(1);
-    let text = Style::new().fg(palette::TEXT);
+    let text = Style::new().fg(pal.text);
     files
         .iter()
         .map(|f| {
             let mut spans = vec![
                 Span::styled(fit_start(&file_label(f), path_w), text),
-                Span::styled(" | ", Style::new().fg(palette::OVERLAY)),
+                Span::styled(" | ", Style::new().fg(pal.muted)),
             ];
             match (f.added, f.removed) {
                 (Some(a), Some(r)) => {
                     let (p, m) = bar(a.into(), r.into(), max, bar_w);
                     spans.push(Span::styled(format!("{:>num_w$} ", changed(f)), text));
-                    spans.push(Span::styled("+".repeat(p), Style::new().fg(palette::GREEN)));
-                    spans.push(Span::styled("-".repeat(m), Style::new().fg(palette::RED)));
+                    spans.push(Span::styled("+".repeat(p), Style::new().fg(pal.green)));
+                    spans.push(Span::styled("-".repeat(m), Style::new().fg(pal.red)));
                 }
                 _ => spans.push(Span::styled(
                     format!("{:>num_w$}", "Bin"),
-                    Style::new().fg(palette::OVERLAY),
+                    Style::new().fg(pal.muted),
                 )),
             }
             Line::from(spans)
@@ -162,40 +162,41 @@ pub fn file_lines(files: &[FileStat], width: usize) -> Vec<Line<'static>> {
 /// The pane's lines. `cap` limits the message to that many rows (the
 /// last one `…`) when there are files to show below it.
 fn stat_lines(app: &App, s: &CommitStat, width: usize, cap: Option<usize>) -> Vec<Line<'static>> {
+    let pal = &app.theme().palette;
     let mut lines = Vec::new();
     let row = app.rows().get(app.cursor());
     let working = row.is_some_and(|r| r.info.commit == WORKING_ID);
     if working {
         lines.push(Line::styled(
             "Working copy (uncommitted)",
-            Style::new().fg(palette::YELLOW),
+            Style::new().fg(pal.yellow),
         ));
     } else if let Some(r) = row {
         // One header line first, so a short pane reaches the files soon.
         let c = &r.info.commit;
         let mut head = vec![Span::styled(
             c.get(..12).unwrap_or(c).to_string(),
-            Style::new().fg(palette::MAUVE),
+            Style::new().fg(pal.purple),
         )];
         if let Some(ch) = &r.info.change {
             head.push(Span::styled(
                 format!("  change {}", ch.get(..12).unwrap_or(ch)),
-                Style::new().fg(palette::PINK),
+                Style::new().fg(pal.pink),
             ));
         }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
         head.extend([
-            Span::styled(format!("  {}", s.author), Style::new().fg(palette::BLUE)),
-            Span::styled(format!(" <{}>", s.email), Style::new().fg(palette::OVERLAY)),
+            Span::styled(format!("  {}", s.author), Style::new().fg(pal.blue)),
+            Span::styled(format!(" <{}>", s.email), Style::new().fg(pal.muted)),
             Span::styled(
                 format!("  {}", date_label(now, s.time)),
-                Style::new().fg(palette::GREEN),
+                Style::new().fg(pal.green),
             ),
         ]);
         lines.push(Line::from(head));
-        let msg = Style::new().fg(palette::TEXT);
+        let msg = Style::new().fg(pal.text);
         let mut body: Vec<Line<'static>> = s
             .message
             .lines()
@@ -213,7 +214,7 @@ fn stat_lines(app: &App, s: &CommitStat, width: usize, cap: Option<usize>) -> Ve
             && body.len() > cap.max(2)
         {
             body.truncate(cap.max(2) - 1);
-            body.push(Line::styled("…", Style::new().fg(palette::OVERLAY)));
+            body.push(Line::styled("…", Style::new().fg(pal.muted)));
         }
         lines.extend(body);
     }
@@ -221,15 +222,12 @@ fn stat_lines(app: &App, s: &CommitStat, width: usize, cap: Option<usize>) -> Ve
     if s.files.is_empty() {
         lines.push(Line::styled(
             "(no files changed)",
-            Style::new().fg(palette::OVERLAY),
+            Style::new().fg(pal.muted),
         ));
         return lines;
     }
-    lines.extend(file_lines(&s.files, width));
-    lines.push(Line::styled(
-        summary(&s.files),
-        Style::new().fg(palette::OVERLAY),
-    ));
+    lines.extend(file_lines(pal, &s.files, width));
+    lines.push(Line::styled(summary(&s.files), Style::new().fg(pal.muted)));
     lines
 }
 
@@ -238,13 +236,14 @@ fn stat_lines(app: &App, s: &CommitStat, width: usize, cap: Option<usize>) -> Ve
 /// the pane so the files show; scrolled, the whole message is shown, and
 /// the scroll range covers every line of it.
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool) {
+    let pal = &app.theme().palette;
     let block = Block::new()
         .borders(if side_by_side {
             Borders::LEFT
         } else {
             Borders::TOP
         })
-        .border_style(Style::new().fg(palette::OVERLAY));
+        .border_style(Style::new().fg(pal.muted));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let inner = Rect {
@@ -256,9 +255,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool)
     let full = match app.stat_pane() {
         None => return,
         Some(StatPane::Loading) => {
-            vec![Line::styled("loading…", Style::new().fg(palette::OVERLAY))]
+            vec![Line::styled("loading…", Style::new().fg(pal.muted))]
         }
-        Some(StatPane::Error(e)) => vec![Line::styled(e, Style::new().fg(palette::RED))],
+        Some(StatPane::Error(e)) => vec![Line::styled(e, Style::new().fg(pal.red))],
         Some(StatPane::Ready(s)) => {
             let w = inner.width as usize;
             let h = inner.height as usize;
@@ -309,7 +308,7 @@ mod tests {
             summary(&files),
             "2 files changed, 4294967296 insertions(+), 4294967296 deletions(-)"
         );
-        let text: Vec<String> = file_lines(&files, 40)
+        let text: Vec<String> = file_lines(&crate::theme::MOCHA, &files, 40)
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
             .collect();
@@ -352,7 +351,7 @@ mod tests {
             summary(&files[..1]),
             "1 file changed, 1 insertion(+), 0 deletions(-)"
         );
-        let text: Vec<String> = file_lines(&files, 40)
+        let text: Vec<String> = file_lines(&crate::theme::MOCHA, &files, 40)
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
             .collect();

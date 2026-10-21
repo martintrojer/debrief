@@ -48,7 +48,11 @@ fn table_header(l: &str) -> Option<&str> {
     let t = l.strip_prefix("# ")?;
     let t = t.strip_prefix("[[").and_then(|t| t.strip_suffix("]]"));
     t.or_else(|| l.strip_prefix("# [")?.strip_suffix(']'))
-        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|t| {
+            !t.is_empty()
+                && t.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        })
 }
 
 /// How many more `[`/`{` than `]`/`}` `s` has, ignoring any inside a quoted
@@ -112,6 +116,8 @@ fn uncommented_default_file_is_the_defaults() {
         "[keys]",
         "[mouse]",
         "[log]",
+        "[theme]",
+        "[theme.colors]",
         "[review]",
         "[send]",
         "[[launch]]",
@@ -123,7 +129,16 @@ fn uncommented_default_file_is_the_defaults() {
         2,
         "md and edit"
     );
-    assert_eq!(Config::parse(&uncommented).unwrap(), Config::default());
+    // The theme stays unresolved, and the file sets every key (explicitly,
+    // even at the Mocha value): everything else equals the defaults, and the
+    // theme resolves to the same palette, syntax and fill.
+    let mut parsed = Config::parse(&uncommented).unwrap();
+    let theme = std::mem::take(&mut parsed.theme);
+    assert_eq!(parsed, Config::default());
+    assert_eq!(
+        theme.resolve().unwrap(),
+        Config::default().theme.resolve().unwrap()
+    );
 }
 
 /// `table.key` is set (commented out) under `# [table]` in the default file.
@@ -569,7 +584,7 @@ fn render_highlight_sets_syntax_colours_at_start() {
     assert_ne!(fg_of(&mut on, "fn"), fg_of(&mut off, "fn"));
     assert_eq!(
         fg_of(&mut off, "fn"),
-        Some(debrief::ui::palette::GREEN),
+        Some(debrief::theme::MOCHA.green),
         "plain added line"
     );
 }

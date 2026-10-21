@@ -22,7 +22,7 @@ use debrief::app::{
 };
 use debrief::seen::Status;
 use debrief::session::{Store, ViewFocus};
-use debrief::ui::palette;
+use debrief::theme::MOCHA;
 use debrief::vcs;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -310,7 +310,7 @@ fn the_open_commit_row_has_the_surface_background() {
     for i in 0..5 {
         let cell = &buf[(c.x + 3, list_y(&app, i))];
         let want = if i == 2 {
-            palette::SURFACE
+            MOCHA.cursor_bg
         } else {
             Color::Reset
         };
@@ -339,13 +339,13 @@ fn the_focused_cursor_is_a_separate_highlight() {
     let open = &buf[(c.x + 3, list_y(&app, 2))];
     let cur = &buf[(c.x + 3, list_y(&app, 3))];
     let other = &buf[(c.x + 3, list_y(&app, 4))];
-    assert_eq!(open.bg, palette::SURFACE);
+    assert_eq!(open.bg, MOCHA.cursor_bg);
     assert!(!open.modifier.contains(Modifier::BOLD));
     assert!(
         cur.modifier.contains(Modifier::BOLD),
         "the tree's selected style"
     );
-    assert_eq!(cur.bg, palette::SURFACE);
+    assert_eq!(cur.bg, MOCHA.cursor_bg);
     assert_ne!(open.style(), cur.style(), "distinct");
     assert_eq!(other.bg, Color::Reset);
 }
@@ -630,8 +630,8 @@ fn the_row_backgrounds_fill_the_whole_row() {
     let open = &buf[(x, list_y(&app, 2))];
     let cur = &buf[(x, list_y(&app, 3))];
     assert_eq!(open.symbol(), " ");
-    assert_eq!(open.bg, palette::SURFACE, "the open row");
-    assert_eq!(cur.bg, palette::SURFACE, "the cursor row");
+    assert_eq!(open.bg, MOCHA.cursor_bg, "the open row");
+    assert_eq!(cur.bg, MOCHA.cursor_bg, "the cursor row");
     assert_eq!(buf[(x, list_y(&app, 4))].bg, Color::Reset);
 }
 
@@ -1074,12 +1074,8 @@ fn list_search_matches_are_highlighted() {
     let c = app.commit_layout(area(ROWS)).commits.unwrap();
     // The short ID starts after the marker and its space.
     let x = c.x + 2;
-    assert_eq!(
-        buf[(x, list_y(&app, 2))].bg,
-        palette::YELLOW,
-        "while typing"
-    );
-    assert_ne!(buf[(x, list_y(&app, 1))].bg, palette::YELLOW);
+    assert_eq!(buf[(x, list_y(&app, 2))].bg, MOCHA.yellow, "while typing");
+    assert_ne!(buf[(x, list_y(&app, 1))].bg, MOCHA.yellow);
 }
 
 #[test]

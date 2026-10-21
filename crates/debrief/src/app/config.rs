@@ -17,6 +17,7 @@ use anyhow::{anyhow, bail};
 use debrief_review::Kind;
 use serde::{Deserialize, Serialize};
 
+use crate::theme::{self, ThemeConfig};
 use crate::vcs::Context as DiffContext;
 
 /// The commented default config written by `--init-config`.
@@ -32,10 +33,39 @@ pub struct Config {
     pub keys: KeysConfig,
     pub mouse: MouseConfig,
     pub log: LogConfig,
+    /// `[theme]`, unresolved: [`ThemeConfig::resolve`] builds the colours.
+    pub theme: ThemeConfig,
     pub launch: Vec<Launcher>,
     /// Problems the file had that didn't stop it loading (dropped comment
     /// kinds); the app shows them in the status line at start.
     pub warnings: Vec<String>,
+    /// The theme as validated at load; see [`Config::resolve_theme`].
+    pub(crate) theme_cache: ThemeCache,
+}
+
+/// A successful resolution of `[theme]` with the settings it came from.
+/// Never part of `Config` equality.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ThemeCache(Option<(ThemeConfig, theme::Resolved)>);
+
+impl PartialEq for ThemeCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for ThemeCache {}
+
+impl Config {
+    /// The resolved theme. Reuses the resolution `load` validated (an
+    /// external scheme file is not read again) while `theme` is unchanged
+    /// since; any change to it resolves afresh.
+    pub fn resolve_theme(&self) -> Result<theme::Resolved, theme::ThemeError> {
+        match &self.theme_cache.0 {
+            Some((snapshot, resolved)) if *snapshot == self.theme => Ok(resolved.clone()),
+            _ => self.theme.resolve(),
+        }
+    }
 }
 
 /// `[review]`.
@@ -377,10 +407,12 @@ impl Config {
             keys: KeysConfig::default(),
             mouse: MouseConfig::default(),
             log: LogConfig::default(),
+            theme: ThemeConfig::default(),
             review: ReviewConfig {
                 kinds: debrief_review::builtin_kinds(),
             },
             warnings: Vec::new(),
+            theme_cache: ThemeCache::default(),
             launch: vec![
                 Launcher {
                     name: MD.into(),
@@ -415,7 +447,7 @@ impl Config {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::defaults()),
             Err(e) => return Err(anyhow!("cannot read config {}: {e}", path.display())),
         };
-        Config::parse_at(&src).map_err(|(at, msg)| match at {
+        Config::parse_at(&src, path.parent()).map_err(|(at, msg)| match at {
             Some(at) => anyhow!(
                 "config error at {} line {}: {msg}",
                 path.display(),
@@ -428,16 +460,16 @@ impl Config {
     /// Parse `src` over the defaults; the error is [`Config::load`]'s
     /// message without the file and line.
     pub fn parse(src: &str) -> Result<Config, String> {
-        Config::parse_at(src).map_err(|(_, msg)| msg)
+        Config::parse_at(src, None).map_err(|(_, msg)| msg)
     }
 
     /// [`Config::parse`]; the error carries its byte offset if known and
     /// is one line (values quoted in it may hold newlines).
-    fn parse_at(src: &str) -> Result<Config, (Option<usize>, String)> {
-        Config::parse_raw(src).map_err(|(at, msg)| (at, one_line(&msg)))
+    fn parse_at(src: &str, dir: Option<&Path>) -> Result<Config, (Option<usize>, String)> {
+        Config::parse_raw(src, dir).map_err(|(at, msg)| (at, one_line(&msg)))
     }
 
-    fn parse_raw(src: &str) -> Result<Config, (Option<usize>, String)> {
+    fn parse_raw(src: &str, dir: Option<&Path>) -> Result<Config, (Option<usize>, String)> {
         let raw: RawConfig = toml::from_str(src).map_err(|e| {
             let at = e.span().map(|s| s.start);
             let msg = e.message().trim_end();
@@ -504,6 +536,11 @@ impl Config {
             set(&mut c.view.tmux_zoom, v.tmux_zoom);
             set(&mut c.view.follow_working, v.follow_working);
             set(&mut c.view.header, v.header);
+        }
+        if let Some(t) = raw.theme {
+            let (cfg, resolved) = parse_theme(t, dir)?;
+            c.theme_cache = ThemeCache(Some((cfg.clone(), resolved)));
+            c.theme = cfg;
         }
         if let Some(kinds) = raw.review.and_then(|r| r.kinds) {
             c.review.kinds = clean_kinds(kinds, &mut c.warnings);
@@ -647,7 +684,65 @@ struct RawConfig {
     keys: Option<RawKeys>,
     mouse: Option<RawMouse>,
     log: Option<RawLog>,
+    theme: Option<RawTheme>,
     launch: Option<Vec<RawLauncher>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTheme {
+    name: Option<toml::Spanned<String>>,
+    syntax: Option<toml::Spanned<String>>,
+    fill: Option<bool>,
+    colors: Option<std::collections::BTreeMap<String, toml::Spanned<String>>>,
+}
+
+/// `[theme]`, unresolved, and its resolution: done here, so a bad name or
+/// syntax is a config error at its key, and the app reuses the result
+/// (see [`Config::resolve_theme`]).
+fn parse_theme(
+    t: RawTheme,
+    dir: Option<&Path>,
+) -> Result<(ThemeConfig, theme::Resolved), (Option<usize>, String)> {
+    let at = |s: &Option<toml::Spanned<String>>| s.as_ref().map(|s| s.span().start);
+    let (name_at, syntax_at) = (at(&t.name), at(&t.syntax));
+    let mut c = ThemeConfig {
+        name: t.name.map(toml::Spanned::into_inner),
+        syntax: t.syntax.map(toml::Spanned::into_inner),
+        fill: t.fill,
+        ..ThemeConfig::default()
+    };
+    c.dir = dir
+        .filter(|_| c.name.as_deref().is_some_and(theme::is_path))
+        .map(Path::to_path_buf);
+    for (key, v) in t.colors.unwrap_or_default() {
+        let at = v.span().start;
+        let hex = theme::parse_hex(v.get_ref()).ok_or_else(|| {
+            (
+                Some(at),
+                format!(
+                    "theme.colors.{key}: bad colour {:?} (expected \"#rrggbb\")",
+                    v.get_ref()
+                ),
+            )
+        })?;
+        if !c.colors.set(&key, hex) {
+            return Err((
+                Some(at),
+                format!(
+                    "theme.colors.{key}: unknown key, expected one of {}",
+                    theme::KEYS.join(", ")
+                ),
+            ));
+        }
+    }
+    match c.resolve() {
+        Ok(r) => Ok((c, r)),
+        Err(e) => {
+            let at = if e.key == "name" { name_at } else { syntax_at };
+            Err((at, format!("theme.{}: {}", e.key, e.msg)))
+        }
+    }
 }
 
 #[derive(Deserialize)]

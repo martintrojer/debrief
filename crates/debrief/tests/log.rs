@@ -574,7 +574,7 @@ fn filter_narrows_marks_only_visible_rows_and_survives_reload() {
     let line: String = (0..80).map(|x| buf[(x, 1)].symbol().to_string()).collect();
     let at = line.find("commit 1").unwrap();
     let x = line[..at].chars().count() as u16;
-    assert_eq!(buf[(x, 1)].bg, debrief::ui::palette::YELLOW);
+    assert_eq!(buf[(x, 1)].bg, debrief::theme::MOCHA.yellow);
 
     // m marks only the filtered rows.
     key(&mut app, 'm');

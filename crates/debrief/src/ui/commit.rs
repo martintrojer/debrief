@@ -8,12 +8,12 @@
 //! background, search hits, the cursor and the dimmed `?` of a control
 //! character stay on top.
 
-use super::palette;
 use crate::app::commit::gutter_width;
 use crate::app::display::{self, DisplayCell, Glyph};
 use crate::app::highlight::style_at;
 use crate::app::review::MARKER;
 use crate::app::{App, DiffRow, Focus, Mode, RowKind};
+use crate::theme::Palette;
 use crate::vcs::LineKind;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -21,33 +21,28 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-/// Selection background (Catppuccin Mocha surface2).
-const SELECTED: Color = Color::Rgb(0x58, 0x5b, 0x70);
-const HIT: Color = palette::YELLOW;
 /// The hatch of a filler row.
 const FILLER: &str = "╱";
 
-pub(super) fn style_of(kind: RowKind) -> Style {
-    let s = Style::new().fg(palette::TEXT);
+pub(super) fn style_of(pal: &Palette, kind: RowKind) -> Style {
+    let s = Style::new().fg(pal.text);
     match kind {
         RowKind::Message => s,
-        RowKind::FileHeader => s.fg(palette::BLUE).add_modifier(Modifier::BOLD),
-        RowKind::HunkHeader => s.fg(palette::MAUVE).add_modifier(Modifier::BOLD),
-        RowKind::Line(LineKind::Added) => s.fg(palette::GREEN),
-        RowKind::Line(LineKind::Removed) => s.fg(palette::RED),
+        RowKind::FileHeader => s.fg(pal.blue).add_modifier(Modifier::BOLD),
+        RowKind::HunkHeader => s.fg(pal.purple).add_modifier(Modifier::BOLD),
+        RowKind::Line(LineKind::Added) => s.fg(pal.green),
+        RowKind::Line(LineKind::Removed) => s.fg(pal.red),
         RowKind::Line(LineKind::Context) => s,
-        RowKind::NoNewline | RowKind::Binary | RowKind::Blank | RowKind::Filler => {
-            s.fg(palette::OVERLAY)
-        }
+        RowKind::NoNewline | RowKind::Binary | RowKind::Blank | RowKind::Filler => s.fg(pal.muted),
     }
 }
 
 /// The background a row of `kind` gets across the whole pane, if any.
-pub(super) fn row_bg(kind: RowKind) -> Option<Color> {
+pub(super) fn row_bg(pal: &Palette, kind: RowKind) -> Option<Color> {
     match kind {
-        RowKind::Line(LineKind::Added) => Some(palette::ADD_BG),
-        RowKind::Line(LineKind::Removed) => Some(palette::DEL_BG),
-        RowKind::HunkHeader => Some(palette::HUNK_BG),
+        RowKind::Line(LineKind::Added) => Some(pal.add_bg),
+        RowKind::Line(LineKind::Removed) => Some(pal.del_bg),
+        RowKind::HunkHeader => Some(pal.hunk_bg),
         _ => None,
     }
 }
@@ -57,7 +52,7 @@ pub(super) fn row_bg(kind: RowKind) -> Option<Color> {
 fn gutter(app: &App, r: &DiffRow, w: usize) -> (String, Option<(char, Color)>) {
     let line = diff_line(app, r);
     let num = |n: Option<u32>| n.map_or(String::new(), |n| n.to_string());
-    let sign = sign_of(r.kind);
+    let sign = sign_of(&app.theme().palette, r.kind);
     match line {
         Some(l) => (
             format!("{:>w$} {:>w$} ", num(l.old), num(l.new)),
@@ -84,15 +79,13 @@ fn visible(text: &str, from: usize, width: usize) -> Vec<(DisplayCell<'_>, usize
 
 /// The empty pane: loading, or nothing to show.
 fn draw_empty(frame: &mut Frame, app: &App, area: Rect) {
+    let pal = &app.theme().palette;
     let msg = if app.commit_loading() {
         " loading…"
     } else {
         " nothing to show"
     };
-    frame.render_widget(
-        Paragraph::new(msg).style(Style::new().fg(palette::OVERLAY)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(msg).style(Style::new().fg(pal.muted)), area);
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
@@ -144,11 +137,11 @@ pub(super) fn diff_line<'a>(app: &'a App, r: &DiffRow) -> Option<&'a crate::vcs:
 }
 
 /// The sign (and its colour) of a Line row.
-pub(super) fn sign_of(kind: RowKind) -> (char, Color) {
+pub(super) fn sign_of(pal: &Palette, kind: RowKind) -> (char, Color) {
     match kind {
-        RowKind::Line(LineKind::Added) => ('+', palette::GREEN),
-        RowKind::Line(LineKind::Removed) => ('-', palette::RED),
-        _ => (' ', palette::OVERLAY),
+        RowKind::Line(LineKind::Added) => ('+', pal.green),
+        RowKind::Line(LineKind::Removed) => ('-', pal.red),
+        _ => (' ', pal.muted),
     }
 }
 
@@ -178,14 +171,15 @@ pub(super) struct Pane<'a> {
 
 /// Draw row `i` of `p` in the one-row `rect`.
 pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &DiffRow, rect: Rect) {
+    let pal = &app.theme().palette;
     let text_w = (rect.width as usize).saturating_sub(p.gutter_w + p.marks);
     let selected = p.sel.is_some_and(|(lo, hi)| (lo..=hi).contains(&i));
     let bg = if selected {
-        Some(SELECTED)
+        Some(pal.selection_bg)
     } else if p.cursor == Some(i) {
-        Some(palette::SURFACE)
+        Some(pal.cursor_bg)
     } else {
-        row_bg(r.kind)
+        row_bg(pal, r.kind)
     };
     // Paint the background across the pane: a Line's style only reaches
     // the cells it draws.
@@ -193,8 +187,8 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
         frame.buffer_mut().set_style(rect, Style::new().bg(bg));
     }
     let base = match bg {
-        Some(bg) => style_of(r.kind).bg(bg),
-        None => style_of(r.kind),
+        Some(bg) => style_of(pal, r.kind).bg(bg),
+        None => style_of(pal, r.kind),
     };
     let caret = p.caret.filter(|c| c.row == i && p.sel.is_none());
     let mut spans = Vec::new();
@@ -204,16 +198,16 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
         } else {
             " ".to_string()
         };
-        spans.push(Span::styled(m, base.fg(palette::YELLOW)));
+        spans.push(Span::styled(m, base.fg(pal.yellow)));
     }
     let (nums, sign) = (p.gutter)(r);
-    spans.push(Span::styled(nums, base.fg(palette::OVERLAY)));
+    spans.push(Span::styled(nums, base.fg(pal.muted)));
     if let Some((c, fg)) = sign {
         spans.push(Span::styled(format!("{c} "), base.fg(fg)));
     }
     if r.kind == RowKind::Filler {
         // The shorter side of a change block: a dim hatch.
-        let s = base.fg(palette::OVERLAY).add_modifier(Modifier::DIM);
+        let s = base.fg(pal.muted).add_modifier(Modifier::DIM);
         let mut n = text_w;
         if caret.is_some() {
             spans.push(Span::styled(" ", base.add_modifier(Modifier::REVERSED)));
@@ -237,13 +231,13 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
             .iter()
             .any(|&(hr, a, b)| hr == i && (a..b).contains(&c.col))
         {
-            s = s.bg(HIT).fg(palette::BASE);
+            s = s.bg(pal.yellow).fg(pal.bg);
         }
         let (text, pad) = match c.glyph {
             Glyph::Text(g) => (g.to_string(), String::new()),
             Glyph::Tab => (" ".to_string(), " ".repeat(end - start - 1)),
             Glyph::Control => {
-                s = s.fg(palette::OVERLAY).add_modifier(Modifier::DIM);
+                s = s.fg(pal.muted).add_modifier(Modifier::DIM);
                 ("?".to_string(), String::new())
             }
         };

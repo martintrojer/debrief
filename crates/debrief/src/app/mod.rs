@@ -279,6 +279,10 @@ pub struct App {
     /// Bytes for the terminal (OSC 52).
     output: Vec<u8>,
     config: config::Config,
+    /// The resolved `[theme]`: the palette the UI draws with.
+    theme: crate::theme::Theme,
+    /// `theme.syntax`, shared with the highlighting threads.
+    syntax: std::sync::Arc<syntect::highlighting::Theme>,
     /// Launcher key sequences after the leader, and their index.
     launch_keys: Vec<(Vec<char>, usize)>,
     /// A side effect waiting for the suspended TUI.
@@ -332,6 +336,12 @@ impl App {
         let opts_state = opts.state_dir.clone();
         let limit = opts.limit;
         let root = vcs.root().to_path_buf();
+        let theme = opts
+            .config
+            .resolve_theme()
+            .map(|r| crate::theme::Theme::new(&r))
+            .map_err(|e| anyhow::anyhow!("theme.{}: {}", e.key, e.msg))?;
+        let syntax = std::sync::Arc::new(theme.syntax.clone());
         let mut app = App {
             vcs,
             opts,
@@ -376,6 +386,8 @@ impl App {
             files_tree: true,
             output: Vec::new(),
             config: config::Config::default(),
+            theme,
+            syntax,
             launch_keys: Vec::new(),
             effect: None,
             runner: Box::new(launch::system_run),
@@ -492,6 +504,11 @@ impl App {
         self.commit_follow();
         self.stat_follow();
         crate::ui::draw(frame, self);
+    }
+
+    /// The resolved theme: palette, syntax colours, `fill`.
+    pub fn theme(&self) -> &crate::theme::Theme {
+        &self.theme
     }
 
     /// The config in effect.

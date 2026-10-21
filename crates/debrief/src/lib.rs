@@ -4,5 +4,6 @@ pub mod app;
 pub mod cli;
 pub mod seen;
 pub mod session;
+pub mod theme;
 pub mod ui;
 pub mod vcs;

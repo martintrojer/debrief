@@ -8,20 +8,20 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::palette;
 use crate::app::{App, help_rect};
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    let pal = &app.theme().palette;
     let Some(view) = app.picker() else { return };
     if area.width < 6 || area.height < 5 {
         return;
     }
     let rect = help_rect(area);
     frame.render_widget(Clear, rect);
-    let base = Style::new().fg(palette::TEXT).bg(palette::BASE);
+    let base = Style::new().fg(pal.text).bg(pal.bg);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(palette::OVERLAY))
+        .border_style(Style::new().fg(pal.muted))
         .title(format!(" {} ({}) ", view.title, view.items.len()))
         .style(base);
     let inner = block.inner(rect);
@@ -35,7 +35,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let q = format!("> {}", view.input);
     let x = query.x + Span::raw(q.as_str()).width() as u16;
     frame.set_cursor_position((x.min(query.right().saturating_sub(1)), query.y));
-    frame.render_widget(Paragraph::new(q).style(base.fg(palette::BLUE)), query);
+    frame.render_widget(Paragraph::new(q).style(base.fg(pal.blue)), query);
     let h = list.height as usize;
     let skip = view.skip(h);
     let lines: Vec<Line> = if view.items.is_empty() {
@@ -44,7 +44,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             crate::app::PickerKind::Sessions => "No sessions",
             crate::app::PickerKind::Branches => "No branches",
         };
-        vec![Line::from(Span::styled(empty, base.fg(palette::OVERLAY)))]
+        vec![Line::from(Span::styled(empty, base.fg(pal.muted)))]
     } else {
         view.items
             .iter()
@@ -53,12 +53,12 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             .take(h)
             .map(|(i, it)| {
                 let s = if i == view.selected {
-                    base.bg(palette::SURFACE).add_modifier(Modifier::BOLD)
+                    base.bg(pal.cursor_bg).add_modifier(Modifier::BOLD)
                 } else {
                     base
                 };
                 Line::from(vec![
-                    Span::styled(it.label.clone(), s.fg(palette::BLUE)),
+                    Span::styled(it.label.clone(), s.fg(pal.blue)),
                     Span::styled(format!("  {}", it.detail), s),
                 ])
                 .style(s)
@@ -67,7 +67,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     };
     frame.render_widget(Paragraph::new(lines).style(base), list);
     frame.render_widget(
-        Paragraph::new(view.footer).style(base.fg(palette::OVERLAY)),
+        Paragraph::new(view.footer).style(base.fg(pal.muted)),
         footer,
     );
 }

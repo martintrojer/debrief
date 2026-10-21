@@ -21,11 +21,11 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::log::{WORKING_MARKER, hl, marker, more_line};
-use super::palette;
 use crate::app::config::SidebarSide;
 use crate::app::file_tree::clip_middle;
 use crate::app::sidebar::{GUTTER_COLS, STATUS_COLS, counts_label, lead_col};
 use crate::app::{App, Focus, WORKING_ID, short_id};
+use crate::theme::Palette;
 use crate::vcs::FileStatus;
 
 /// The current-file marker, drawn in the left gutter.
@@ -33,13 +33,13 @@ pub const CURRENT: &str = "▎";
 
 /// A status letter's colour (tuicr's: A green, M yellow, D red, R pink;
 /// C teal).
-pub fn status_color(s: FileStatus) -> Color {
+pub fn status_color(pal: &Palette, s: FileStatus) -> Color {
     match s {
-        FileStatus::Added => palette::GREEN,
-        FileStatus::Modified => palette::YELLOW,
-        FileStatus::Deleted => palette::RED,
-        FileStatus::Renamed => palette::PINK,
-        FileStatus::Copied => palette::TEAL,
+        FileStatus::Added => pal.green,
+        FileStatus::Modified => pal.yellow,
+        FileStatus::Deleted => pal.red,
+        FileStatus::Renamed => pal.pink,
+        FileStatus::Copied => pal.cyan,
     }
 }
 
@@ -51,14 +51,16 @@ pub const CLOSED: &str = "▸";
 /// first (over the diff, a peek, nothing of it shows through). Returns
 /// the area inside it.
 fn bordered(frame: &mut Frame, app: &App, area: Rect) -> Rect {
+    let pal = &app.theme().palette;
     frame.render_widget(Clear, area);
+    super::fill(frame, app, area);
     let border = match app.config().view.sidebar_side {
         SidebarSide::Left => Borders::RIGHT,
         SidebarSide::Right => Borders::LEFT,
     };
     let block = Block::new()
         .borders(border)
-        .border_style(Style::new().fg(palette::OVERLAY));
+        .border_style(Style::new().fg(pal.muted));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     inner
@@ -81,6 +83,7 @@ fn clip(s: &str, w: usize) -> String {
 
 /// The commit list: a rule on the top row of `area`, then the rows.
 pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
+    let pal = &app.theme().palette;
     let inner = bordered(frame, app, area);
     if inner.height == 0 {
         return;
@@ -90,15 +93,15 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
     let rule = if w > 4 {
         let chips = super::log::chips(app, w - 3);
         let used = 3 + chips.iter().map(Span::width).sum::<usize>();
-        let mut spans = vec![Span::styled("─ ", Style::new().fg(palette::OVERLAY))];
+        let mut spans = vec![Span::styled("─ ", Style::new().fg(pal.muted))];
         spans.extend(chips);
         spans.push(Span::styled(
             format!(" {}", "─".repeat(w.saturating_sub(used))),
-            Style::new().fg(palette::OVERLAY),
+            Style::new().fg(pal.muted),
         ));
         Line::from(spans)
     } else {
-        Line::styled("─".repeat(w), Style::new().fg(palette::OVERLAY))
+        Line::styled("─".repeat(w), Style::new().fg(pal.muted))
     };
     frame.render_widget(Paragraph::new(rule), Rect { height: 1, ..inner });
     let list = Rect {
@@ -118,34 +121,34 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
         .skip(app.commit_list_offset())
         .take(list.height as usize)
         .map(|(i, r)| {
-            let mut base = Style::new().fg(palette::TEXT);
+            let mut base = Style::new().fg(pal.text);
             if open == Some(i) || (focused && i == cursor) {
-                base = base.bg(palette::SURFACE);
+                base = base.bg(pal.cursor_bg);
             }
             if focused && i == cursor {
                 base = base.add_modifier(Modifier::BOLD);
             }
-            let (mut m, mut mc) = marker(r.status);
+            let (mut m, mut mc) = marker(pal, r.status);
             if r.working {
-                (m, mc) = (WORKING_MARKER, palette::YELLOW);
+                (m, mc) = (WORKING_MARKER, pal.yellow);
             }
             let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
             let mut rest = width.saturating_sub(2);
             let mut push = |text: &str, style: Style, spans: &mut Vec<Span<'static>>| {
                 let t = clip(text, rest);
                 rest -= t.width();
-                spans.extend(hl(t, style, &pats));
+                spans.extend(hl(t, style, &pats, pal));
             };
             if r.info.commit == WORKING_ID {
-                push(&r.info.summary, base.fg(palette::YELLOW), &mut spans);
+                push(&r.info.summary, base.fg(pal.yellow), &mut spans);
             } else {
                 push(
                     &format!("{} ", short_id(&r.info)),
-                    base.fg(palette::MAUVE),
+                    base.fg(pal.purple),
                     &mut spans,
                 );
                 if let Some(s) = app.session_marker(r) {
-                    push(&format!("{s} "), base.fg(palette::TEAL), &mut spans);
+                    push(&format!("{s} "), base.fg(pal.cyan), &mut spans);
                 }
                 push(&r.info.summary, base, &mut spans);
             }
@@ -156,12 +159,13 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
     let shown = app.rows().len().saturating_sub(app.commit_list_offset());
     if app.more_row() && shown < list.height as usize {
-        lines.push(more_line());
+        lines.push(more_line(pal));
     }
     frame.render_widget(Paragraph::new(lines), list);
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    let pal = &app.theme().palette;
     let inner = bordered(frame, app, area);
     let (Some(diff), Some(list)) = (app.commit_diff(), app.file_list()) else {
         return;
@@ -175,12 +179,12 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         .take(h)
         .filter_map(|row| Some((row, list.entry(row)?)))
         .map(|(row, e)| {
-            let mut base = Style::new().fg(palette::TEXT);
+            let mut base = Style::new().fg(pal.text);
             if focused && row == sel {
-                base = base.bg(palette::SURFACE).add_modifier(Modifier::BOLD);
+                base = base.bg(pal.cursor_bg).add_modifier(Modifier::BOLD);
             }
             let mark = if list.current == Some(row) {
-                Span::styled(CURRENT, base.fg(palette::PEACH))
+                Span::styled(CURRENT, base.fg(pal.orange))
             } else {
                 Span::styled(" ", base)
             };
@@ -190,22 +194,18 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                     let status = f.status();
                     Span::styled(
                         format!("{} ", status.letter()),
-                        base.fg(status_color(status)),
+                        base.fg(status_color(pal, status)),
                     )
                 }
                 None => {
                     let arrow = if list.is_collapsed(e) { CLOSED } else { OPEN };
-                    Span::styled(format!("{arrow} "), base.fg(palette::BLUE))
+                    Span::styled(format!("{arrow} "), base.fg(pal.blue))
                 }
             };
             let pad_l = lead_col(e, width) - GUTTER_COLS;
             let room = width.saturating_sub(1 + pad_l + STATUS_COLS + counts.width());
             let name = clip_middle(&e.name, room);
-            let name_style = if e.is_dir() {
-                base.fg(palette::BLUE)
-            } else {
-                base
-            };
+            let name_style = if e.is_dir() { base.fg(pal.blue) } else { base };
             let pad = room.saturating_sub(name.width());
             let (a, d) = counts.trim_start().split_once(' ').unwrap_or(("", ""));
             Line::from(vec![
@@ -214,9 +214,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 lead,
                 Span::styled(name, name_style),
                 Span::styled(" ".repeat(pad + 1), base),
-                Span::styled(a.to_string(), base.fg(palette::GREEN)),
+                Span::styled(a.to_string(), base.fg(pal.green)),
                 Span::styled(" ", base),
-                Span::styled(d.to_string(), base.fg(palette::RED)),
+                Span::styled(d.to_string(), base.fg(pal.red)),
             ])
             .style(base)
         })

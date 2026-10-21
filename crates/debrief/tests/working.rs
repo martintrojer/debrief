@@ -935,7 +935,7 @@ fn search_and_filter_highlight_the_working_copy_row() {
         let line: String = (0..80).map(|x| buf[(x, 1)].symbol().to_string()).collect();
         let at = line.find(needle).unwrap();
         let x = line[..at].chars().count() as u16;
-        buf[(x, 1)].bg == debrief::ui::palette::YELLOW
+        buf[(x, 1)].bg == debrief::theme::MOCHA.yellow
     };
     assert!(!yellow_at(&mut app, "Working"));
     keys(&mut app, "fworking");

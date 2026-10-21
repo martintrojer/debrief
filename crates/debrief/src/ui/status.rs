@@ -9,7 +9,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::palette;
 use crate::app::{App, Mode, Screen};
 use crate::vcs::Kind;
 
@@ -62,6 +61,7 @@ pub(super) fn elide_right(s: &str, max: usize) -> String {
 /// at least 12 columns of the text filter's room and is cut from the
 /// left.
 fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
+    let pal = &app.theme().palette;
     const LEAD: &str = "  path: ";
     const BRANCH: &str = "  branch: ";
     let filter = app.filter_label();
@@ -77,7 +77,7 @@ fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
     if fit > BRANCH.len() {
         let b = format!("{BRANCH}{}", elide_right(&label, fit - BRANCH.len()));
         room = room.saturating_sub(b.width());
-        spans.push(Span::styled(b, base.fg(palette::GREEN)));
+        spans.push(Span::styled(b, base.fg(pal.green)));
     }
     if let Some(p) = app.path_filter() {
         let text = filter.as_ref().map_or(0, |f| f.width() + 2);
@@ -85,7 +85,7 @@ fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
         if fit > LEAD.len() {
             let label = format!("{LEAD}{}", elide_left(p, fit - LEAD.len()));
             room = room.saturating_sub(label.width());
-            spans.push(Span::styled(label, base.fg(palette::PEACH)));
+            spans.push(Span::styled(label, base.fg(pal.orange)));
         }
     }
     if let Some(f) = filter {
@@ -93,7 +93,7 @@ fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
         if room > 0 {
             spans.push(Span::styled(
                 format!("  {}", elide_right(&f, room)),
-                base.fg(palette::SKY),
+                base.fg(pal.sky),
             ));
         }
     }
@@ -101,11 +101,12 @@ fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
-    let base = Style::new().fg(palette::TEXT).bg(palette::MANTLE);
+    let pal = &app.theme().palette;
+    let base = Style::new().fg(pal.text).bg(pal.bg_dark);
     // The quit prompt draws over a search or filter prompt it interrupted.
     if app.mode() == Mode::QuitPrompt {
         let p = format!(" {}", crate::app::session::QUIT_PROMPT);
-        frame.render_widget(Paragraph::new(p).style(base.fg(palette::YELLOW)), area);
+        frame.render_widget(Paragraph::new(p).style(base.fg(pal.yellow)), area);
         return;
     }
     if let Some(p) = app.search_prompt() {
@@ -113,7 +114,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), area.y));
         let mut spans = vec![Span::raw(p)];
         if let Some(note) = app.log_prompt_note() {
-            spans.push(Span::styled(format!("  {note}"), base.fg(palette::YELLOW)));
+            spans.push(Span::styled(format!("  {note}"), base.fg(pal.yellow)));
         }
         frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
         return;
@@ -157,8 +158,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     );
     let [kind, counts] = tail;
     let mut spans = vec![
-        Span::styled(format!(" {root}"), base.fg(palette::BLUE)),
-        Span::styled(kind, base.fg(palette::OVERLAY)),
+        Span::styled(format!(" {root}"), base.fg(pal.blue)),
+        Span::styled(kind, base.fg(pal.muted)),
     ];
     // `branch: …` and `path: …` before the counts, the text filter after.
     let mut filters = filters.into_iter().peekable();
@@ -167,10 +168,10 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     {
         spans.push(p);
     }
-    spans.push(Span::styled(counts, base.fg(palette::SKY)));
+    spans.push(Span::styled(counts, base.fg(pal.sky)));
     spans.extend(filters);
     if !msg.is_empty() {
-        spans.push(Span::styled(msg, base.fg(palette::YELLOW)));
+        spans.push(Span::styled(msg, base.fg(pal.yellow)));
     }
     let left_w: usize = spans.iter().map(Span::width).sum();
     let right_w = Span::raw(right.as_str()).width();
@@ -182,15 +183,16 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         base,
     ));
     if hint {
-        spans.push(Span::styled(HELP_HINT, base.fg(palette::OVERLAY)));
+        spans.push(Span::styled(HELP_HINT, base.fg(pal.muted)));
     }
-    spans.push(Span::styled(right, base.fg(palette::TEAL)));
+    spans.push(Span::styled(right, base.fg(pal.cyan)));
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
 
 /// The commit screen: mode, commit ID, the log's path filter and kept
 /// text filter, loading/status message, the repo root, position.
 fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
+    let pal = &app.theme().palette;
     let id = app.commit_id().unwrap_or("");
     let id = if app.commit_id() == Some(crate::app::WORKING_ID) {
         "working copy"
@@ -199,12 +201,9 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     };
     let mut spans = Vec::new();
     if app.mode() == Mode::Visual {
-        spans.push(Span::styled(
-            " V-LINE ",
-            base.fg(palette::BASE).bg(palette::MAUVE),
-        ));
+        spans.push(Span::styled(" V-LINE ", base.fg(pal.bg).bg(pal.purple)));
     }
-    spans.push(Span::styled(format!(" {id}"), base.fg(palette::MAUVE)));
+    spans.push(Span::styled(format!(" {id}"), base.fg(pal.purple)));
     let preview = app.review_preview();
     let msg = if app.commit_loading() {
         "loading…"
@@ -231,7 +230,7 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
         (area.width as usize).saturating_sub(used),
     ));
     if !msg.is_empty() {
-        spans.push(Span::styled(format!("  {msg}"), base.fg(palette::YELLOW)));
+        spans.push(Span::styled(format!("  {msg}"), base.fg(pal.yellow)));
     }
     let left_w: usize = spans.iter().map(Span::width).sum();
     let right_w = Span::raw(right.as_str()).width();
@@ -249,13 +248,13 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
         base,
     ));
     if let Some(root) = root {
-        spans.push(Span::styled(root, base.fg(palette::BLUE)));
+        spans.push(Span::styled(root, base.fg(pal.blue)));
         spans.push(Span::styled("  ", base));
     }
     if hint {
-        spans.push(Span::styled(HELP_HINT, base.fg(palette::OVERLAY)));
+        spans.push(Span::styled(HELP_HINT, base.fg(pal.muted)));
     }
-    spans.push(Span::styled(right, base.fg(palette::TEAL)));
+    spans.push(Span::styled(right, base.fg(pal.cyan)));
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
 

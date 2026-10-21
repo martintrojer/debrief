@@ -10,24 +10,24 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use super::palette;
 use crate::app::App;
 
 pub(super) fn draw(frame: &mut Frame, app: &App, pane: Rect) {
+    let pal = &app.theme().palette;
     let Some(b) = app.comment_box(pane) else {
         return;
     };
-    let base = Style::new().fg(palette::TEXT).bg(palette::BASE);
+    let base = Style::new().fg(pal.text).bg(pal.bg);
     frame.render_widget(Clear, b.rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(base.fg(palette::MAUVE))
+        .border_style(base.fg(pal.purple))
         .title(Line::styled(
             b.title,
-            base.fg(palette::MAUVE).add_modifier(Modifier::BOLD),
+            base.fg(pal.purple).add_modifier(Modifier::BOLD),
         ))
-        .title_bottom(Line::styled(b.hint, base.fg(palette::OVERLAY)))
+        .title_bottom(Line::styled(b.hint, base.fg(pal.muted)))
         .style(base);
     let lines: Vec<Line> = b.lines.into_iter().map(Line::raw).collect();
     frame.render_widget(Paragraph::new(lines).style(base).block(block), b.rect);

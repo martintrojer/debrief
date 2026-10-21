@@ -507,6 +507,12 @@ impl App {
             [a, b] if plain(a) == Some('g') && plain(b) == Some('g') => {
                 KeyResult::Action(A::FileTop)
             }
+            [a, b] if plain(a) == Some(']') && plain(b) == Some(']') => {
+                KeyResult::Action(A::Commit(true))
+            }
+            [a, b] if plain(a) == Some('[') && plain(b) == Some('[') => {
+                KeyResult::Action(A::Commit(false))
+            }
             [k] if k.modifiers.contains(KeyModifiers::CONTROL) => match k.code {
                 KeyCode::Char('d') => KeyResult::Action(A::FileHalfDown),
                 KeyCode::Char('u') => KeyResult::Action(A::FileHalfUp),
@@ -515,7 +521,7 @@ impl App {
             [k] => KeyResult::Action(match (k.code, plain(k)) {
                 (_, Some(c @ '1'..='9')) => return KeyResult::Count(c as usize - '0' as usize),
                 (_, Some('0')) if count.is_some() => return KeyResult::Count(0),
-                (_, Some('g')) => return KeyResult::Pending,
+                (_, Some('g' | ']' | '[')) => return KeyResult::Pending,
                 (_, Some('j')) | (KeyCode::Down, _) => A::FileDown(count),
                 (_, Some('k')) | (KeyCode::Up, _) => A::FileUp(count),
                 (_, Some('G')) => A::FileBottom,
@@ -544,6 +550,12 @@ impl App {
             [a, b] if plain(a) == Some('g') && plain(b) == Some('g') => {
                 KeyResult::Action(A::CommitsTop(count))
             }
+            [a, b] if plain(a) == Some(']') && plain(b) == Some(']') => {
+                KeyResult::Action(A::Commit(true))
+            }
+            [a, b] if plain(a) == Some('[') && plain(b) == Some('[') => {
+                KeyResult::Action(A::Commit(false))
+            }
             [k] if k.modifiers.contains(KeyModifiers::CONTROL) => match k.code {
                 KeyCode::Char('d') => KeyResult::Action(A::CommitsHalfDown),
                 KeyCode::Char('u') => KeyResult::Action(A::CommitsHalfUp),
@@ -552,7 +564,7 @@ impl App {
             [k] => KeyResult::Action(match (k.code, plain(k)) {
                 (_, Some(c @ '1'..='9')) => return KeyResult::Count(c as usize - '0' as usize),
                 (_, Some('0')) if count.is_some() => return KeyResult::Count(0),
-                (_, Some('g')) => return KeyResult::Pending,
+                (_, Some('g' | ']' | '[')) => return KeyResult::Pending,
                 (_, Some('j')) | (KeyCode::Down, _) => A::CommitsDown(count),
                 (_, Some('k')) | (KeyCode::Up, _) => A::CommitsUp(count),
                 (_, Some('G')) => A::CommitsBottom(count),

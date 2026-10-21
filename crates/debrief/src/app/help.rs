@@ -266,6 +266,8 @@ pub(crate) const BINDINGS: &[Binding] = {
             G::Files,
             "open the directory; on a file: jump to it",
         ),
+        b("]]", F, G::Files, "open the next commit"),
+        b("[[", F, G::Files, "open the previous commit"),
         b("-", F, G::Files, "close every directory"),
         b("=", F, G::Files, "open every directory"),
         b("`", F, G::Files, "tree / flat"),
@@ -286,6 +288,8 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("gg", CL, G::Commits, "first commit (or row {count})"),
         b("G", CL, G::Commits, "last commit (or row {count})"),
         b("Enter", CL, G::Commits, "open the commit (marks it seen)"),
+        b("]]", CL, G::Commits, "open the next commit"),
+        b("[[", CL, G::Commits, "open the previous commit"),
         b(
             "w",
             CL,

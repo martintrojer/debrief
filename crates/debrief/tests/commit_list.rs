@@ -1405,3 +1405,32 @@ fn w_in_the_list_sets_the_watermark_at_its_cursor() {
     assert_eq!(marks, [New, New, Seen, Seen, Seen, Seen]);
     assert_eq!(app.focus(), Focus::Commits, "the list keeps the keys");
 }
+
+#[test]
+fn brackets_step_commits_from_the_commit_list_and_keep_it_focused() {
+    let f = fixture_n(5);
+    let mut app = f.open(ON, 2);
+    to_list(&mut app);
+    keys(&mut app, "]]");
+    assert_eq!(app.screen(), Screen::Commit(3));
+    assert_eq!(app.focus(), Focus::Commits, "the list keeps the keys");
+    assert_eq!(app.commit_list_open_row(), Some(3));
+    keys(&mut app, "[[");
+    keys(&mut app, "[[");
+    assert_eq!(app.screen(), Screen::Commit(1));
+    assert_eq!(app.focus(), Focus::Commits);
+}
+
+#[test]
+fn brackets_step_commits_from_the_file_list_and_keep_it_focused() {
+    let f = fixture_n(5);
+    let mut app = f.open("", 2);
+    ctrl(&mut app, 'h');
+    assert_eq!(app.focus(), Focus::Files);
+    keys(&mut app, "]]");
+    assert_eq!(app.screen(), Screen::Commit(3));
+    assert_eq!(app.focus(), Focus::Files, "the file list keeps the keys");
+    keys(&mut app, "[[");
+    assert_eq!(app.screen(), Screen::Commit(2));
+    assert_eq!(app.focus(), Focus::Files);
+}

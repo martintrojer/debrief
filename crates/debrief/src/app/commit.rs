@@ -979,13 +979,24 @@ impl App {
         } else {
             i.checked_sub(1)
         };
-        match to {
-            Some(j) => self.open_index(j),
-            None => self.set_status(if forward {
+        let Some(j) = to else {
+            return self.set_status(if forward {
                 "no next commit"
             } else {
                 "no previous commit"
-            }),
+            });
+        };
+        // Stepped from the file list or the commit list: that list keeps
+        // the keys, as Enter in the commit list does.
+        match self.focus {
+            Focus::Commits => self.commit_list_open_at(j),
+            Focus::Files => {
+                self.open_index(j);
+                if matches!(self.screen, Screen::Commit(_)) && self.focus != Focus::Files {
+                    self.focus_pane(Focus::Files);
+                }
+            }
+            Focus::Diff => self.open_index(j),
         }
     }
 

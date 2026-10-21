@@ -278,6 +278,7 @@ session keeps tree or flat and the closed directories.
 | `l` | open the directory; on a file: jump to it |
 | `-` / `=` | close / open every directory |
 | `` ` `` | tree / flat |
+| `]]` `[[` | open the next / previous commit; the list keeps the keys |
 | `Esc` | back to the diff |
 
 ### The commit list
@@ -306,6 +307,7 @@ setting; a session saved from the list restores focus to the tree.
 |---|---|
 | `j` `k` `gg` `G` `C-d` `C-u` | move the cursor (opens nothing, marks nothing seen) |
 | `Enter` | open the commit under it (as `]]`: marks it seen, restores its session); the list keeps the keys |
+| `]]` `[[` | open the next / previous commit of the open one; the list keeps the keys |
 | `w` | watermark at the cursor, as on the log |
 | `/` `?` `n` `N` | search the rows, as on the log (moves the cursor, opens nothing) |
 | `f` | the log's filter; `Enter` keeps it, `Esc` clears it |

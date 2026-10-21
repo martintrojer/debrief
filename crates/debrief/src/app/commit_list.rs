@@ -141,8 +141,13 @@ impl App {
         if self.rows.get(self.commit_list.cursor).is_none() {
             return;
         }
+        self.commit_list_open_at(self.commit_list.cursor);
+    }
+
+    /// Open log row `i` with the commit list keeping the keys.
+    pub(super) fn commit_list_open_at(&mut self, i: usize) {
         self.commit_list.opening = true;
-        self.open_index(self.commit_list.cursor);
+        self.open_index(i);
         self.commit_list.opening = false;
         if matches!(self.screen, Screen::Commit(_)) && self.focus != Focus::Commits {
             self.focus_pane(Focus::Commits);

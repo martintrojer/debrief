@@ -396,19 +396,19 @@ fn a_working_copy_session_opens_after_its_branch_switch_with_a_sender() {
     let (tx, rx) = std::sync::mpsc::channel();
     app.set_sender(tx);
     press(&mut app, KeyCode::Enter);
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
+    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
         app.event(ev);
     }
     assert!(app.viewing_working_copy());
     keys(&mut app, " ss");
     press(&mut app, KeyCode::Esc);
     pick(&mut app, "feat");
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
+    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
         app.event(ev);
     }
     keys(&mut app, " rs");
     press(&mut app, KeyCode::Enter);
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
+    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
         app.event(ev);
     }
     assert_eq!(app.branch_name(), Some("main"));

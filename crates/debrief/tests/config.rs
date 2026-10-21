@@ -36,16 +36,50 @@ fn commented_default_file_is_the_defaults() {
     assert_eq!(Config::parse(&default_file()).unwrap(), Config::default());
 }
 
+/// The key of a value line (`# <key> = <value>`), if `l` is one.
+fn value_key(l: &str) -> Option<&str> {
+    let (k, _) = l.strip_prefix("# ")?.split_once(" = ")?;
+    let ident = !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    ident.then_some(k)
+}
+
+/// The table of a `# [table]` / `# [[table]]` line, if `l` is one.
+fn table_header(l: &str) -> Option<&str> {
+    let t = l.strip_prefix("# ")?;
+    let t = t.strip_prefix("[[").and_then(|t| t.strip_suffix("]]"));
+    t.or_else(|| l.strip_prefix("# [")?.strip_suffix(']'))
+        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+}
+
+/// `src` with the `# ` taken off value lines only: `# <key> = `, `# [table]`,
+/// `# [[table]]`, and a multi-line value's lines through its closing `]`/`}`.
+/// Prose (including indented examples) stays commented.
+fn uncomment_values(src: &str) -> String {
+    let mut out = Vec::new();
+    let mut open = false;
+    for l in src.lines() {
+        let rest = l.strip_prefix("# ").unwrap_or(l);
+        if open {
+            open = !matches!(rest.trim_end(), "]" | "}" | "]," | "},");
+            out.push(rest);
+        } else if value_key(l).is_some() || table_header(l).is_some() {
+            let v = rest.split_once(" = ").map_or("", |(_, v)| v.trim_end());
+            open = v == "[" || v == "{";
+            out.push(rest);
+        } else {
+            out.push(l);
+        }
+    }
+    out.join("\n")
+}
+
 #[test]
 fn uncommented_default_file_is_the_defaults() {
-    let uncommented: String = default_file()
-        .lines()
-        .map(|l| match l.strip_prefix("# ") {
-            Some(rest) if !l.starts_with("##") => rest,
-            _ => l,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let uncommented = uncomment_values(&default_file());
+    assert!(
+        !default_file().lines().any(|l| l.starts_with("##")),
+        "one comment style: no `##` lines"
+    );
     // Every section is really there (no vacuous pass).
     for header in [
         "[view]",
@@ -69,16 +103,7 @@ fn uncommented_default_file_is_the_defaults() {
 
 /// `table.key` is set (commented out) under `# [table]` in the default file.
 fn documented(key: &str) -> bool {
-    let (table, k) = key.split_once('.').unwrap();
-    let src = config::DEFAULT_TOML;
-    let Some(at) = src.find(&format!("\n# [{table}]\n")) else {
-        return false;
-    };
-    let rest = &src[at + 1..];
-    let end = rest[1..].find("\n# [").map_or(rest.len(), |i| i + 1);
-    rest[..end]
-        .lines()
-        .any(|l| l.starts_with(&format!("# {k} = ")))
+    default_keys(&[key.split_once('.').unwrap().0]).contains(&key.to_string())
 }
 
 /// The guide's toggle table (docs/guide.md): rows of `| what | key | config key | default |`.
@@ -159,22 +184,44 @@ fn every_toggle_has_a_config_key_and_a_guide_row() {
     }
 }
 
-/// `table.key` for every key set (commented out) under `# [table]` in the
-/// default file, for each of `tables`.
+/// `table.key` for every value line (`# <key> = ...`) under `# [table]` in the
+/// default file, for each of `tables`. Prose is never taken for a key.
 fn default_keys(tables: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     let mut table = None;
     for l in config::DEFAULT_TOML.lines() {
-        if let Some(t) = l.strip_prefix("# [").and_then(|t| t.strip_suffix(']')) {
+        if let Some(t) = table_header(l) {
             table = tables.contains(&t).then_some(t);
-        } else if let (Some(t), Some((k, _))) = (
-            table,
-            l.strip_prefix("# ").and_then(|r| r.split_once(" = ")),
-        ) {
+        } else if let (Some(t), Some(k)) = (table, value_key(l)) {
             out.push(format!("{t}.{k}"));
         }
     }
     out
+}
+
+#[test]
+fn section_banners_are_78_columns_with_blank_lines_around() {
+    let lines: Vec<&str> = config::DEFAULT_TOML.lines().collect();
+    let banners: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].starts_with("# ── "))
+        .collect();
+    assert!(banners.len() >= 8, "sections are really there: {banners:?}");
+    for i in banners {
+        let l = lines[i];
+        assert_eq!(l.chars().count(), 78, "line {}: {l}", i + 1);
+        assert!(l.ends_with('─'), "line {}: padded with ─", i + 1);
+        assert!(i >= 3, "line {}", i + 1);
+        assert!(
+            lines[i - 1].is_empty() && lines[i - 2].is_empty() && !lines[i - 3].is_empty(),
+            "line {}: two blank lines before",
+            i + 1
+        );
+        assert!(
+            lines[i + 1].is_empty(),
+            "line {}: a blank line after",
+            i + 1
+        );
+    }
 }
 
 #[test]

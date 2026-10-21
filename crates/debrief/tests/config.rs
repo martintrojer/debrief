@@ -51,20 +51,45 @@ fn table_header(l: &str) -> Option<&str> {
         .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
 }
 
+/// How many more `[`/`{` than `]`/`}` `s` has, ignoring any inside a quoted
+/// string (`"..."` with `\` escapes, or `'...'`).
+fn bracket_depth(s: &str) -> i32 {
+    let (mut depth, mut quote, mut escaped) = (0, None, false);
+    for c in s.chars() {
+        match quote {
+            Some('"') if escaped => escaped = false,
+            Some('"') if c == '\\' => escaped = true,
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None => match c {
+                '"' | '\'' => quote = Some(c),
+                '[' | '{' => depth += 1,
+                ']' | '}' => depth -= 1,
+                _ => {}
+            },
+        }
+    }
+    depth
+}
+
 /// `src` with the `# ` taken off value lines only: `# <key> = `, `# [table]`,
-/// `# [[table]]`, and a multi-line value's lines through its closing `]`/`}`.
-/// Prose (including indented examples) stays commented.
+/// `# [[table]]`, and, for a value that opens a `[`/`{` it does not close on
+/// its own line (with or without content after the opener), the lines through
+/// the one that balances it. Prose (including indented examples) stays
+/// commented.
 fn uncomment_values(src: &str) -> String {
     let mut out = Vec::new();
-    let mut open = false;
+    let mut depth = 0;
     for l in src.lines() {
         let rest = l.strip_prefix("# ").unwrap_or(l);
-        if open {
-            open = !matches!(rest.trim_end(), "]" | "}" | "]," | "},");
+        if depth > 0 {
+            depth += bracket_depth(rest);
             out.push(rest);
         } else if value_key(l).is_some() || table_header(l).is_some() {
-            let v = rest.split_once(" = ").map_or("", |(_, v)| v.trim_end());
-            open = v == "[" || v == "{";
+            depth = rest
+                .split_once(" = ")
+                .map_or(0, |(_, v)| bracket_depth(v))
+                .max(0);
             out.push(rest);
         } else {
             out.push(l);
@@ -217,8 +242,8 @@ fn section_banners_are_78_columns_with_blank_lines_around() {
             i + 1
         );
         assert!(
-            lines[i + 1].is_empty(),
-            "line {}: a blank line after",
+            lines[i + 1].is_empty() && !lines[i + 2].is_empty(),
+            "line {}: exactly one blank line after",
             i + 1
         );
     }

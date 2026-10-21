@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{JjEnv, commit, ctrl, git, have_jj, keys, press};
+use common::{JjEnv, ctrl, git_repo, have_jj, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::session::{OPEN_TO_SAVE, QUIT_PROMPT, SESSION_DELETED, SESSION_NOT_IN_LOG};
 use debrief::app::{App, AppEvent, Focus, Mode, PickerKind, RowKind, Screen, StartOptions};
@@ -32,20 +32,14 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let mut a: Vec<String> = (1..=60).map(|i| format!("a{i}")).collect();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2\n").unwrap();
-    commit(&root, "base");
+    let base = vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b1\nb2\n")];
     a[2] = "a3 new".into();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    commit(&root, "middle");
+    let middle = vec![w("a.txt", a.join("\n") + "\n")];
     a[39] = "a40 new".into();
     a.drain(19..22);
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2 new\n").unwrap();
-    commit(&root, "top");
+    let top = vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b1\nb2 new\n")];
+    git_repo(&root, &[("base", base), ("middle", middle), ("top", top)]);
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

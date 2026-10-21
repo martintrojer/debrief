@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{commit, ctrl, git, keys, press};
+use common::{commit, ctrl, git, git_repo, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::config::{Config, SidebarShow};
 use debrief::app::{
@@ -46,15 +46,12 @@ struct Fixture {
 fn fixture_n(n: usize) -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join("a.txt"), "base\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b\n").unwrap();
-    commit(&root, "base");
-    for i in 1..=n {
-        std::fs::write(root.join("a.txt"), format!("{i}\n")).unwrap();
-        commit(&root, &format!("commit {i}"));
+    let msgs: Vec<String> = (1..=n).map(|i| format!("commit {i}")).collect();
+    let mut commits = vec![("base", vec![w("a.txt", "base\n"), w("b.txt", "b\n")])];
+    for (i, msg) in msgs.iter().enumerate() {
+        commits.push((msg, vec![w("a.txt", format!("{}\n", i + 1))]));
     }
+    git_repo(&root, &commits);
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

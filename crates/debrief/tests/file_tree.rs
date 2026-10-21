@@ -6,7 +6,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{commit, ctrl, git, keys, press};
+use common::{commit, ctrl, git, git_repo, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::config::Config;
 use debrief::app::{App, AppEvent, Focus, RowKind, Screen, StartOptions};
@@ -30,22 +30,17 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join("z.txt"), "z\n").unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join("z.txt"), "z2\n").unwrap();
-    for (p, body) in [
-        ("src/main.rs", "fn main() {}\n"),
-        ("src/app/x.rs", "a\nb\n"),
-        ("pkg/gui/helpers/a.go", "package helpers\n"),
-        ("b.txt", "b\n"),
-    ] {
-        let path = root.join(p);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
-    }
-    commit(&root, "change");
+    let change = vec![
+        w("z.txt", "z2\n"),
+        w("src/main.rs", "fn main() {}\n"),
+        w("src/app/x.rs", "a\nb\n"),
+        w("pkg/gui/helpers/a.go", "package helpers\n"),
+        w("b.txt", "b\n"),
+    ];
+    git_repo(
+        &root,
+        &[("base", vec![w("z.txt", "z\n")]), ("change", change)],
+    );
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

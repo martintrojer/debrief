@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{commit, git};
+use common::{commit, git, git_repo, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::config::Config;
 use debrief::app::{App, Mode, RowKind, Screen, StartOptions};
@@ -25,21 +25,21 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let a: Vec<String> = (1..=60).map(|i| format!("a{i}")).collect();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2\n").unwrap();
-    commit(&root, "base");
+    let base = vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b1\nb2\n")];
     let mut a = a;
     a[39] = "a40 new".into();
     a.drain(19..22);
     a[2] = "a3 new".into();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2 new\n").unwrap();
-    commit(&root, "change");
-    std::fs::write(root.join("c.txt"), "c1\n").unwrap();
-    commit(&root, "top");
+    let change = vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b1\nb2 new\n")];
+    git_repo(
+        &root,
+        &[
+            ("base", base),
+            ("change", change),
+            ("top", vec![w("c.txt", "c1\n")]),
+        ],
+    );
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

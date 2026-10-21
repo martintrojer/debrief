@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use common::{commit, git};
+use common::{git_repo, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::config::{self, Config, Layout};
 use debrief::app::{App, AppEvent, Screen, StartOptions, TOGGLES};
@@ -436,13 +436,12 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let body: String = (1..=30).map(|i| format!("line {i}\n")).collect();
-    std::fs::write(root.join("x.rs"), &body).unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join("x.rs"), body.replace("line 15\n", "fn x() {}\n")).unwrap();
-    commit(&root, "change");
+    let change = vec![w("x.rs", body.replace("line 15\n", "fn x() {}\n"))];
+    git_repo(
+        &root,
+        &[("base", vec![w("x.rs", &body)]), ("change", change)],
+    );
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

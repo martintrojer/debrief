@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{JjEnv, commit, git, have_jj};
+use common::{JjEnv, commit, git, git_repo, have_jj, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::comment::{MERGE_OLD_SIDE, OUTSIDE_ROOT};
 use debrief::app::watch::{TreeFilter, tree_watcher};
@@ -31,12 +31,13 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join("old.txt"), "o\n").unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join("a.txt"), "a1\na2\na3\na4\na5\n").unwrap();
-    commit(&root, "second");
+    git_repo(
+        &root,
+        &[
+            ("base", vec![w("old.txt", "o\n")]),
+            ("second", vec![w("a.txt", "a1\na2\na3\na4\na5\n")]),
+        ],
+    );
     std::fs::write(root.join("a.txt"), "a1\nA2\na3\na5\n").unwrap();
     std::fs::write(root.join("new.txt"), "n1\nn2\n").unwrap();
     Fixture {

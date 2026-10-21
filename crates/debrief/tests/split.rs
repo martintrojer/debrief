@@ -6,7 +6,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{commit, git};
+use common::{commit, git_repo, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::config::{Config, Layout};
 use debrief::app::split::too_narrow;
@@ -32,12 +32,10 @@ fn fixture() -> Fixture {
 fn fixture_of(file: &str, old: &str, new: &str) -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join(file), old).unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join(file), new).unwrap();
-    commit(&root, "change");
+    git_repo(
+        &root,
+        &[("base", vec![w(file, old)]), ("change", vec![w(file, new)])],
+    );
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

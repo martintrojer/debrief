@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{commit, git};
+use common::{commit, git, git_repo, rm, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::{App, AppEvent, Focus, Mode, RowKind, Screen, StartOptions};
 use debrief::seen::{Seen, Status};
@@ -20,26 +20,28 @@ const LONG: &str = "long line with 日本 wide text and then a lot more words to
 fn repo() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let lines: Vec<String> = (1..=30).map(|i| format!("line {i}")).collect();
-    std::fs::write(root.join("m.txt"), lines.join("\n") + "\n").unwrap();
     let keep: String = (1..=10).map(|i| format!("rename me {i}\n")).collect();
-    std::fs::write(root.join("r_old.txt"), keep).unwrap();
-    commit(&root, "base");
+    let base = vec![w("m.txt", lines.join("\n") + "\n"), w("r_old.txt", &keep)];
 
     let mut lines = lines;
     lines[1] = "line two changed".into();
     lines[24] = LONG.into();
-    std::fs::write(root.join("m.txt"), lines.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("new.txt"), "added\nlast").unwrap();
-    git(&root, &["mv", "r_old.txt", "r_new.txt"]);
-    std::fs::write(root.join("bin.dat"), [0u8, 1, 2, 0, 255, 0]).unwrap();
-    git(&root, &["add", "-A"]);
-    git(&root, &["commit", "-q", "-m", "big change\n\nbody text"]);
-
-    std::fs::write(root.join("top.txt"), "top\n").unwrap();
-    commit(&root, "top");
+    let big = vec![
+        w("m.txt", lines.join("\n") + "\n"),
+        w("new.txt", "added\nlast"),
+        rm("r_old.txt"),
+        w("r_new.txt", &keep),
+        w("bin.dat", [0u8, 1, 2, 0, 255, 0]),
+    ];
+    git_repo(
+        &root,
+        &[
+            ("base", base),
+            ("big change\n\nbody text", big),
+            ("top", vec![w("top.txt", "top\n")]),
+        ],
+    );
     let root = root.canonicalize().unwrap();
     let cache = tmp.path().join("cache");
     let log = vcs::open(&root, vcs::OpenOptions::default())

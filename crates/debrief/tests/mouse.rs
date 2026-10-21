@@ -10,7 +10,7 @@ mod common;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use common::{commit, ctrl, git, keys, press};
+use common::{ctrl, git_repo, keys, press, w};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use debrief::app::config::Config;
 use debrief::app::run::capture_wanted;
@@ -41,15 +41,14 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let a: Vec<String> = (1..=200).map(|i| format!("line {i}")).collect();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b\n").unwrap();
-    commit(&root, "base");
-    for i in 1..=FILLERS {
-        std::fs::write(root.join("f.txt"), format!("{i}\n")).unwrap();
-        commit(&root, &format!("filler {i}"));
+    let fillers: Vec<String> = (1..=FILLERS).map(|i| format!("filler {i}")).collect();
+    let mut commits = vec![(
+        "base",
+        vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b\n")],
+    )];
+    for (i, msg) in fillers.iter().enumerate() {
+        commits.push((msg, vec![w("f.txt", format!("{}\n", i + 1))]));
     }
     let a: Vec<String> = (1..=200)
         .map(|i| {
@@ -60,13 +59,12 @@ fn fixture() -> Fixture {
             }
         })
         .collect();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b changed\n").unwrap();
-    std::fs::create_dir(root.join("src")).unwrap();
+    let mut change = vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b changed\n")];
     for i in 0..SRC_FILES {
-        std::fs::write(root.join(format!("src/f{i:02}.rs")), "fn f() {}\n").unwrap();
+        change.push(w(&format!("src/f{i:02}.rs"), "fn f() {}\n"));
     }
-    commit(&root, "change");
+    commits.push(("change", change));
+    git_repo(&root, &commits);
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),
@@ -1100,8 +1098,10 @@ fn mouse_events_are_ignored_while_typing() {
 
 #[test]
 fn mouse_events_are_ignored_in_the_log_filter() {
+    let mut f = fixture();
     for (key, mode) in [("f", Mode::Filter), ("F", Mode::PathFilter)] {
-        let f = fixture();
+        // A fresh cache per mode: nothing carries over from the last one.
+        f.cache = f._tmp.path().join(format!("cache-{key}"));
         let mut clock = Clock::new();
         let mut app = f.app("");
         keys(&mut app, key);

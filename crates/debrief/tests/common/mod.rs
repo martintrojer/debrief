@@ -124,11 +124,111 @@ pub const TEST_GIT: [&str; 12] = [
     "gc.autoDetach=false",
 ];
 
+/// The git the tests run: `$DEBRIEF_GIT` when set and non-empty (as
+/// `vcs::git_program` resolves it), else `git`.
+pub fn git_program() -> String {
+    std::env::var("DEBRIEF_GIT")
+        .ok()
+        .filter(|g| !g.is_empty())
+        .unwrap_or_else(|| "git".into())
+}
+
 /// git with [`TEST_GIT`].
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let mut a = TEST_GIT.to_vec();
     a.extend_from_slice(args);
-    sh(dir, "git", &a)
+    sh(dir, &git_program(), &a)
+}
+
+/// One file change in a [`git_repo`] commit.
+pub enum Change {
+    Write(String, Vec<u8>),
+    Delete(String),
+}
+
+/// Write `path` (relative, `/`-separated) with `data`.
+pub fn w(path: &str, data: impl AsRef<[u8]>) -> Change {
+    Change::Write(path.into(), data.as_ref().to_vec())
+}
+
+/// Delete `path`.
+pub fn rm(path: &str) -> Change {
+    Change::Delete(path.into())
+}
+
+/// A git repo at `root` (created if missing) on `main`, holding
+/// `commits` (message, changes) oldest first, checked out with a clean
+/// tree. Three git processes: `init`, one `fast-import`, `read-tree`.
+///
+/// Committer and author are `t <t@t>`; commit dates rise by 1s and end
+/// 1s before now, so commits a test makes later still sort after.
+/// Messages get the trailing newline `git commit -m` adds.
+pub fn git_repo(root: &Path, commits: &[(&str, Vec<Change>)]) {
+    use std::io::Write;
+    std::fs::create_dir_all(root).unwrap();
+    git(root, &["init", "-q", "-b", "main"]);
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let base = now - commits.len() as u64;
+    let mut s = Vec::new();
+    for (i, (msg, changes)) in commits.iter().enumerate() {
+        let mut msg = msg.to_string();
+        if !msg.ends_with('\n') {
+            msg.push('\n');
+        }
+        write!(
+            s,
+            "commit refs/heads/main\ncommitter t <t@t> {} +0000\ndata {}\n{msg}",
+            base + i as u64,
+            msg.len()
+        )
+        .unwrap();
+        for c in changes {
+            match c {
+                Change::Write(p, data) => {
+                    writeln!(s, "M 100644 inline {}\ndata {}", quote(p), data.len()).unwrap();
+                    s.extend_from_slice(data);
+                    s.push(b'\n');
+                }
+                Change::Delete(p) => writeln!(s, "D {}", quote(p)).unwrap(),
+            }
+        }
+        s.push(b'\n');
+    }
+    let mut cmd = Command::new(git_program());
+    cmd.current_dir(root)
+        .args(TEST_GIT)
+        .args(["fast-import", "--quiet"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn git fast-import");
+    child.stdin.take().unwrap().write_all(&s).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "git fast-import failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Unlike `reset --hard`, writes no ORIG_HEAD or reflog entry.
+    git(root, &["read-tree", "-u", "--reset", "HEAD"]);
+}
+
+/// `p` as a fast-import C-style quoted path.
+fn quote(p: &str) -> String {
+    let mut q = String::from("\"");
+    for ch in p.chars() {
+        match ch {
+            '"' => q.push_str("\\\""),
+            '\\' => q.push_str("\\\\"),
+            '\n' => q.push_str("\\n"),
+            c => q.push(c),
+        }
+    }
+    q.push('"');
+    q
 }
 
 /// `git add -A` and commit.

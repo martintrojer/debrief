@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{commit, ctrl, git, keys, press};
+use common::{ctrl, git_repo, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::config::Config;
 use debrief::app::sidebar::Pane;
@@ -25,13 +25,16 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join("a.txt"), "c1\nr1\nc2\n").unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join("a.txt"), "c1\na1\nc2\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b\n").unwrap();
-    commit(&root, "change");
+    git_repo(
+        &root,
+        &[
+            ("base", vec![w("a.txt", "c1\nr1\nc2\n")]),
+            (
+                "change",
+                vec![w("a.txt", "c1\na1\nc2\n"), w("b.txt", "b\n")],
+            ),
+        ],
+    );
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

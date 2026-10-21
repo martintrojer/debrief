@@ -8,7 +8,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{commit, ctrl, git, keys, press};
+use common::{ctrl, git, git_repo, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::config::{Config, FilesLayout, SidebarShow};
 use debrief::app::sidebar::Pane;
@@ -34,15 +34,15 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let body: String = (1..=40).map(|i| format!("line {i}\n")).collect();
-    std::fs::write(root.join("a.txt"), &body).unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join("a.txt"), body.replace("line 20\n", "changed\n")).unwrap();
-    std::fs::create_dir_all(root.join("src/deeply/nested/path")).unwrap();
-    std::fs::write(root.join(LONG), "fn x() {}\n").unwrap();
-    commit(&root, "change");
+    let change = vec![
+        w("a.txt", body.replace("line 20\n", "changed\n")),
+        w(LONG, "fn x() {}\n"),
+    ];
+    git_repo(
+        &root,
+        &[("base", vec![w("a.txt", &body)]), ("change", change)],
+    );
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

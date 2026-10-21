@@ -7,7 +7,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use common::{JjEnv, commit, git, have_jj};
+use common::{JjEnv, git_repo, have_jj, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::comment::{EMPTY_COMMENT, EXCERPT_LINES, NOT_A_LINE, SPANS_FILES};
 use debrief::app::review::{MARKER, REVIEW_POLL};
@@ -29,21 +29,19 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let a: Vec<String> = (1..=60).map(|i| format!("a{i}")).collect();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2\n").unwrap();
-    commit(&root, "base");
+    let base = vec![w("a.txt", a.join("\n") + "\n"), w("b.txt", "b1\nb2\n")];
     let mut a = a;
     a[39] = "a40 new".into();
     a.drain(19..22);
     a[2] = "a3 new".into();
-    std::fs::write(root.join("a.txt"), a.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2 new\n").unwrap();
     let big: String = (1..=50).map(|i| format!("g{i}\n")).collect();
-    std::fs::write(root.join("big.txt"), big).unwrap();
-    commit(&root, "change");
+    let change = vec![
+        w("a.txt", a.join("\n") + "\n"),
+        w("b.txt", "b1\nb2 new\n"),
+        w("big.txt", big),
+    ];
+    git_repo(&root, &[("base", base), ("change", change)]);
     Fixture {
         root: root.canonicalize().unwrap(),
         cache: tmp.path().join("cache"),

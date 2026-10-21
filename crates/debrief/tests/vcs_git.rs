@@ -3,7 +3,8 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::{
-    assert_same, commit, git, git_branch_repo, git_dir_snapshot, sh, snapshot, summaries_of,
+    assert_same, commit, git, git_branch_repo, git_dir_snapshot, git_repo, rm, sh, snapshot,
+    summaries_of, w,
 };
 use debrief::vcs::{self, Context, Kind, LineKind};
 
@@ -11,18 +12,26 @@ use debrief::vcs::{self, Context, Kind, LineKind};
 fn repo() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").unwrap();
-    std::fs::create_dir(root.join("sub")).unwrap();
-    std::fs::write(root.join("sub/keep.txt"), "keep\n").unwrap();
-    commit(&root, "first\n\nbody line");
-    std::fs::write(root.join("a.txt"), "one\nTWO\nthree\n").unwrap();
-    std::fs::write(root.join("b.txt"), "b1\nb2\nb3\nb4\nb5\n").unwrap();
-    commit(&root, "second");
-    std::fs::remove_file(root.join("b.txt")).unwrap();
-    std::fs::write(root.join("c d.txt"), "b1\nb2\nb3\nb4\nB5\n").unwrap();
-    commit(&root, "third: rename");
+    git_repo(
+        &root,
+        &[
+            (
+                "first\n\nbody line",
+                vec![w("a.txt", "one\ntwo\nthree\n"), w("sub/keep.txt", "keep\n")],
+            ),
+            (
+                "second",
+                vec![
+                    w("a.txt", "one\nTWO\nthree\n"),
+                    w("b.txt", "b1\nb2\nb3\nb4\nb5\n"),
+                ],
+            ),
+            (
+                "third: rename",
+                vec![rm("b.txt"), w("c d.txt", "b1\nb2\nb3\nb4\nB5\n")],
+            ),
+        ],
+    );
     let root = root.canonicalize().unwrap();
     (tmp, root)
 }

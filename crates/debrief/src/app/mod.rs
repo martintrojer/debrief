@@ -620,18 +620,24 @@ impl App {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::process::Command;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
 
     use super::{App, StartOptions};
 
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = Command::new(crate::vcs::git_program())
+    fn git(dir: &std::path::Path, args: &[&str], stdin: &[u8]) {
+        let mut child = Command::new(crate::vcs::git_program())
             .current_dir(dir)
             .args(["-c", "user.name=t", "-c", "user.email=t@t"])
             .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
             .args(args)
-            .output()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
+        child.stdin.take().unwrap().write_all(stdin).unwrap();
+        let out = child.wait_with_output().unwrap();
         assert!(out.status.success(), "{out:?}");
     }
 
@@ -640,12 +646,20 @@ pub(crate) mod test_support {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("repo");
         std::fs::create_dir(&root).unwrap();
-        git(&root, &["init", "-q"]);
-        for i in 0..2 {
-            std::fs::write(root.join("a.txt"), format!("{i}\n")).unwrap();
-            git(&root, &["add", "-A"]);
-            git(&root, &["commit", "-q", "-m", &format!("c{i}")]);
+        git(&root, &["init", "-q", "-b", "main"], b"");
+        // Two commits (c0, c1) writing a.txt, dated just before now.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut s = String::new();
+        for i in 0..2u64 {
+            let date = now - 2 + i;
+            s += &format!("commit refs/heads/main\ncommitter t <t@t> {date} +0000\n");
+            s += &format!("data 3\nc{i}\nM 100644 inline a.txt\ndata 2\n{i}\n\n\n");
         }
+        git(&root, &["fast-import", "--quiet"], s.as_bytes());
+        git(&root, &["read-tree", "-u", "--reset", "HEAD"], b"");
         let vcs = crate::vcs::open(&root, crate::vcs::OpenOptions::default()).unwrap();
         let app = App::new(vcs, StartOptions::new(tmp.path().join("cache"))).unwrap();
         (tmp, app)

@@ -6,7 +6,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use common::{JjEnv, commit, ctrl, git, have_jj, keys, press};
+use common::{JjEnv, commit, ctrl, git_repo, have_jj, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::{App, AppEvent, Mode, Screen, StartOptions};
 use debrief::cli::Cli;
@@ -19,21 +19,17 @@ use ratatui::backend::TestBackend;
 fn repo() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir_all(root.join("a/sub")).unwrap();
     // On `main` whatever init.defaultBranch says: the screens name it.
-    git(&root, &["init", "-q", "-b", "main"]);
-    let w = |p: &str, s: &str| std::fs::write(root.join(p), s).unwrap();
-    w("a/x.txt", "0\n");
-    commit(&root, "m0");
-    w("b.txt", "1\n");
-    commit(&root, "m1");
-    w("a/sub/y.txt", "2\n");
-    commit(&root, "m2");
-    w("a/x.txt", "3\n");
-    w("b.txt", "3\n");
-    commit(&root, "m3");
-    w("a/q\"*.txt", "4\n");
-    commit(&root, "m4");
+    git_repo(
+        &root,
+        &[
+            ("m0", vec![w("a/x.txt", "0\n")]),
+            ("m1", vec![w("b.txt", "1\n")]),
+            ("m2", vec![w("a/sub/y.txt", "2\n")]),
+            ("m3", vec![w("a/x.txt", "3\n"), w("b.txt", "3\n")]),
+            ("m4", vec![w("a/q\"*.txt", "4\n")]),
+        ],
+    );
     let root = root.canonicalize().unwrap();
     (tmp, root)
 }

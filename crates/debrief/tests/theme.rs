@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{commit, git, keys, press};
+use common::{git_repo, keys, press, w};
 use crossterm::event::KeyCode;
 use debrief::app::config::Config;
 use debrief::app::{App, AppEvent, Screen, StartOptions};
@@ -353,12 +353,13 @@ struct Repo {
 fn repo() -> Repo {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
-    std::fs::write(root.join("a.rs"), "fn one() {}\n").unwrap();
-    commit(&root, "base");
-    std::fs::write(root.join("a.rs"), "fn one() { let x = \"s\"; }\n").unwrap();
-    commit(&root, "second");
+    git_repo(
+        &root,
+        &[
+            ("base", vec![w("a.rs", "fn one() {}\n")]),
+            ("second", vec![w("a.rs", "fn one() { let x = \"s\"; }\n")]),
+        ],
+    );
     std::fs::write(root.join("a.rs"), "fn one() { let y = 2; }\n").unwrap();
     Repo {
         root: root.canonicalize().unwrap(),

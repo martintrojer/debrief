@@ -6,7 +6,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{commit, git};
+use common::{commit, git, git_repo, rm, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use debrief::app::config::Config;
 use debrief::app::{App, Effect, RowKind, Screen, StartOptions};
@@ -26,22 +26,23 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
-    std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q"]);
     let lines: Vec<String> = (1..=10).map(|i| format!("e{i}")).collect();
-    std::fs::write(root.join("e.txt"), lines.join("\n") + "\n").unwrap();
-    std::fs::write(root.join("d.txt"), "doomed\n").unwrap();
-    std::fs::write(root.join("tail.txt"), "t1\nt2\nt3\n").unwrap();
-    commit(&root, "base");
+    let base = vec![
+        w("e.txt", lines.join("\n") + "\n"),
+        w("d.txt", "doomed\n"),
+        w("tail.txt", "t1\nt2\nt3\n"),
+    ];
     let mut lines = lines;
     lines[7] = "e8 edited".into();
     lines.remove(4);
-    std::fs::write(root.join("e.txt"), lines.join("\n") + "\n").unwrap();
-    std::fs::remove_file(root.join("d.txt")).unwrap();
-    std::fs::write(root.join("gone.txt"), "g\n").unwrap();
-    std::fs::write(root.join("notes.md"), "# notes\n").unwrap();
-    std::fs::write(root.join("tail.txt"), "t1\n").unwrap();
-    commit(&root, "change\n\nbody");
+    let change = vec![
+        w("e.txt", lines.join("\n") + "\n"),
+        rm("d.txt"),
+        w("gone.txt", "g\n"),
+        w("notes.md", "# notes\n"),
+        w("tail.txt", "t1\n"),
+    ];
+    git_repo(&root, &[("base", base), ("change\n\nbody", change)]);
     // Gone from disk without making the tree dirty (no working-copy row).
     git(&root, &["update-index", "--skip-worktree", "gone.txt"]);
     std::fs::remove_file(root.join("gone.txt")).unwrap();

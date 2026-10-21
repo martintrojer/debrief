@@ -758,10 +758,7 @@ fn jj_app(e: &JjEnv, opts: OpenOptions, revset: Option<&str>) -> App {
 }
 
 fn jj_sample() -> JjEnv {
-    let e = JjEnv::new(false);
-    e.write("a.txt", "one\ntwo\n");
-    e.jj(&["--quiet", "commit", "-m", "first"]);
-    e
+    JjEnv::with_history(&[("first", vec![w("a.txt", "one\ntwo\n")])], &[], 1)
 }
 
 fn added_texts(app: &App) -> Vec<String> {

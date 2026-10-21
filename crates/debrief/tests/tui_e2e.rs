@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use common::{JjEnv, commit, git, have_jj};
+use common::{JjEnv, commit, git, have_jj, w};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
@@ -182,31 +182,6 @@ fn git_log_renders_moves_and_quits() {
 }
 
 #[test]
-fn jj_log_renders_moves_and_quits() {
-    if !have_jj() {
-        return;
-    }
-    let e = JjEnv::new(false);
-    for i in 0..2 {
-        e.write("a.txt", &format!("{i}\n"));
-        e.jj(&["--quiet", "commit", "-m", &format!("jj commit {i}")]);
-    }
-    let dir = e.root.parent().unwrap();
-    let status = dir.join("status");
-    let env = format!("JJ_CONFIG={}", quote(Path::new(&e.cfg)));
-    let Some(tmux) = start(&e.root, &dir.join("cache"), &status, &env) else {
-        return;
-    };
-    let screen = tmux.wait_for("the log", |s| s.contains("jj commit 0"));
-    assert!(screen.contains(" jj "), "{screen}");
-    tmux.keys(&["j"]);
-    tmux.wait_for("cursor on row 2", |s| {
-        position(s).is_some_and(|p| p.starts_with("2/"))
-    });
-    assert_eq!(tmux.quit(&status), "0");
-}
-
-#[test]
 fn not_a_repo_exits_2_with_the_error() {
     let dir = tempfile::tempdir().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_debrief"))
@@ -310,9 +285,7 @@ fn jj_snapshot_and_no_snapshot() {
     if !have_jj() {
         return;
     }
-    let e = JjEnv::new(false);
-    e.write("a.txt", "one\n");
-    e.jj(&["--quiet", "commit", "-m", "jj first"]);
+    let e = JjEnv::with_history(&[("jj first", vec![w("a.txt", "one\n")])], &[], 1);
     e.write("a.txt", "one\nunsnapshotted\n");
     let dir = e.root.parent().unwrap();
     let env = format!("JJ_CONFIG={}", quote(Path::new(&e.cfg)));
@@ -322,7 +295,12 @@ fn jj_snapshot_and_no_snapshot() {
     let Some(tmux) = start_with(&e.root, &dir.join("cache"), &status, &env, "--no-snapshot") else {
         return;
     };
-    tmux.wait_for("the log", |s| s.contains("jj first"));
+    let screen = tmux.wait_for("the log", |s| s.contains("jj first"));
+    assert!(screen.contains(" jj "), "{screen}");
+    tmux.keys(&["j"]);
+    tmux.wait_for("cursor on row 2", |s| {
+        position(s).is_some_and(|p| p.starts_with("2/"))
+    });
     tmux.keys(&["gg", "Enter"]);
     let screen = tmux.wait_for("@ open", |s| {
         s.contains("nothing to show") || s.contains("1/")
@@ -333,7 +311,8 @@ fn jj_snapshot_and_no_snapshot() {
     assert_eq!(tmux.quit(&status), "0");
     assert_eq!(e.op_count(), ops);
     drop(tmux);
-    // Default: the snapshot makes the edit visible in @.
+    // Default: the snapshot makes the edit visible in @. Keep this run:
+    // the only check that main.rs passes cli.open_options() to vcs::open.
     let status = dir.join("status2");
     let Some(tmux) = start_with(&e.root, &dir.join("cache"), &status, &env, "") else {
         return;

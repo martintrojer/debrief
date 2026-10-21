@@ -164,9 +164,17 @@ pub fn rm(path: &str) -> Change {
 /// 1s before now, so commits a test makes later still sort after.
 /// Messages get the trailing newline `git commit -m` adds.
 pub fn git_repo(root: &Path, commits: &[(&str, Vec<Change>)]) {
-    use std::io::Write;
     std::fs::create_dir_all(root).unwrap();
     git(root, &["init", "-q", "-b", "main"]);
+    fast_import(root, &import_stream(commits, "refs/heads/main", &[]), &[]);
+    // Unlike `reset --hard`, writes no ORIG_HEAD or reflog entry.
+    git(root, &["read-tree", "-u", "--reset", "HEAD"]);
+}
+
+/// A fast-import stream of `commits` (as in [`git_repo`]) on `tip`,
+/// marked `:1` up, then each of `refs` (ref, commit number from 1).
+fn import_stream(commits: &[(&str, Vec<Change>)], tip: &str, refs: &[(String, usize)]) -> Vec<u8> {
+    use std::io::Write;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
@@ -180,7 +188,8 @@ pub fn git_repo(root: &Path, commits: &[(&str, Vec<Change>)]) {
         }
         write!(
             s,
-            "commit refs/heads/main\ncommitter t <t@t> {} +0000\ndata {}\n{msg}",
+            "commit {tip}\nmark :{}\ncommitter t <t@t> {} +0000\ndata {}\n{msg}",
+            i + 1,
             base + i as u64,
             msg.len()
         )
@@ -197,23 +206,31 @@ pub fn git_repo(root: &Path, commits: &[(&str, Vec<Change>)]) {
         }
         s.push(b'\n');
     }
+    for (r, n) in refs {
+        write!(s, "reset {r}\nfrom :{n}\n\n").unwrap();
+    }
+    s
+}
+
+/// Feed `stream` to `git fast-import` in `dir`.
+fn fast_import(dir: &Path, stream: &[u8], args: &[&str]) {
+    use std::io::Write;
     let mut cmd = Command::new(git_program());
-    cmd.current_dir(root)
+    cmd.current_dir(dir)
         .args(TEST_GIT)
         .args(["fast-import", "--quiet"])
+        .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = cmd.spawn().expect("spawn git fast-import");
-    child.stdin.take().unwrap().write_all(&s).unwrap();
+    child.stdin.take().unwrap().write_all(stream).unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(
         out.status.success(),
         "git fast-import failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    // Unlike `reset --hard`, writes no ORIG_HEAD or reflog entry.
-    git(root, &["read-tree", "-u", "--reset", "HEAD"]);
 }
 
 /// `p` as a fast-import C-style quoted path.
@@ -258,7 +275,62 @@ pub struct JjEnv {
 }
 
 impl JjEnv {
+    /// An empty repo; colocated (`.git` at the root) or not.
     pub fn new(colocate: bool) -> Self {
+        let env = Self::unborn();
+        let colocation = if colocate {
+            "--colocate"
+        } else {
+            "--no-colocate"
+        };
+        env.jj(&["--quiet", "git", "init", colocation]);
+        env.finish()
+    }
+
+    /// A non-colocated repo holding `commits` (as in [`git_repo`]),
+    /// `bookmarks` (name, commit number from 1) and an empty `@` on
+    /// commit number `at`. Built with git (a bare repo beside the root,
+    /// so no `.git` at it) and one `jj git init --git-repo`: three
+    /// processes, not one jj command per commit.
+    pub fn with_history(
+        commits: &[(&str, Vec<Change>)],
+        bookmarks: &[(&str, usize)],
+        at: usize,
+    ) -> Self {
+        let env = Self::unborn();
+        let dir = env._tmp.path();
+        let git_dir = dir.join("git");
+        git(dir, &["init", "-q", "--bare", "git"]);
+        // Commits go on a scratch ref, deleted at the end, so jj imports
+        // only `bookmarks`; `@` comes from a detached HEAD.
+        let tip = "refs/fixture/tip";
+        let refs: Vec<_> = bookmarks
+            .iter()
+            .map(|(b, n)| (format!("refs/heads/{b}"), *n))
+            .collect();
+        let mut stream = import_stream(commits, tip, &refs);
+        stream.extend_from_slice(format!("reset {tip}\n\n").as_bytes());
+        let marks = dir.join("marks");
+        let marks_arg = format!("--export-marks={}", marks.display());
+        fast_import(&git_dir, &stream, &[&marks_arg]);
+        let marks = std::fs::read_to_string(marks).unwrap();
+        let head = marks
+            .lines()
+            .find_map(|l| l.strip_prefix(&format!(":{at} ")))
+            .unwrap();
+        std::fs::write(git_dir.join("HEAD"), format!("{head}\n")).unwrap();
+        env.jj(&[
+            "--quiet",
+            "git",
+            "init",
+            "--git-repo",
+            git_dir.to_str().unwrap(),
+        ]);
+        env.finish()
+    }
+
+    /// The config and an empty root, before `jj git init`.
+    fn unborn() -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = tmp.path().join("jj.toml");
         std::fs::write(
@@ -268,18 +340,16 @@ impl JjEnv {
         .unwrap();
         let root = tmp.path().join("repo");
         std::fs::create_dir(&root).unwrap();
-        let env = JjEnv {
+        JjEnv {
             cfg: cfg.to_str().unwrap().to_string(),
             root,
             _tmp: tmp,
-        };
-        let mut args = vec!["--quiet", "git", "init"];
-        if colocate {
-            args.push("--colocate");
         }
-        env.jj(&args);
-        let root = env.root.canonicalize().unwrap();
-        JjEnv { root, ..env }
+    }
+
+    fn finish(self) -> Self {
+        let root = self.root.canonicalize().unwrap();
+        JjEnv { root, ..self }
     }
 
     /// Run jj in the repo with the test config (ordinary, writing jj).

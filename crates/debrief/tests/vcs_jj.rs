@@ -1,19 +1,21 @@
 mod common;
 
-use common::{JjEnv as Env, assert_same, have_jj, snapshot, summaries_of};
+use common::{JjEnv as Env, assert_same, have_jj, rm, snapshot, summaries_of, w};
 use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
 
 /// The strict read-only tests open without snapshots.
 const NO_SNAPSHOT: OpenOptions = OpenOptions { snapshot: false };
 
+/// first (a.txt), second (a.txt edit, new b.txt), then an empty `@`.
 fn sample() -> Env {
-    let e = Env::new(false);
-    e.write("a.txt", "one\ntwo\n");
-    e.jj(&["--quiet", "commit", "-m", "first\n\nbody"]);
-    e.write("a.txt", "one\nTWO\n");
-    e.write("b.txt", "b\n");
-    e.jj(&["--quiet", "commit", "-m", "second"]);
-    e
+    Env::with_history(
+        &[
+            ("first\n\nbody", vec![w("a.txt", "one\ntwo\n")]),
+            ("second", vec![w("a.txt", "one\nTWO\n"), w("b.txt", "b\n")]),
+        ],
+        &[],
+        2,
+    )
 }
 
 #[test]
@@ -22,6 +24,7 @@ fn log_has_change_ids_and_parents() {
         return;
     }
     let e = sample();
+    assert!(!e.root.join(".git").exists(), "not colocated");
     let v = vcs::open(&e.root.join("a.txt"), NO_SNAPSHOT).unwrap();
     assert_eq!(v.kind(), Kind::Jj);
     assert_eq!(v.root(), e.root);
@@ -59,12 +62,11 @@ fn default_log_is_every_ancestor_of_at() {
         assert!(log[6].commit.bytes().all(|b| b == b'0'), "{:?}", log[6]);
         return;
     }
-    let e = Env::new(false);
-    for i in 1..=5 {
-        e.write("a.txt", &format!("{i}\n"));
-        e.jj(&["--quiet", "commit", "-m", &format!("c{i}")]);
-    }
-    e.jj(&["--quiet", "bookmark", "set", "old", "-r", "@----"]);
+    let msgs: Vec<_> = (1..=5).map(|i| format!("c{i}")).collect();
+    let commits: Vec<_> = (1..=5)
+        .map(|i| (msgs[i - 1].as_str(), vec![w("a.txt", format!("{i}\n"))]))
+        .collect();
+    let e = Env::with_history(&commits, &[("old", 2)], 5);
     // jj's own default log, with this config, is @ alone. Passed through
     // the environment: a repo-level jj config would live in the user's
     // config dir.
@@ -144,6 +146,7 @@ fn colocated_repo_opens_as_jj() {
     if !have_jj() {
         return;
     }
+    assert!(!Env::new(false).root.join(".git").exists());
     let e = Env::new(true);
     assert!(e.root.join(".git").exists());
     e.write("a.txt", "a\n");
@@ -240,7 +243,7 @@ fn option_like_revsets_are_rejected() {
     if !have_jj() {
         return;
     }
-    let e = sample();
+    let e = Env::new(false);
     let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let out = e.root.parent().unwrap().join("x");
     let flag = format!("--output={}", out.display());
@@ -258,7 +261,7 @@ fn failed_command_carries_stderr() {
     if !have_jj() {
         return;
     }
-    let e = sample();
+    let e = Env::new(false);
     let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let err = format!("{:#}", v.log(Some("nosuchbookmark"), 10).err().unwrap());
     assert!(err.contains("nosuchbookmark"), "{err}");
@@ -431,13 +434,17 @@ fn stat_rename_and_binary() {
     if !have_jj() {
         return;
     }
-    let e = Env::new(false);
-    e.write("a.txt", "a\nb\nc\nd\n");
-    std::fs::write(e.root.join("bin"), b"\0\x01").unwrap();
-    e.jj(&["--quiet", "commit", "-m", "one"]);
-    std::fs::rename(e.root.join("a.txt"), e.root.join("z.txt")).unwrap();
-    std::fs::write(e.root.join("bin"), b"\0\x02").unwrap();
-    e.jj(&["--quiet", "commit", "-m", "two"]);
+    let e = Env::with_history(
+        &[
+            ("one", vec![w("a.txt", "a\nb\nc\nd\n"), w("bin", b"\0\x01")]),
+            (
+                "two",
+                vec![rm("a.txt"), w("z.txt", "a\nb\nc\nd\n"), w("bin", b"\0\x02")],
+            ),
+        ],
+        &[],
+        2,
+    );
     let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let log = v.log(Some("::@ ~ root()"), 200).unwrap();
     let s = v.stat(&log[1].commit).unwrap();
@@ -460,13 +467,11 @@ fn full_context_shows_the_whole_file() {
     if !have_jj() {
         return;
     }
-    let e = Env::new(false);
     let mut lines: Vec<String> = (1..=40).map(|i| format!("line {i}")).collect();
-    e.write("f.txt", &(lines.join("\n") + "\n"));
-    e.jj(&["--quiet", "commit", "-m", "base"]);
+    let base = w("f.txt", lines.join("\n") + "\n");
     lines[19] = "line twenty".into();
-    e.write("f.txt", &(lines.join("\n") + "\n"));
-    e.jj(&["--quiet", "commit", "-m", "change"]);
+    let change = w("f.txt", lines.join("\n") + "\n");
+    let e = Env::with_history(&[("base", vec![base]), ("change", vec![change])], &[], 2);
     let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
     let id = v.log(Some("@-"), 1).unwrap()[0].commit.clone();
     let new = |d: &vcs::CommitDiff| -> Vec<u32> {
@@ -488,19 +493,16 @@ fn full_context_shows_the_whole_file() {
 /// `main` on second; `feat/x` on f2 (f1, f2 off second); `@` empty on
 /// top of `main`.
 fn branchy() -> Env {
-    let e = Env::new(false);
-    e.write("a.txt", "1\n");
-    e.jj(&["--quiet", "commit", "-m", "first"]);
-    e.write("a.txt", "2\n");
-    e.jj(&["--quiet", "commit", "-m", "second"]);
-    e.jj(&["--quiet", "bookmark", "create", "main", "-r", "@-"]);
-    e.write("f.txt", "1\n");
-    e.jj(&["--quiet", "commit", "-m", "f1"]);
-    e.write("f.txt", "2\n");
-    e.jj(&["--quiet", "commit", "-m", "f2"]);
-    e.jj(&["--quiet", "bookmark", "create", "feat/x", "-r", "@-"]);
-    e.jj(&["--quiet", "new", "main"]);
-    e
+    Env::with_history(
+        &[
+            ("first", vec![w("a.txt", "1\n")]),
+            ("second", vec![w("a.txt", "2\n")]),
+            ("f1", vec![w("f.txt", "1\n")]),
+            ("f2", vec![w("f.txt", "2\n")]),
+        ],
+        &[("main", 2), ("feat/x", 4)],
+        2,
+    )
 }
 
 #[test]

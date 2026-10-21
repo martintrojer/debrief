@@ -410,7 +410,11 @@ fn quit_without_review_work_quits_at_once() {
 
 /// An app with an unsaved comment on `top`, back on the log.
 fn with_unsaved(f: &Fixture) -> App {
-    let mut app = f.app();
+    unsaved(f.app())
+}
+
+/// `app` with an unsaved comment on `b2 new`, back in the log.
+fn unsaved(mut app: App) -> App {
     open(&mut app, 0);
     let r = row_of(&app, "b2 new", RowKind::Line(LineKind::Added));
     goto(&mut app, r);
@@ -442,9 +446,12 @@ fn quit_prompt_esc_stays_and_q_quits() {
 
 #[test]
 fn quit_prompt_shows_over_a_search_or_filter_prompt() {
-    for (commit, prompt) in [(true, "/needle"), (false, "ftop"), (false, "/top")] {
-        let f = fixture();
-        let mut app = with_unsaved(&f);
+    let f = fixture();
+    for (i, (commit, prompt)) in [(true, "/needle"), (false, "ftop"), (false, "/top")]
+        .into_iter()
+        .enumerate()
+    {
+        let mut app = unsaved(app_at(&f.root, &f.cache.join(i.to_string())));
         if commit {
             open(&mut app, 0);
         }
@@ -837,11 +844,14 @@ fn a_jj_rewrite_leaves_the_session_on_the_old_commit() {
     if !have_jj() {
         return;
     }
-    let e = JjEnv::new(false);
-    e.write("a.txt", "one\ntwo\n");
-    e.jj(&["--quiet", "commit", "-m", "first"]);
-    e.write("a.txt", "one\nTWO\n");
-    e.jj(&["--quiet", "commit", "-m", "second"]);
+    let e = JjEnv::with_history(
+        &[
+            ("first", vec![w("a.txt", "one\ntwo\n")]),
+            ("second", vec![w("a.txt", "one\nTWO\n")]),
+        ],
+        &[],
+        2,
+    );
     let cache = e.root.parent().unwrap().join("cache");
     let opts = || StartOptions {
         revset: Some("::@- ~ root()".into()),

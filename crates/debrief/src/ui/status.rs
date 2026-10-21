@@ -145,22 +145,12 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     if !app.status().is_empty() {
         msg.push_str(&format!("  {}", app.status()));
     }
-    // The root is elided first, so the message shows whole while it
-    // fits; the filters get what the rest leaves (see `filter_spans`).
-    let tail = [format!("  {kind}"), format!("  {counts}")];
-    let fixed: usize =
-        1 + tail.iter().map(|t| t.width()).sum::<usize>() + msg.width() + right.len();
+    // Filters and messages take priority over the repo path in the footer.
+    let tail = [format!(" {kind}"), format!("  {counts}")];
+    let fixed: usize = tail.iter().map(|t| t.width()).sum::<usize>() + msg.width() + right.width();
     let filters = filter_spans(app, base, (area.width as usize).saturating_sub(fixed));
-    let filters_w: usize = filters.iter().map(Span::width).sum();
-    let root = elide_left(
-        &app.root_label(),
-        (area.width as usize).saturating_sub(fixed + filters_w),
-    );
     let [kind, counts] = tail;
-    let mut spans = vec![
-        Span::styled(format!(" {root}"), base.fg(pal.blue)),
-        Span::styled(kind, base.fg(pal.muted)),
-    ];
+    let mut spans = vec![Span::styled(kind, base.fg(pal.muted))];
     // `branch: …` and `path: …` before the counts, the text filter after.
     let mut filters = filters.into_iter().peekable();
     while let Some(p) = filters
@@ -173,20 +163,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     if !msg.is_empty() {
         spans.push(Span::styled(msg, base.fg(pal.yellow)));
     }
-    let left_w: usize = spans.iter().map(Span::width).sum();
-    let right_w = Span::raw(right.as_str()).width();
-    let hint_w = HELP_HINT.len();
-    let hint = left_w + right_w + hint_w + 2 <= area.width as usize;
-    let used = left_w + right_w + if hint { hint_w } else { 0 };
-    spans.push(Span::styled(
-        " ".repeat((area.width as usize).saturating_sub(used)),
-        base,
-    ));
-    if hint {
-        spans.push(Span::styled(HELP_HINT, base.fg(pal.muted)));
-    }
-    spans.push(Span::styled(right, base.fg(pal.cyan)));
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
+    draw_footer(frame, app, area, base, spans, right);
 }
 
 /// The commit screen: mode, commit ID, the log's path filter and kept
@@ -232,6 +209,19 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     if !msg.is_empty() {
         spans.push(Span::styled(format!("  {msg}"), base.fg(pal.yellow)));
     }
+    draw_footer(frame, app, area, base, spans, right);
+}
+
+/// The same right-hand repo path, help hint and position on both screens.
+fn draw_footer(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    base: Style,
+    mut spans: Vec<Span<'static>>,
+    right: String,
+) {
+    let pal = &app.theme().palette;
     let left_w: usize = spans.iter().map(Span::width).sum();
     let right_w = Span::raw(right.as_str()).width();
     let hint_w = HELP_HINT.len();
@@ -258,8 +248,7 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
 
-/// The fewest columns the commit screen gives the repo root; less room
-/// drops it.
+/// The fewest columns either screen gives the repo root; less room drops it.
 const ROOT_MIN: usize = 8;
 
 #[cfg(test)]

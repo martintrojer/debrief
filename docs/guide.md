@@ -188,8 +188,8 @@ as a coloured badge. A commit with no subject (git's working copy, a jj
 change without a description) has no header. `[view] header = false`
 hides it.
 
-The status line keeps the repo root at the right, before `g? help`, as
-the log shows it on the left, so two debriefs side by side tell apart.
+Both the log and commit status lines keep the repo root at the right,
+before `g? help`, so two debriefs side by side tell apart.
 It is cut from the left when space runs short, and dropped first.
 
 | Key | Does |

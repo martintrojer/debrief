@@ -47,7 +47,11 @@ fn keys(app: &mut App, s: &str) {
 
 /// Render to an 80x12 TestBackend and return the screen's lines.
 fn screen(app: &mut App) -> Vec<String> {
-    let mut t = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    screen_width(app, 80)
+}
+
+fn screen_width(app: &mut App, width: u16) -> Vec<String> {
+    let mut t = Terminal::new(TestBackend::new(width, 12)).unwrap();
     t.draw(|f| app.render(f)).unwrap();
     let buf = t.backend().buffer().clone();
     (0..buf.area.height)
@@ -75,6 +79,66 @@ fn seed_oldest(root: &Path, cache: &Path) {
         .unwrap()
         .mark(log.last().unwrap())
         .unwrap();
+}
+
+#[test]
+fn the_repo_path_stays_on_the_right_when_opening_a_commit() {
+    let (tmp, root) = git_repo(2);
+    let mut app = open(&root, &tmp.path().join("cache"));
+    for detail in [false, true] {
+        if detail {
+            app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+        let lines = screen_width(&mut app, 160);
+        let status = &lines[11];
+        let path = status.find("/repo").expect("repo path fits");
+        let help = status.find("g? help").expect("help fits");
+        assert!(path > 80, "path belongs on the right: {status}");
+        assert!(path < help, "path precedes help: {status}");
+        if !detail {
+            assert!(status.find("0 new").unwrap() < path, "{status}");
+        }
+    }
+}
+
+#[test]
+fn the_repo_path_yields_to_filters_and_has_an_eight_column_minimum() {
+    let (tmp, root) = git_repo(2);
+    let mut app = open(&root, &tmp.path().join("cache"));
+    for detail in [false, true] {
+        if detail {
+            app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+        let counter = if detail {
+            format!(" 1/{} ", app.commit_rows().len())
+        } else {
+            " 1/2 ".to_string()
+        };
+        let left = if detail {
+            format!(" {}  branch: main", &app.commit_id().unwrap()[..8])
+        } else {
+            " git  branch: main  0 new".to_string()
+        };
+        // Left content, counter, help, four separator columns, then root room.
+        for room in [7, 8] {
+            let width = (left.len() + counter.len() + "g? help".len() + 4 + room) as u16;
+            let status = screen_width(&mut app, width)[11].clone();
+            assert!(status.starts_with(&left), "{status}");
+            assert!(status.ends_with(counter.trim_end()), "{status}");
+            assert_eq!(status.contains("/repo"), room == 8, "{status}");
+            assert_eq!(status.contains('…'), room == 8, "{status}");
+        }
+    }
+    key(&mut app, 'q');
+    keys(&mut app, "fcommit");
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let status = screen_width(&mut app, 50)[11].clone();
+    assert!(status.contains("filter: commit"), "{status}");
+    assert!(status.ends_with("1/2"), "{status}");
+    assert!(
+        !status.contains("/repo"),
+        "the filter takes priority: {status}"
+    );
 }
 
 #[test]

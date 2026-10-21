@@ -104,6 +104,7 @@ fn the_repo_path_stays_on_the_right_when_opening_a_commit() {
 #[test]
 fn the_repo_path_yields_to_filters_and_has_an_eight_column_minimum() {
     let (tmp, root) = git_repo(2);
+    git(&root, &["branch", "-m", "main"]);
     let mut app = open(&root, &tmp.path().join("cache"));
     for detail in [false, true] {
         if detail {

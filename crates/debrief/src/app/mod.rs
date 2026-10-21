@@ -664,4 +664,86 @@ pub(crate) mod test_support {
         let app = App::new(vcs, StartOptions::new(tmp.path().join("cache"))).unwrap();
         (tmp, app)
     }
+
+    /// A git-kind [`Vcs`](crate::vcs::Vcs) without a process: [`app`]'s
+    /// shape (a log of two commits, each showing one file with one hunk)
+    /// served from memory. Its root is a real directory, as `Review::open`
+    /// canonicalizes it.
+    struct FakeVcs {
+        root: std::path::PathBuf,
+    }
+
+    impl crate::vcs::Vcs for FakeVcs {
+        fn kind(&self) -> crate::vcs::Kind {
+            crate::vcs::Kind::Git
+        }
+        fn root(&self) -> &std::path::Path {
+            &self.root
+        }
+        fn open_options(&self) -> crate::vcs::OpenOptions {
+            crate::vcs::OpenOptions::default()
+        }
+        fn log(&self, _: Option<&str>, _: usize) -> anyhow::Result<Vec<crate::vcs::CommitInfo>> {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let commit = |i: i64, parents: Vec<String>| crate::vcs::CommitInfo {
+                commit: format!("{i:040x}"),
+                change: None,
+                author: "t".into(),
+                time: now - 2 + i,
+                summary: format!("c{i}"),
+                parents,
+            };
+            Ok(vec![
+                commit(2, vec![format!("{:040x}", 1)]),
+                commit(1, vec![]),
+            ])
+        }
+        fn show(&self, _: &str, _: crate::vcs::Context) -> anyhow::Result<crate::vcs::CommitDiff> {
+            use crate::vcs::{DiffLine, FileDiff, Hunk, LineKind};
+            let line = |kind, old, new, text: &str| DiffLine {
+                kind,
+                old,
+                new,
+                text: text.into(),
+                no_newline: false,
+            };
+            Ok(crate::vcs::CommitDiff {
+                message: "c1\n".into(),
+                files: vec![FileDiff {
+                    old_path: Some("a.txt".into()),
+                    new_path: Some("a.txt".into()),
+                    binary: false,
+                    hunks: vec![Hunk {
+                        header: "@@ -1 +1 @@".into(),
+                        old_start: 1,
+                        new_start: 1,
+                        lines: vec![
+                            line(LineKind::Removed, Some(1), None, "0"),
+                            line(LineKind::Added, None, Some(1), "1"),
+                        ],
+                    }],
+                    note: None,
+                    mode_change: None,
+                    copied: false,
+                }],
+            })
+        }
+        fn stat(&self, _: &str) -> anyhow::Result<crate::vcs::CommitStat> {
+            anyhow::bail!("no stat")
+        }
+    }
+
+    /// An app like [`app`]'s on a [`FakeVcs`]: no git process, for tests
+    /// that need only the app's state (keymaps, help, clues).
+    pub(crate) fn fake_app() -> (tempfile::TempDir, App) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let vcs = Box::new(FakeVcs { root });
+        let app = App::new(vcs, StartOptions::new(tmp.path().join("cache"))).unwrap();
+        (tmp, app)
+    }
 }

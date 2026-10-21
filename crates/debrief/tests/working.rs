@@ -412,7 +412,7 @@ fn a_follow_load_in_flight_waits_for_a_selection_made_meanwhile() {
     let (mut app, _reads, rx) = f.counting_with(f.follow_opts());
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     let r = row_of(&app, "n2", RowKind::Line(LineKind::Added));
     goto(&mut app, r);
     // The load starts, then V comes before it lands.
@@ -421,11 +421,11 @@ fn a_follow_load_in_flight_waits_for_a_selection_made_meanwhile() {
     keys(&mut app, "V");
     let sel = app.selection_rows();
     let before = app.commit_rows().to_vec();
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     assert_eq!(app.commit_rows(), before, "the selection's rows stay");
     assert_eq!(app.selection_rows(), sel);
     press(&mut app, KeyCode::Esc);
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     row_of(&app, "X", RowKind::Line(LineKind::Added));
 }
 
@@ -446,13 +446,13 @@ fn the_tree_watcher_reloads_the_open_view_off_the_ui_thread() {
     let (mut app, reads, rx) = f.counting_with(f.follow_opts());
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     assert!(app.viewing_working_copy());
     reads.set(0);
     std::fs::write(f.root.join("new.txt"), "n0\nn1\nn2\n").unwrap();
     app.event(AppEvent::WorkingChanged);
     assert_eq!(reads.get(), 0, "read the working copy on the UI thread");
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     row_of(&app, "n0", RowKind::Line(LineKind::Added));
     assert!(app.viewing_working_copy());
 }
@@ -591,6 +591,17 @@ fn fires(rx: &mpsc::Receiver<()>) -> bool {
     rx.recv_timeout(Duration::from_secs(5)).is_ok()
 }
 
+/// The watcher stays quiet: no event for 5x its debounce (1.5s). A
+/// relevant change fires one debounce (300ms) after it lands; deliveries
+/// measured 305-540ms, so a path wrongly judged relevant still shows here,
+/// with room for a slow host.
+fn quiet(rx: &mpsc::Receiver<()>) -> bool {
+    rx.recv_timeout(debrief::app::watch::DEBOUNCE * 5).is_err()
+}
+
+/// Swallow the events of the change just made, until none comes for
+/// 600ms: one change can fire twice (a trailing second event was seen
+/// 921ms after the change), and a leftover would fail the next `quiet`.
 fn drain(rx: &mpsc::Receiver<()>) {
     while rx.recv_timeout(Duration::from_millis(600)).is_ok() {}
 }
@@ -619,7 +630,7 @@ fn tree_watcher_fires_on_edits_and_skips_ignored_and_git_dir() {
 
     std::fs::write(f.root.join("x.log"), "ignored\n").unwrap();
     std::fs::write(f.root.join("build/out"), "ignored\n").unwrap();
-    assert!(!fires(&rx), "ignored paths don't refresh");
+    assert!(quiet(&rx), "ignored paths don't refresh");
 
     std::fs::write(f.root.join("kept.log"), "k2\n").unwrap();
     assert!(fires(&rx), "a tracked path refreshes even if ignored");
@@ -635,7 +646,7 @@ fn tree_watcher_fires_on_edits_and_skips_ignored_and_git_dir() {
     assert!(fires(&rx));
     drain(&rx);
     std::fs::write(f.root.join("y.tmp"), "t\n").unwrap();
-    assert!(!fires(&rx), "the rebuilt rules ignore *.tmp");
+    assert!(quiet(&rx), "the rebuilt rules ignore *.tmp");
 
     // A nested .gitignore.
     std::fs::create_dir(f.root.join("sub")).unwrap();
@@ -643,7 +654,7 @@ fn tree_watcher_fires_on_edits_and_skips_ignored_and_git_dir() {
     assert!(fires(&rx));
     drain(&rx);
     std::fs::write(f.root.join("sub/z.gen"), "g\n").unwrap();
-    assert!(!fires(&rx), "nested rules apply");
+    assert!(quiet(&rx), "nested rules apply");
     std::fs::write(f.root.join("sub/z.txt"), "g\n").unwrap();
     assert!(fires(&rx));
     drain(&rx);
@@ -652,7 +663,7 @@ fn tree_watcher_fires_on_edits_and_skips_ignored_and_git_dir() {
     std::fs::write(f.root.join(".git/info/exclude"), "*.ex\n").unwrap();
     drain(&rx);
     std::fs::write(f.root.join("w.ex"), "e\n").unwrap();
-    assert!(!fires(&rx), "info/exclude applies");
+    assert!(quiet(&rx), "info/exclude applies");
 }
 
 #[test]
@@ -670,7 +681,7 @@ fn an_external_excludes_file_rebuilds_the_rules_and_refreshes() {
     assert!(fires(&rx), "an ignore-file change refreshes the row");
     drain(&rx);
     std::fs::write(f.root.join("ignored.tmp"), "i\n").unwrap();
-    assert!(!fires(&rx), "the rebuilt rules ignore *.tmp");
+    assert!(quiet(&rx), "the rebuilt rules ignore *.tmp");
 
     // Dropping the rule reveals the file: the row must come back.
     std::fs::write(&excludes, "").unwrap();
@@ -1027,10 +1038,16 @@ impl Fixture {
     }
 }
 
-/// Feed every event the workers send until they go quiet.
-fn settle_events(app: &mut App, rx: &mpsc::Receiver<AppEvent>) {
-    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
-        app.event(ev);
+/// Feed the app the next `n` events the workers send: the count the step
+/// is known to cause, so the test moves on as soon as they land, not after
+/// a quiet window. Each has 20s to arrive.
+#[track_caller]
+fn settle_events(app: &mut App, rx: &mpsc::Receiver<AppEvent>, n: usize) {
+    for i in 1..=n {
+        match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(ev) => app.event(ev),
+            Err(e) => panic!("event {i} of {n}: {e}"),
+        }
     }
 }
 
@@ -1045,7 +1062,7 @@ fn r_reads_the_working_row_off_the_ui_thread() {
     std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
     keys(&mut app, "r");
     assert_eq!(reads.get(), 0, "r read the working copy on the UI thread");
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     assert_eq!(summaries(&app), ["Working copy", "second", "base"]);
     common::assert_same(&before, &common::git_dir_snapshot(&f.root.join(".git")));
 }
@@ -1065,13 +1082,13 @@ fn the_tree_watcher_reads_the_working_row_off_the_ui_thread() {
         0,
         "the watcher read the working copy on the UI thread"
     );
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     let s = screen(&mut app, 80, 6);
     assert!(s[1].starts_with("✎ Working copy  2 files"), "{}", s[1]);
     std::fs::remove_file(f.root.join("x.txt")).unwrap();
     std::fs::remove_file(f.root.join("y.txt")).unwrap();
     app.event(AppEvent::WorkingChanged);
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     assert_eq!(summaries(&app), ["second", "base"]);
     assert_eq!(reads.get(), 0);
     common::assert_same(&before, &common::git_dir_snapshot(&f.root.join(".git")));
@@ -1092,7 +1109,7 @@ fn a_touched_but_unchanged_file_leaves_the_tree_clean() {
         .unwrap();
     let (mut app, _, rx) = f.counting();
     keys(&mut app, "r");
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     assert_eq!(summaries(&app), ["second", "base"]);
 }
 
@@ -1109,7 +1126,7 @@ fn the_working_rows_stats_load_off_the_ui_thread() {
         0,
         "the stat read the working copy on the UI thread"
     );
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     let Some(debrief::app::StatPane::Ready(s)) = app.stat_pane() else {
         panic!("no stat: {:?}", app.stat_pane());
     };
@@ -1130,12 +1147,13 @@ fn threaded_r_on_a_clean_tree_leaves_the_working_copy_view() {
     let (mut app, _, rx) = f.counting();
     keys(&mut app, "gg");
     press(&mut app, KeyCode::Enter);
-    settle_events(&mut app, &rx);
+    settle_events(&mut app, &rx, 1);
     assert!(app.viewing_working_copy());
     git(&f.root, &["checkout", "-q", "--", "a.txt"]);
     std::fs::remove_file(f.root.join("new.txt")).unwrap();
     keys(&mut app, "r");
-    settle_events(&mut app, &rx);
+    // The diff and the log's row.
+    settle_events(&mut app, &rx, 2);
     assert_eq!(app.screen(), Screen::Log, "the obsolete diff is closed");
     assert_eq!(app.status(), "The working copy is clean");
     assert_eq!(summaries(&app), ["second", "base"]);

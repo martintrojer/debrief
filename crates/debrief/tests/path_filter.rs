@@ -429,10 +429,9 @@ fn a_working_copy_diff_in_flight_keeps_a_row_the_path_hides_hidden() {
     to_commit_list(&mut app);
     set_path(&mut app, "b.txt");
     // Every answer, the working copy's diff first, as the race had it.
-    let mut evs = Vec::new();
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
-        evs.push(ev);
-    }
+    let mut evs: Vec<_> = (0..2)
+        .map(|_| rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap())
+        .collect();
     assert!(
         evs.iter()
             .any(|e| matches!(e, AppEvent::WorkingLoaded { .. })),

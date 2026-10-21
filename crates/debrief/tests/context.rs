@@ -397,9 +397,8 @@ fn the_git_working_copy_loads_off_thread_on_open_t_and_r() {
     assert!(app.commit_loading(), "r returns before the diff");
     // The diff and the log's row, in either order.
     let settle = |app: &mut App| {
-        while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
-            app.event(ev);
-        }
+        app.event(recv());
+        app.event(recv());
     };
     settle(&mut app);
     assert!(!app.commit_loading());

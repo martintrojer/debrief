@@ -395,22 +395,25 @@ fn a_working_copy_session_opens_after_its_branch_switch_with_a_sender() {
     let mut app = open_with(&root, opts(tmp.path())).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     app.set_sender(tx);
+    let recv = || rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
     press(&mut app, KeyCode::Enter);
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
-        app.event(ev);
-    }
+    // The working copy's diff.
+    app.event(recv());
     assert!(app.viewing_working_copy());
     keys(&mut app, " ss");
     press(&mut app, KeyCode::Esc);
     pick(&mut app, "feat");
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+    // Picking the branch sends no event (measured): this short drain only
+    // feeds the app a stray one before the next step.
+    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
         app.event(ev);
     }
     keys(&mut app, " rs");
     press(&mut app, KeyCode::Enter);
-    while let Ok(ev) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
-        app.event(ev);
-    }
+    // The working row, then the diff its arrival opens: fed as they come,
+    // as the first causes the second.
+    app.event(recv());
+    app.event(recv());
     assert_eq!(app.branch_name(), Some("main"));
     assert!(app.viewing_working_copy(), "status: {}", app.status());
     assert!(matches!(app.screen(), Screen::Commit(_)));

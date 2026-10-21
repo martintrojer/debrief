@@ -436,10 +436,15 @@ fn syntax_changes_the_working_copy_diff_s_token_colours() {
     assert_ne!(fg(""), fg("[theme]\nsyntax = \"gruvbox-dark\"\n"));
 }
 
-/// Feed the events the worker threads send until they go quiet.
-fn settle(app: &mut App, rx: &mpsc::Receiver<AppEvent>) {
-    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
-        app.event(ev);
+/// Feed the app the next `n` events the worker threads send, each within
+/// 20s.
+#[track_caller]
+fn settle(app: &mut App, rx: &mpsc::Receiver<AppEvent>, n: usize) {
+    for i in 1..=n {
+        match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(ev) => app.event(ev),
+            Err(e) => panic!("event {i} of {n}: {e}"),
+        }
     }
 }
 
@@ -452,7 +457,8 @@ fn syntax_reaches_the_worker_threads_too() {
             let (tx, rx) = mpsc::channel();
             app.set_sender(tx);
             open_row(&mut app, row);
-            settle(&mut app, &rx);
+            // Opening either row sends two events.
+            settle(&mut app, &rx, 2);
             keyword_fg(&mut app, needle).expect("a coloured keyword")
         };
         assert_ne!(

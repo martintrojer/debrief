@@ -880,7 +880,7 @@ impl App {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::app::test_support::app;
+    use crate::app::test_support::{app, fake_app};
 
     /// One alternative of a row's `keys` as key events.
     pub(crate) fn parse(alt: &str) -> Vec<KeyEvent> {
@@ -893,8 +893,10 @@ pub(super) mod tests {
             .collect()
     }
 
+    /// A fresh app (one per context: they share no state) on the fake
+    /// repository, in `ctx`.
     pub(crate) fn in_ctx(ctx: Ctx) -> (tempfile::TempDir, App) {
-        let (t, mut a) = app();
+        let (t, mut a) = fake_app();
         if !matches!(
             ctx,
             Ctx::Log | Ctx::Help | Ctx::Picker | Ctx::Filter | Ctx::PathFilter | Ctx::Quit

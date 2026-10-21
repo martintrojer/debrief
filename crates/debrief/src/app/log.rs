@@ -168,11 +168,23 @@ impl App {
     /// jj snapshots the working copy), then reads the working copy: git's
     /// changes, jj's `@`. Errors in either go to the status line.
     pub(super) fn load(&mut self, snapshot: bool) -> anyhow::Result<Vec<CommitInfo>> {
+        self.refresh(snapshot);
+        self.branch_refresh();
+        self.load_refreshed()
+    }
+
+    /// Bring the VCS up to date (see [`App::load`]); an error goes to the
+    /// status line.
+    pub(super) fn refresh(&mut self, snapshot: bool) {
         if let Err(e) = self.vcs.refresh(snapshot) {
             self.set_status(format!("{e:#}"));
         }
+    }
+
+    /// [`App::load`] after the refresh and the branch read: the log and
+    /// the working copy.
+    pub(super) fn load_refreshed(&mut self) -> anyhow::Result<Vec<CommitInfo>> {
         let limit = self.page.limit;
-        self.branch_refresh();
         let commits = self
             .vcs
             .log_in(self.query.as_deref(), self.opts.path.as_deref(), limit)?;

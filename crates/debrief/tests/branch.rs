@@ -415,3 +415,89 @@ fn a_working_copy_session_opens_after_its_branch_switch_with_a_sender() {
     assert!(app.viewing_working_copy(), "status: {}", app.status());
     assert!(matches!(app.screen(), Screen::Commit(_)));
 }
+
+/// A [`vcs::Vcs`] counting its branch reads (`current_branch` and
+/// `branch_revset`); everything else goes straight through.
+struct BranchReads {
+    inner: Box<dyn vcs::Vcs>,
+    reads: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl vcs::Vcs for BranchReads {
+    fn kind(&self) -> vcs::Kind {
+        self.inner.kind()
+    }
+    fn root(&self) -> &Path {
+        self.inner.root()
+    }
+    fn open_options(&self) -> OpenOptions {
+        self.inner.open_options()
+    }
+    fn refresh(&self, snapshot: bool) -> anyhow::Result<()> {
+        self.inner.refresh(snapshot)
+    }
+    fn working_copy(&self, context: vcs::Context) -> anyhow::Result<Option<vcs::WorkingCopy>> {
+        self.inner.working_copy(context)
+    }
+    fn working_status(&self) -> anyhow::Result<Option<vcs::WorkingStatus>> {
+        self.inner.working_status()
+    }
+    fn working_status_in(&self, path: Option<&str>) -> anyhow::Result<Option<vcs::WorkingStatus>> {
+        self.inner.working_status_in(path)
+    }
+    fn pinned_op(&self) -> Option<String> {
+        self.inner.pinned_op()
+    }
+    fn working_copy_commit(&self) -> anyhow::Result<Option<String>> {
+        self.inner.working_copy_commit()
+    }
+    fn log(&self, revset: Option<&str>, limit: usize) -> anyhow::Result<Vec<vcs::CommitInfo>> {
+        self.inner.log(revset, limit)
+    }
+    fn log_in(
+        &self,
+        revset: Option<&str>,
+        path: Option<&str>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<vcs::CommitInfo>> {
+        self.inner.log_in(revset, path, limit)
+    }
+    fn branches(&self) -> anyhow::Result<Vec<String>> {
+        self.inner.branches()
+    }
+    fn current_branch(&self) -> anyhow::Result<Option<String>> {
+        self.reads.set(self.reads.get() + 1);
+        self.inner.current_branch()
+    }
+    fn branch_revset(
+        &self,
+        branch: &str,
+        trunk: Option<&str>,
+        with_working_copy: bool,
+    ) -> anyhow::Result<String> {
+        self.reads.set(self.reads.get() + 1);
+        self.inner.branch_revset(branch, trunk, with_working_copy)
+    }
+    fn show(&self, commit: &str, context: vcs::Context) -> anyhow::Result<vcs::CommitDiff> {
+        self.inner.show(commit, context)
+    }
+    fn stat(&self, commit: &str) -> anyhow::Result<vcs::CommitStat> {
+        self.inner.stat(commit)
+    }
+}
+
+#[test]
+fn the_start_reads_the_branch_once_and_a_reload_again() {
+    let (tmp, root) = git_branch_repo();
+    let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+    let v = BranchReads {
+        inner: vcs::open(&root, OpenOptions::default()).unwrap(),
+        reads: reads.clone(),
+    };
+    let mut app = App::new(Box::new(v), opts(tmp.path())).unwrap();
+    assert_eq!(app.branch_name(), Some("main"));
+    // One current branch and one branch query.
+    assert_eq!(reads.get(), 2, "the start read the branch more than once");
+    app.reload(false);
+    assert_eq!(reads.get(), 4, "a reload re-reads the branch");
+}

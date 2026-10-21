@@ -418,9 +418,11 @@ impl App {
         if !errors.is_empty() {
             app.status = errors.join("; ");
         }
-        app.vcs.refresh(true).ok();
+        // One refresh and one branch read: `branch_start` reads jj state
+        // after the snapshot, and has just read what `load` would re-read.
+        app.refresh(true);
         app.branch_start()?;
-        let commits = app.load(true)?;
+        let commits = app.load_refreshed()?;
         if app.seen.is_fresh() {
             // The first run marks what it lists seen and, under a path
             // filter, the unfiltered log's first page too, so a later

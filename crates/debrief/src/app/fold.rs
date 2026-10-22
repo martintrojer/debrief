@@ -220,10 +220,13 @@ impl App {
                 }
                 self.commit_reindex();
                 // An open commit inside a closed fold stays open with no
-                // row marked; `]]` / `[[` step from its old place.
+                // row marked; `]]` / `[[` step from its old place. One
+                // that was not a row before (a path change hid it) keeps
+                // the record that change made.
                 if let Some(v) = &self.commit
                     && matches!(self.screen, Screen::Commit(_))
                     && self.view_index(v).is_none()
+                    && before.contains(&v.commit)
                 {
                     self.hidden_open = Some((v.commit.clone(), before));
                 }

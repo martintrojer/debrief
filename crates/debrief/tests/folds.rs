@@ -11,8 +11,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use common::{
-    BUBBLES_GROUPS, BUBBLES_SHARED, BUBBLES_SPINE, JjEnv, bubbles_repo, graph_repo, have_jj, keys,
-    press, w,
+    BUBBLES_GROUPS, BUBBLES_SHARED, BUBBLES_SPINE, JjEnv, bubbles_repo, ctrl, graph_repo, have_jj,
+    keys, press, w,
 };
 use crossterm::event::KeyCode;
 use debrief::app::config::Config;
@@ -999,4 +999,57 @@ fn leader_m_on_the_commit_screen_keeps_the_open_commit() {
     assert!(matches!(app.screen(), Screen::Commit(_)));
     assert_eq!(app.commit_id(), Some(open.as_str()));
     assert_eq!(app.commit_list_open_row(), None);
+}
+
+/// The open commit's row summary, on the commit screen.
+fn open_title(app: &App) -> String {
+    let Screen::Commit(i) = app.screen() else {
+        panic!("not on the commit screen")
+    };
+    assert_eq!(app.commit_id(), Some(app.rows()[i].info.commit.as_str()));
+    app.rows()[i].info.summary.clone()
+}
+
+#[test]
+fn leader_m_with_the_open_commit_in_a_closed_fold_steps_from_its_old_place() {
+    let f = fixture();
+    let mut app = f.app();
+    open_fold(&mut app, "Merge n");
+    app.goto_summary("n2");
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, " m");
+    // Back on, n2 is hidden in the closed Merge n.
+    keys(&mut app, " m");
+    keys(&mut app, "]]");
+    assert_eq!(open_title(&app), "m1");
+    let mut app = f.app();
+    open_fold(&mut app, "Merge n");
+    app.goto_summary("n2");
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, " m");
+    keys(&mut app, " m");
+    keys(&mut app, "[[");
+    assert_eq!(open_title(&app), "Merge n");
+}
+
+#[test]
+fn leader_m_keeps_a_path_change_s_hidden_open_commit() {
+    let f = fixture();
+    let mut app = f.app();
+    keys(&mut app, " m");
+    app.goto_summary("n2");
+    press(&mut app, KeyCode::Enter);
+    // From the commit list, a path that drops n2.
+    keys(&mut app, " E");
+    ctrl(&mut app, 'h');
+    ctrl(&mut app, 'j');
+    keys(&mut app, "F");
+    ctrl(&mut app, 'u');
+    keys(&mut app, "b/");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(summaries(&app), ["b2", "b1"]);
+    keys(&mut app, " m");
+    keys(&mut app, " m");
+    keys(&mut app, "]]");
+    assert_eq!(open_title(&app), "b2");
 }

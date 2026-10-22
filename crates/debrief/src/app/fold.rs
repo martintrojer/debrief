@@ -26,7 +26,7 @@ use crate::seen::Status;
 use crate::vcs::{CommitInfo, OpenOptions};
 
 use super::log::{FOLD_MORE_PREFIX, RowKey, is_fold_more, is_zero_id};
-use super::{App, AppEvent, Fold, Group, MORE_ROW, Row};
+use super::{App, AppEvent, Fold, Group, MORE_ROW, Row, Screen};
 
 /// Said when a revset's spine fell back to a flat list.
 pub(super) const FLAT: &str = "merges flat: several heads";
@@ -193,12 +193,18 @@ impl App {
     /// Turn folding on or off and reload. Off drops the open folds. The
     /// cursor stays on its commit, else goes to its merge, else to the
     /// nearest row above it that is still listed (turning on: the spine
-    /// commit that landed it), else row 0. An open commit stays open.
+    /// commit that landed it), else row 0. An open commit stays open, its
+    /// row marked if it is listed, else none (inside a closed fold).
     pub fn set_folding(&mut self, on: bool) {
         if self.folds.on == on {
             return;
         }
         let anchor = self.anchor(self.cursor, true);
+        let before: Vec<String> = self
+            .all_rows
+            .iter()
+            .map(|r| r.info.commit.clone())
+            .collect();
         let was = self.folds.on;
         self.folds.on = on;
         if !on {
@@ -213,6 +219,14 @@ impl App {
                     self.cursor = 0;
                 }
                 self.commit_reindex();
+                // An open commit inside a closed fold stays open with no
+                // row marked; `]]` / `[[` step from its old place.
+                if let Some(v) = &self.commit
+                    && matches!(self.screen, Screen::Commit(_))
+                    && self.view_index(v).is_none()
+                {
+                    self.hidden_open = Some((v.commit.clone(), before));
+                }
                 self.keep_visible();
             }
             Err(e) => {
@@ -220,6 +234,21 @@ impl App {
                 self.set_status(format!("reload failed: {e:#}"));
             }
         }
+    }
+
+    /// `<leader>m`: flip folding (see [`App::set_folding`]); the status
+    /// line names the new state.
+    pub(super) fn toggle_folds(&mut self) {
+        let on = !self.folds.on;
+        self.set_folding(on);
+        if self.folds.on != on {
+            return; // the reload failed and said so
+        }
+        self.set_status(match (on, self.folds.flat) {
+            (true, true) => FLAT,
+            (true, false) => "merges folded",
+            (false, _) => "merges flat",
+        });
     }
 
     /// The anchor of row `i` (see [`Anchor`]); `above` adds the rows

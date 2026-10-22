@@ -33,6 +33,7 @@ pub const TOGGLES: &[(Action, &str, &str)] = &[
     (Action::ToggleContext, "T", "view.context"),
     (Action::ToggleLayout, "t", "view.layout"),
     (Action::ToggleFiles, "`", "view.files"),
+    (Action::ToggleFolds, "<leader>m", "view.fold_merges"),
 ];
 
 /// Everything a key can do. `Option<usize>` is the typed count.
@@ -210,6 +211,17 @@ pub enum Action {
     FiltersClear,
     /// Log `J` (true) / `K`: scroll the stats pane a line.
     StatScroll(bool, Option<usize>),
+    /// Log `l` / Right: open the merge's fold (a `… more` row: its
+    /// group's next page).
+    FoldOpen,
+    /// Log `h` / Left: close the merge's fold, or the one the row is in.
+    FoldClose,
+    /// Log `zR`: open every fold, nested ones too.
+    FoldsOpenAll,
+    /// Log `zM`: close every fold.
+    FoldsCloseAll,
+    /// `<leader>m`: merges as folds / the flat list.
+    ToggleFolds,
 }
 
 /// What a key sequence means so far.
@@ -362,9 +374,10 @@ impl App {
 
     /// Keys after `<leader>`: the `[[launch]]` keys first (a launcher
     /// prefix waits for more keys), then the built-ins (`e` on the commit
-    /// screen, `E`, `F`, `b`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
+    /// screen, `E`, `F`, `b`, `m`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
     /// the commit screen and the stats pane on the log; `E` the commit
-    /// list under the file list's tree.
+    /// list under the file list's tree; `m` merge folding, on every
+    /// screen.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
         let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
             return KeyResult::None;
@@ -379,6 +392,7 @@ impl App {
                 ['E'] => KeyResult::Action(Action::ToggleCommits),
                 ['F'] => KeyResult::Action(Action::FiltersClear),
                 ['b'] => KeyResult::Action(Action::BranchList),
+                ['m'] => KeyResult::Action(Action::ToggleFolds),
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
                 ['r', 's'] => KeyResult::Action(Action::SessionList),
@@ -602,6 +616,8 @@ impl App {
             return match (prefix, c) {
                 ('g', 'g') => KeyResult::Action(A::GotoTop(count)),
                 ('g', '?') => KeyResult::Action(A::Help(HelpAction::Open)),
+                ('z', 'R') => KeyResult::Action(A::FoldsOpenAll),
+                ('z', 'M') => KeyResult::Action(A::FoldsCloseAll),
                 _ => KeyResult::None,
             };
         };
@@ -616,7 +632,7 @@ impl App {
             KeyCode::Char(c @ '0'..='9') if c != '0' || count.is_some() => {
                 return KeyResult::Count(c as usize - '0' as usize);
             }
-            KeyCode::Char('g') => return KeyResult::Pending,
+            KeyCode::Char('g' | 'z') => return KeyResult::Pending,
             KeyCode::Char('q') => A::Quit,
             KeyCode::Char('j') | KeyCode::Down => A::Down(count),
             KeyCode::Char('k') | KeyCode::Up => A::Up(count),
@@ -633,6 +649,8 @@ impl App {
             KeyCode::Char('F') => A::PathStart,
             KeyCode::Char('J') => A::StatScroll(true, count),
             KeyCode::Char('K') => A::StatScroll(false, count),
+            KeyCode::Char('l') | KeyCode::Right => A::FoldOpen,
+            KeyCode::Char('h') | KeyCode::Left => A::FoldClose,
             KeyCode::Esc => A::FilterClear,
             _ => return KeyResult::None,
         };
@@ -654,6 +672,7 @@ impl App {
                 | A::SessionSave
                 | A::SessionList
                 | A::BranchList
+                | A::ToggleFolds
                 | A::QuitPrompt(_)
         );
         if matches!(self.screen, Screen::Commit(_)) && !shared && !self.list_search(action) {
@@ -702,6 +721,11 @@ impl App {
             // The log has no panes to move between: tmux's, if any.
             A::PaneNav(d) => self.pane_nav(d),
             A::StatScroll(down, c) => self.stat_scroll_by(if down { n(c) } else { -n(c) }),
+            A::FoldOpen => self.fold_open(self.cursor),
+            A::FoldClose => self.fold_close(self.cursor),
+            A::FoldsOpenAll => self.folds_open_all(),
+            A::FoldsCloseAll => self.folds_close_all(),
+            A::ToggleFolds => self.toggle_folds(),
             other => self.apply_commit(other),
         }
     }
@@ -908,6 +932,7 @@ fn visual_ok(a: Action) -> bool {
             | A::SessionSave
             | A::SessionList
             | A::BranchList
+            | A::ToggleFolds
             | A::FiltersClear
     )
 }

@@ -81,6 +81,9 @@ many have loaded. The commit list pages the same way.
 | `F` | path filter: commits touching a file or directory |
 | `<leader>F` | clear the path and text filters |
 | `<leader>b` | pick the branch the log lists |
+| `l` `Right` / `h` `Left` | open / close the merge's fold (see [Merges](#merges)) |
+| `zR` / `zM` | open every fold, nested ones too / close every fold |
+| `<leader>m` | merges as folds / the flat list |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `<leader>rs` | list the saved review sessions |
@@ -103,6 +106,25 @@ matches and more may exist, the prompt and then the status line say
 `… more not loaded`. The filter narrows the list as you type,
 and the status line shows `filter: x (12/200)`. `m`, `Enter` and `]]` /
 `[[` act on the filtered list, and `r` keeps the filter.
+
+### Merges
+
+The fold rows are described [above](#the-log). `l` (or Right) on a
+merge row opens its fold, and on a fold's `… more` row loads the next
+page, as `Enter` does there. `h` (or Left) on an open merge closes it;
+on any row inside a fold it closes that fold and moves the cursor to its
+merge. Elsewhere they do nothing. `zR` opens every fold on the loaded
+page, nested ones included, and `zM` closes them all.
+
+`]]` / `[[` in the commit view step over the log's visible rows: an open
+fold is walked, a closed one skipped, and a `… more` row passed over.
+
+`<leader>m`, on every screen, flips folding for the session
+(`[view] fold_merges` sets it at start); the status line says
+`merges folded` or `merges flat`. The log reloads. The cursor stays on
+its commit if it is still listed, else goes to the merge whose fold holds
+it; open folds are not kept through turning folding off. An open commit
+stays open, with no row marked while it is inside a closed fold.
 
 ### Branches
 
@@ -227,6 +249,7 @@ It is cut from the left when space runs short, and dropped first.
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
 | `<leader>ss` | save this commit's review session |
 | `<leader>F` | clear the log's path and text filters |
+| `<leader>m` | merges as folds / the flat list (the open commit stays open) |
 | `<leader>rs` | list the saved review sessions |
 | `q` `Esc` | back to the log |
 
@@ -612,7 +635,7 @@ session. The rows without a key are set only in the file.
 | the file list as a tree / flat paths | `` ` `` | `view.files` | `"tree"` (or `"flat"`) |
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
 | header row (short ID and subject) on the commit screen | — | `view.header` | `true` |
-| the log lists the first-parent spine, merges as folds | — | `view.fold_merges` | `true` |
+| the log lists the first-parent spine, merges as folds | `<leader>m` | `view.fold_merges` | `true` |
 | git: the open working-copy view follows file changes | `r` | `view.follow_working` | `false` |
 | zoom the tmux pane while debrief runs (see [Panes and tmux](#panes-and-tmux)) | — | `view.tmux_zoom` | `false` |
 | syntax highlighting | — | `render.highlight` | `true` |

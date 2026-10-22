@@ -824,3 +824,179 @@ fn a_linear_log_draws_the_same_with_folding_on_and_off() {
     assert_eq!(mask_ages(&off), mask_ages(&on));
     assert_eq!(app.log_fit(), fit);
 }
+
+// --- keys ------------------------------------------------------------------
+
+#[test]
+fn l_opens_a_merge_fold_and_h_closes_it_or_the_one_the_row_is_in() {
+    let f = fixture();
+    let mut app = f.app();
+    // Off a merge, outside a fold: nothing.
+    app.goto_summary("m1");
+    keys(&mut app, "l");
+    keys(&mut app, "h");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+    assert_eq!(cursor_summary(&app), "m1");
+    // l / Right on a merge opens it; again does nothing.
+    app.goto_summary("Merge n");
+    keys(&mut app, "l");
+    assert!(app.rows()[app.cursor()].fold.unwrap().open);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(
+        summaries(&app)[1..6],
+        ["Merge n", "Merge s", "n2", "n1", "m1"]
+    );
+    // l on a commit inside: nothing; h: closes the fold, onto its merge.
+    app.goto_summary("n2");
+    keys(&mut app, "l");
+    assert_eq!(cursor_summary(&app), "n2");
+    keys(&mut app, "h");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+    assert_eq!(cursor_summary(&app), "Merge n");
+    // A nested merge: Left inside it closes it; h on it (closed, inside
+    // Merge n's fold) closes Merge n.
+    keys(&mut app, "l");
+    app.goto_summary("Merge s");
+    keys(&mut app, "l");
+    app.goto_summary("s1");
+    press(&mut app, KeyCode::Left);
+    assert_eq!(cursor_summary(&app), "Merge s");
+    assert!(!app.rows()[app.cursor()].fold.unwrap().open);
+    keys(&mut app, "h");
+    assert_eq!(cursor_summary(&app), "Merge n");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+    // h on an open merge closes it, the cursor kept.
+    keys(&mut app, "lh");
+    assert_eq!(cursor_summary(&app), "Merge n");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+}
+
+#[test]
+fn l_on_a_fold_more_row_loads_its_page_and_h_closes_its_fold() {
+    let f = fixture();
+    let mut opts = f.opts();
+    opts.limit = 2;
+    let mut app = f.app_with(opts);
+    open_fold(&mut app, "Merge n");
+    app.goto_summary("… more");
+    keys(&mut app, "l");
+    assert_eq!(app.screen(), Screen::Log);
+    assert_eq!(
+        summaries(&app),
+        ["Octopus x y z", "Merge n", "Merge s", "n2", "n1"]
+    );
+    // h on the `… more` row closes its fold.
+    let mut opts = f.opts();
+    opts.limit = 2;
+    let mut app = f.app_with(opts);
+    open_fold(&mut app, "Merge n");
+    app.goto_summary("… more");
+    keys(&mut app, "h");
+    assert_eq!(cursor_summary(&app), "Merge n");
+    assert_eq!(summaries(&app), ["Octopus x y z", "Merge n"]);
+}
+
+#[test]
+fn z_r_opens_every_fold_and_z_m_closes_them() {
+    let f = fixture();
+    let mut app = f.app();
+    keys(&mut app, "zR");
+    let all = summaries(&app);
+    assert_eq!(all.len(), BUBBLES_SPINE.len() + 11, "{all:?}");
+    assert!(all.contains(&"s1".to_string()), "nested opened too");
+    app.goto_summary("s1");
+    keys(&mut app, "zM");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+    assert_eq!(cursor_summary(&app), "Merge n");
+}
+
+#[test]
+fn bracket_steps_walk_open_folds_skip_closed_ones_and_fold_more_rows() {
+    let f = fixture();
+    let mut opts = f.opts();
+    opts.limit = 3;
+    let mut app = f.app_with(opts);
+    open_fold(&mut app, "Merge n");
+    assert_eq!(
+        summaries(&app),
+        [
+            "Octopus x y z",
+            "Merge n",
+            "Merge s",
+            "n2",
+            "n1",
+            "… more",
+            "m1"
+        ]
+    );
+    let title = |app: &App| {
+        let Screen::Commit(i) = app.screen() else {
+            panic!("not on the commit screen")
+        };
+        assert_eq!(app.commit_id(), Some(app.rows()[i].info.commit.as_str()));
+        app.rows()[i].info.summary.clone()
+    };
+    app.goto_summary("Merge n");
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, "]]");
+    assert_eq!(title(&app), "Merge s", "an open fold is walked");
+    keys(&mut app, "]]");
+    assert_eq!(title(&app), "n2", "a closed one (Merge s) is skipped");
+    keys(&mut app, "]]]]");
+    assert_eq!(title(&app), "m1", "past the fold's `… more` row");
+    keys(&mut app, "[[");
+    assert_eq!(title(&app), "n1", "back over it too");
+}
+
+#[test]
+fn leader_m_flips_folding_and_keeps_a_spine_commit() {
+    let f = fixture();
+    let mut app = f.app();
+    app.goto_summary("m1");
+    keys(&mut app, " m");
+    assert!(!app.folding());
+    assert_eq!(app.status(), "merges flat");
+    assert_eq!(app.rows().len(), BUBBLES_SPINE.len() + 11);
+    assert_eq!(cursor_summary(&app), "m1");
+    keys(&mut app, " m");
+    assert!(app.folding());
+    assert_eq!(app.status(), "merges folded");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+    assert_eq!(cursor_summary(&app), "m1");
+}
+
+#[test]
+fn leader_m_from_inside_an_open_fold_comes_back_on_its_merge() {
+    let f = fixture();
+    let mut app = f.app();
+    open_fold(&mut app, "Merge n");
+    app.goto_summary("n2");
+    keys(&mut app, " m");
+    assert_eq!(cursor_summary(&app), "n2");
+    // Open folds are not kept through folding off.
+    keys(&mut app, " m");
+    assert_eq!(summaries(&app), BUBBLES_SPINE);
+    assert_eq!(cursor_summary(&app), "Merge n");
+}
+
+#[test]
+fn leader_m_on_the_commit_screen_keeps_the_open_commit() {
+    let f = fixture();
+    let mut app = f.app();
+    open_fold(&mut app, "Merge n");
+    app.goto_summary("n2");
+    press(&mut app, KeyCode::Enter);
+    let open = app.commit_id().unwrap().to_string();
+    keys(&mut app, " m");
+    assert!(!app.folding());
+    let Screen::Commit(i) = app.screen() else {
+        panic!("closed the view")
+    };
+    assert_eq!(app.rows()[i].info.commit, open, "re-pointed at it");
+    // Back on, n2 is inside a closed fold: still open, no row marked.
+    keys(&mut app, " m");
+    assert!(app.folding());
+    assert!(matches!(app.screen(), Screen::Commit(_)));
+    assert_eq!(app.commit_id(), Some(open.as_str()));
+    assert_eq!(app.commit_list_open_row(), None);
+}

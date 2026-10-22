@@ -161,6 +161,21 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("F", L, G::Log, PATH_FILTER),
         b("<leader>F", L, G::Log, FILTERS_CLEAR),
         b("<leader>b", L, G::Log, BRANCH_LIST),
+        b("<leader>m", L, G::Log, FOLD_TOGGLE),
+        b(
+            "l, Right",
+            L,
+            G::Log,
+            "open the merge's fold (… more: load more)",
+        ),
+        b(
+            "h, Left",
+            L,
+            G::Log,
+            "close the fold, or the one this row is in",
+        ),
+        b("zR", L, G::Log, "open every fold, nested ones too"),
+        b("zM", L, G::Log, "close every fold"),
         b(
             "Enter",
             Pf,
@@ -308,6 +323,9 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("<leader>b", CL, G::Commits, BRANCH_LIST),
         b("<leader>b", C, G::Commit, BRANCH_LIST),
         b("<leader>b", F, G::Files, BRANCH_LIST),
+        b("<leader>m", CL, G::Commits, FOLD_TOGGLE),
+        b("<leader>m", C, G::Commit, FOLD_TOGGLE),
+        b("<leader>m", F, G::Files, FOLD_TOGGLE),
         b("Esc", CL, G::Commits, "back to the diff"),
         b("q", CL, G::Commits, "back to the log"),
         b("{1-9}", CL, G::Commits, "count for the next motion"),
@@ -454,6 +472,8 @@ const PATH_FILTER: &str = "filter the log by a file or directory";
 const FILTERS_CLEAR: &str = "clear the path and text filters";
 /// `<leader>b`.
 const BRANCH_LIST: &str = "pick the branch the log lists";
+/// `<leader>m`.
+const FOLD_TOGGLE: &str = "merges as folds / the flat list";
 /// `<leader>E`.
 const COMMIT_LIST_TOGGLE: &str = "show or hide the commit list under the files";
 

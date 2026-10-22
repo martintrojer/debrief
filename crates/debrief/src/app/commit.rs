@@ -980,18 +980,29 @@ impl App {
     }
 
     /// `]]` (`forward`, the next row in log order) / `[[`; with the open
-    /// commit filtered out, from its place in the unfiltered log.
+    /// commit filtered out, from its place in the unfiltered log. Steps
+    /// over the visible rows, so a closed fold is skipped and an open one
+    /// walked; a fold's `… more` row is passed over.
     pub(super) fn step_commit(&mut self, forward: bool) {
         let Screen::Commit(i) = self.screen else {
             return;
         };
-        let to = if let Some(to) = self.step_past_hidden(forward) {
+        let mut to = if let Some(to) = self.step_past_hidden(forward) {
             to
         } else if forward {
             Some(i + 1).filter(|&j| j < self.rows.len())
         } else {
             i.checked_sub(1)
         };
+        while let Some(j) = to
+            && super::is_fold_more(&self.rows[j].info.commit)
+        {
+            to = if forward {
+                Some(j + 1).filter(|&k| k < self.rows.len())
+            } else {
+                j.checked_sub(1)
+            };
+        }
         let Some(j) = to else {
             return self.set_status(if forward {
                 "no next commit"

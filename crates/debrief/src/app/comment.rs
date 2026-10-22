@@ -48,8 +48,6 @@ pub const EMPTY_COMMENT: &str = "Empty comment not saved";
 pub const NOT_A_LINE: &str = "Comment on a diff line";
 /// Status when the selection's diff lines are in more than one file.
 pub const SPANS_FILES: &str = "Selection spans files";
-/// Status for removed lines of a jj `@` with several parents.
-pub const MERGE_OLD_SIDE: &str = "This working copy is a merge; comment on the new side";
 /// Status for a path that resolves outside the repo (a symlinked dir).
 pub const OUTSIDE_ROOT: &str = "The file is outside the repository";
 /// The excerpt keeps at most this many selected diff lines.
@@ -676,7 +674,7 @@ impl App {
         ))
     }
 
-    /// The working copy's base commit: git's `HEAD`, jj's single `@-`.
+    /// The working copy's base commit: git's `HEAD`, jj's first parent of `@`.
     pub(super) fn working_base(&self) -> Result<CommitInfo, String> {
         let v = self.commit.as_ref().ok_or(NOT_A_LINE)?;
         if let Some(b) = &v.base {
@@ -687,11 +685,12 @@ impl App {
             .iter()
             .find(|r| r.working && r.info.commit == v.commit)
             .ok_or("The working copy is no longer in the log")?;
-        let parent = match &at.info.parents[..] {
-            [one] => one.clone(),
-            [] => return Err("The working copy has no parent".into()),
-            _ => return Err(MERGE_OLD_SIDE.into()),
-        };
+        let parent = at
+            .info
+            .parents
+            .first()
+            .cloned()
+            .ok_or("The working copy has no parent")?;
         if let Some(r) = self.rows.iter().find(|r| r.info.commit == parent) {
             return Ok(r.info.clone());
         }

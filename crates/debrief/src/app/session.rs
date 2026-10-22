@@ -281,14 +281,18 @@ impl App {
         self.sessions.saved.get(key)
     }
 
-    /// The working copy's base commit ID: git's `HEAD`, jj's single `@-`.
+    /// The working copy's base commit ID: git's `HEAD`, jj's first parent of `@`.
     fn working_base_id(&self) -> Option<String> {
         match self.vcs.kind() {
             Kind::Git => Some(self.working.as_ref()?.base.as_ref()?.commit.clone()),
-            Kind::Jj => match &self.all_rows.iter().find(|r| r.working)?.info.parents[..] {
-                [one] => Some(one.clone()),
-                _ => None,
-            },
+            Kind::Jj => self
+                .all_rows
+                .iter()
+                .find(|r| r.working)?
+                .info
+                .parents
+                .first()
+                .cloned(),
         }
     }
 

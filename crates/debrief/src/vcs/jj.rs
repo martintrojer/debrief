@@ -464,7 +464,8 @@ impl Vcs for Jj {
         let rev = format!("--revisions={id}");
         let message = self.jj(&op, &["log", "--no-graph", &rev, "-T", "description"])?;
         let full = format!("--context={FULL_CONTEXT}");
-        let mut args = vec!["diff", "--git", &rev];
+        let (from, to) = first_parent_range(&id);
+        let mut args = vec!["diff", "--git", &from, &to];
         if context == DiffContext::Full {
             args.push(&full);
         }
@@ -482,7 +483,8 @@ impl Vcs for Jj {
         let rev = format!("--revisions={id}");
         let head = self.jj(&op, &["log", "--no-graph", &rev, "-T", STAT_TEMPLATE])?;
         let (author, email, time, message) = parse_stat_header(&head)?;
-        let patch = self.jj(&op, &["diff", "--git", &rev])?;
+        let (from, to) = first_parent_range(&id);
+        let patch = self.jj(&op, &["diff", "--git", &from, &to])?;
         Ok(CommitStat {
             message,
             author,
@@ -491,6 +493,15 @@ impl Vcs for Jj {
             files: file_stats(&parse_unified(&patch)),
         })
     }
+}
+
+/// `jj diff` arguments diffing commit `id` from its first parent, as git
+/// shows a merge; the root commit (no parent) diffs from itself.
+fn first_parent_range(id: &str) -> (String, String) {
+    (
+        format!("--from=coalesce(first_parent({id}), root())"),
+        format!("--to={id}"),
+    )
 }
 
 /// `id` (a commit or change ID) as a revset symbol, refusing anything

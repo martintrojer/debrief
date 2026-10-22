@@ -335,6 +335,45 @@ fn spine_with_a_path_lists_merges_whose_bubble_touched_it() {
 }
 
 #[test]
+fn merge_diffs_from_its_first_parent() {
+    if !have_jj() {
+        return;
+    }
+    let (_e, v) = bubbles();
+    let all = bubbles_by_summary(&*v, BUBBLES);
+    // jj's own `diff -r` of a clean merge is empty; git shows the bubble.
+    for merge in ["Merge b", "Octopus x y z"] {
+        let id = &all[merge].commit;
+        let want = common::BUBBLES_FILES
+            .iter()
+            .find(|(m, _)| *m == merge)
+            .unwrap()
+            .1;
+        let d = v.show(id, Context::Default).unwrap();
+        let mut got: Vec<_> = d.files.iter().filter_map(|f| f.new_path.clone()).collect();
+        got.sort();
+        assert_eq!(got, want, "{merge} show");
+        let s = v.stat(id).unwrap();
+        let mut got: Vec<_> = s.files.iter().map(|f| f.path.clone()).collect();
+        got.sort();
+        assert_eq!(got, want, "{merge} stat");
+    }
+    // Merge b's first parent already had notes.txt's "a".
+    let s = v.stat(&all["Merge b"].commit).unwrap();
+    let notes = s.files.iter().find(|f| f.path == "notes.txt").unwrap();
+    assert_eq!((notes.added, notes.removed), (Some(1), Some(0)));
+    // The root commit has no first parent: an empty diff, not an error.
+    let root = v.log(Some("root()"), 1).unwrap().remove(0);
+    assert!(
+        v.show(&root.commit, Context::Default)
+            .unwrap()
+            .files
+            .is_empty()
+    );
+    assert!(v.stat(&root.commit).unwrap().files.is_empty());
+}
+
+#[test]
 fn linear_history_is_the_same_spine_or_not() {
     if !have_jj() {
         return;

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use common::{JjEnv, commit, git, git_repo, have_jj, w};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use debrief::app::comment::{MERGE_OLD_SIDE, OUTSIDE_ROOT};
+use debrief::app::comment::OUTSIDE_ROOT;
 use debrief::app::watch::{TreeFilter, tree_watcher};
 use debrief::app::{App, AppEvent, Mode, RowKind, Screen, StartOptions, WORKING_ID};
 use debrief::seen::Status;
@@ -880,7 +880,7 @@ fn jj_comments_on_at() {
 }
 
 #[test]
-fn jj_merge_at_refuses_old_side_comments() {
+fn jj_merge_at_comments_old_side_on_first_parent() {
     if !have_jj() {
         return;
     }
@@ -888,27 +888,46 @@ fn jj_merge_at_refuses_old_side_comments() {
     e.write("a.txt", "a\n");
     e.jj(&["--quiet", "commit", "-m", "left"]);
     e.jj(&["--quiet", "new", "root()", "-m", "right"]);
-    e.write("b.txt", "b1\nb2\n");
+    e.write("b.txt", "b1\n");
     e.jj(&[
         "--quiet",
         "new",
         "description(glob:left*)",
         "description(glob:right*)",
     ]);
-    e.write("b.txt", "b1\nB2\n");
+    e.write("a.txt", "A\n");
     let mut app = jj_app(&e, OpenOptions::default(), None);
     let at = app.working_row_index().unwrap();
-    assert_eq!(app.rows()[at].info.parents.len(), 2);
+    let parents = app.rows()[at].info.parents.clone();
+    assert_eq!(parents.len(), 2);
+    let left = app
+        .rows()
+        .iter()
+        .find(|r| r.info.summary == "left")
+        .unwrap()
+        .info
+        .clone();
+    assert_eq!(parents[0], left.commit);
     keys(&mut app, &format!("{}G", at + 1));
     press(&mut app, KeyCode::Enter);
     assert!(app.viewing_working_copy());
-    let r = row_of(&app, "B2", RowKind::Line(LineKind::Added));
-    comment_on(&mut app, r, "fine");
-    let r = row_of(&app, "b2", RowKind::Line(LineKind::Removed));
-    goto(&mut app, r);
-    keys(&mut app, "cc");
-    assert_eq!(app.mode(), Mode::Normal);
-    assert_eq!(app.status(), MERGE_OLD_SIDE);
+    // The first-parent diff: right's b.txt comes in as added; jj's
+    // auto-merge diff would show only the a.txt edit.
+    row_of(&app, "b1", RowKind::Line(LineKind::Added));
+    let r = row_of(&app, "A", RowKind::Line(LineKind::Added));
+    comment_on(&mut app, r, "new side");
+    let r = row_of(&app, "a", RowKind::Line(LineKind::Removed));
+    comment_on(&mut app, r, "old side");
+    let cache = e.root.parent().unwrap().join("cache");
+    let cs = Review::open(&cache, &e.root).unwrap().comments().to_vec();
+    assert_eq!(cs.len(), 2);
+    assert_eq!(cs[0].rev, None);
+    let rev = cs[1].rev.as_ref().unwrap();
+    assert_eq!(rev.commit, left.commit, "first parent");
+    assert_eq!(rev.change, left.change);
+    assert_eq!(cs[1].side, Some(Side::Old));
+    assert_eq!(cs[1].lines, (1, 1));
+    assert_eq!(app.review_marked_rows().len(), 2);
 }
 
 #[test]

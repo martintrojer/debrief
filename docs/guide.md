@@ -169,7 +169,7 @@ Uncommitted changes show in the log and take comments like any commit.
   and the line numbers on disk, as ramble's comments do, so ramble shows
   it too. An old-side comment (a removed line, or side by side any line on
   the left) anchors to the old side of `HEAD` (git) or `@-` (jj); if jj's
-  `@` is a merge, that is refused. Paths that resolve outside the repo through a symlinked
+  `@` is a merge, its first parent. Paths that resolve outside the repo through a symlinked
   directory are refused for comments and for `<leader>o`.
 - **Refresh:** `r` and a return from the editor reload the working copy's
   view in place, keeping the cursor row. Any other commit's view stays as

@@ -2,8 +2,8 @@ mod common;
 
 use common::{
     JjEnv as Env, assert_same, bubbles_by_summary, bubbles_repo, check_bubbles_groups,
-    check_bubbles_path, check_bubbles_sizes, check_bubbles_spine, have_jj, rm, snapshot,
-    summaries_of, w,
+    check_bubbles_path, check_bubbles_sizes, check_bubbles_spine, graph_repo, have_jj, rm,
+    snapshot, summaries, summaries_of, w,
 };
 use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
 
@@ -332,6 +332,73 @@ fn spine_with_a_path_lists_merges_whose_bubble_touched_it() {
     }
     let (_e, v) = bubbles();
     check_bubbles_path(&*v, Some(BUBBLES), &bubbles_by_summary(&*v, BUBBLES));
+}
+
+/// jj over a git repo `graph_repo` builds from `commits`, and git on
+/// that repo: the same commit IDs.
+fn jj_and_git(
+    commits: &[(impl AsRef<str>, Vec<usize>, Vec<common::Change>)],
+) -> (Env, [Box<dyn vcs::Vcs>; 2]) {
+    let e = Env::over_git(|root| graph_repo(root, commits));
+    let jj = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    let git = vcs::open(&e._tmp.path().join("git"), OpenOptions::default()).unwrap();
+    (e, [jj, git])
+}
+
+/// A spine of 60 steps mixing direct commits to `p/direct` and `q/d`
+/// with merges of one side commit touching `p/` or `q/`: spine + path
+/// pages match git's at every limit, including limits whose page ends
+/// inside a merge batch and ones that walk several.
+#[test]
+fn spine_path_pages_match_git() {
+    if !have_jj() {
+        return;
+    }
+    // A merge writes its side's change again: a clean merge.
+    let mut commits = vec![("base".to_string(), vec![], vec![w("base", "0\n")])];
+    for i in 0..60 {
+        let tip = commits.len();
+        let change = |f: &str| vec![w(f, format!("{i}\n"))];
+        match i * 7 % 5 {
+            0 => commits.push((format!("direct p {i}"), vec![tip], change("p/direct"))),
+            1 => commits.push((format!("direct q {i}"), vec![tip], change("q/d"))),
+            k => {
+                let file = format!("{}/s{i}", if k == 4 { "q" } else { "p" });
+                commits.push((format!("side {i}"), vec![tip], change(&file)));
+                commits.push((format!("merge {i}"), vec![tip, tip + 1], change(&file)));
+            }
+        }
+    }
+    let (_e, [jj, git]) = jj_and_git(&commits);
+    let ids = |log: Vec<vcs::CommitInfo>| log.into_iter().map(|c| c.commit).collect::<Vec<_>>();
+    for path in ["p", "q", "p/direct"] {
+        for limit in [1, 2, 3, 5, 7, 10, 15, 30, 200] {
+            let want = ids(git.log_in(None, Some(path), limit, true).unwrap());
+            let got = ids(jj.log_in(Some(BUBBLES), Some(path), limit, true).unwrap());
+            assert_eq!(got, want, "{path} at {limit}");
+        }
+    }
+}
+
+/// A bubble that changes `p` and changes it back: git's first-parent
+/// diff of the merge is empty for `p`, so git omits the merge; jj lists
+/// it, as its bubble touched `p` (see `Vcs::log_in`).
+#[test]
+fn spine_path_lists_a_bubble_that_reverts_its_change() {
+    if !have_jj() {
+        return;
+    }
+    let commits = vec![
+        ("base", vec![], vec![w("p", "0\n")]),
+        ("s1", vec![1], vec![w("p", "1\n")]),
+        ("s2", vec![2], vec![w("p", "0\n"), w("o", "1\n")]),
+        ("M revert", vec![1, 3], vec![w("o", "1\n")]),
+    ];
+    let (_e, [jj, git]) = jj_and_git(&commits);
+    let git = git.log_in(None, Some("p"), 10, true).unwrap();
+    assert_eq!(summaries(&git), ["base"]);
+    let jj = jj.log_in(Some(BUBBLES), Some("p"), 10, true).unwrap();
+    assert_eq!(summaries(&jj), ["M revert", "base"]);
 }
 
 #[test]

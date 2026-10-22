@@ -319,9 +319,18 @@ pub fn bubbles_repo(root: &Path) {
             vec![w("x.txt", "x\n"), w("y.txt", "y\n"), w("z.txt", "z\n")],
         ), // 17
     ];
+    graph_repo(root, &commits);
+}
+
+/// A git repo at `root` (created if missing) on `main`, holding
+/// `commits` (message, parents as commit numbers from 1, changes) oldest
+/// first, checked out clean. No parents: the previous commit. A merge's
+/// tree starts from its first parent's, so it writes its bubble's files
+/// itself. Three git processes, as [`git_repo`].
+pub fn graph_repo(root: &Path, commits: &[(impl AsRef<str>, Vec<usize>, Vec<Change>)]) {
     let nodes: Vec<Node> = commits
         .iter()
-        .map(|(m, p, c)| (*m, p.as_slice(), c.as_slice()))
+        .map(|(m, p, c)| (m.as_ref(), p.as_slice(), c.as_slice()))
         .collect();
     std::fs::create_dir_all(root).unwrap();
     git(root, &["init", "-q", "-b", "main"]);

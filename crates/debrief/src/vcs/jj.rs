@@ -199,8 +199,10 @@ impl Jj {
     /// on its diff against the auto-merge of its parents (empty for a
     /// clean merge), so each merge's bubble is checked on its own:
     /// `m & ((::m ~ ::first_parent(m)) & files(P))::` is `m` exactly when
-    /// the bubble touches `P`. At most three jj calls a page, plus one per
-    /// [`MERGE_BATCH`] merges.
+    /// the bubble touches `P`. Merges are checked newest first in batches
+    /// (`limit` merges, doubling up to [`MERGE_BATCH`]) until the page is
+    /// full down to the oldest checked merge, as an older merge can't make
+    /// it: three jj calls per batch, so a page costs about what it shows.
     fn spine_log(
         &self,
         at_op: &str,
@@ -220,26 +222,39 @@ impl Jj {
             return log(s);
         };
         let files = format!("files({})", fileset(p));
-        let direct = self.ids(at_op, &format!("({s}) & {files}"), Some(limit))?;
-        // Merges older than a full page of direct hits can't make the page.
-        let merges = match direct.get(limit.saturating_sub(1)) {
-            Some(last) if direct.len() == limit => format!("({s}) & merges() & {last}::"),
-            _ => format!("({s}) & merges()"),
+        let hits = |touched: &[String]| match touched {
+            [] => format!("({s}) & {files}"),
+            _ => format!("({s}) & ({files} | {})", touched.join(" | ")),
         };
-        let merges = self.ids(at_op, &merges, None)?;
         let mut touched = Vec::new();
-        for batch in merges.chunks(MERGE_BATCH) {
+        // `s` is one first-parent chain, so `::first_parent(m)` is the part
+        // of it older than `m`.
+        let mut older = String::new();
+        // A page needs at most `limit` merges; later batches grow.
+        let mut size = limit.clamp(1, MERGE_BATCH);
+        loop {
+            let batch = self.ids(at_op, &format!("({s}) & merges(){older}"), Some(size))?;
+            let Some(oldest) = batch.last() else {
+                return log(&hits(&touched));
+            };
             let union = batch
                 .iter()
                 .map(|m| format!("({m} & (({}) & {files})::)", bubble_of(m)))
                 .collect::<Vec<_>>()
                 .join(" | ");
             touched.extend(self.ids(at_op, &union, None)?);
+            if batch.len() < size {
+                return log(&hits(&touched));
+            }
+            // Every merge from `oldest` up is decided: a full page there is
+            // the page.
+            let page = log(&format!("({}) & {oldest}::", hits(&touched)))?;
+            if page.len() == limit {
+                return Ok(page);
+            }
+            older = format!(" & ::first_parent({oldest})");
+            size = (size * 2).min(MERGE_BATCH);
         }
-        if touched.is_empty() {
-            return log(&format!("({s}) & {files}"));
-        }
-        log(&format!("({s}) & ({files} | {})", touched.join(" | ")))
     }
 
     /// Resolve a commit ID (or change ID) to exactly one full commit ID.

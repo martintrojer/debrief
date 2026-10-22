@@ -11,8 +11,8 @@
 //! On the working copy new and context lines make
 //! ramble-style comments: no revision, the new path, the line numbers of
 //! the file on disk. Removed lines anchor to the base (git `HEAD`, jj
-//! `@-`) on its old side and old path; a jj merge `@` has no single base,
-//! so those are refused.
+//! `@-`; for a jj merge `@`, its first parent) on its old side and old
+//! path.
 
 use std::cell::Cell;
 

@@ -294,10 +294,11 @@ pub trait Vcs {
     /// are not followed. A backend without path support refuses a path.
     ///
     /// `spine`: only the first-parent spine of what it lists (a merge
-    /// stands for its bubble; see [`Vcs::fold`]). With a path, a spine
-    /// merge is listed when its first-parent diff touches the path, as
-    /// git's `--first-parent -- <path>` does. A backend without merges
-    /// ignores it.
+    /// stands for its bubble; see [`Vcs::fold`]). With a path, git lists a
+    /// spine merge when its first-parent diff touches the path
+    /// (`--first-parent -- <path>`); jj when a commit in its bubble does,
+    /// so jj also lists a bubble that changes the path and back (no net
+    /// change). A backend without merges ignores it.
     fn log_in(
         &self,
         revset: Option<&str>,

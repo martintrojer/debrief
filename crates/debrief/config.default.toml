@@ -79,6 +79,12 @@
 # conventional-commit type (feat, fix(ui), ...) as a coloured badge.
 # header = true
 
+# The log lists the first-parent spine: each merge is one row, a fold of
+# the commits it brought in (its bubble), opened in place. Off: every
+# commit, flat, in the VCS's default order. A linear history looks the
+# same either way.
+# fold_merges = true
+
 
 # ── Which commits load ──────────────────────────────────────────────────────
 

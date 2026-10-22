@@ -16,7 +16,7 @@
 //! commits and more may exist, the prompt line and then the status line
 //! say so ([`NOT_LOADED`]).
 
-use super::log::{NOT_LOADED, RowKey};
+use super::log::{NOT_LOADED, RowKey, is_fold_more};
 use super::search::find_all;
 use super::{App, Mode, Row, Screen};
 
@@ -42,9 +42,12 @@ pub(super) struct LogSearch {
     list_anchor: Option<RowKey>,
 }
 
-/// `pat` matches one of `r`'s fields.
+/// `pat` matches one of `r`'s fields (never a fold's `… more` row).
 fn row_matches(r: &Row, pat: &str) -> bool {
     let i = &r.info;
+    if is_fold_more(&i.commit) {
+        return false;
+    }
     [
         i.summary.as_str(),
         i.author.as_str(),
@@ -126,12 +129,13 @@ impl App {
                 .filter(|_| self.log_search.filtering),
             self.log_key(self.commit_list.cursor),
         ];
-        let pat = &self.log_search.filter;
+        let shown = self.filter_keep();
         self.rows = self
             .all_rows
             .iter()
-            .filter(|r| pat.is_empty() || row_matches(r, pat))
-            .cloned()
+            .zip(shown)
+            .filter(|(_, k)| *k)
+            .map(|(r, _)| r.clone())
             .collect();
         self.cursor = keep
             .and_then(|id| self.rows.iter().position(|r| r.info.commit == id))
@@ -141,6 +145,43 @@ impl App {
         }
         self.commit_reindex();
         self.keep_visible();
+    }
+
+    /// Which of `all_rows` the filter shows: the hits, the merges whose
+    /// open folds hold one, and a group's `… more` row when its group has
+    /// a hit. Unloaded folds are not searched.
+    fn filter_keep(&self) -> Vec<bool> {
+        let pat = &self.log_search.filter;
+        let rows = &self.all_rows;
+        if pat.is_empty() {
+            return vec![true; rows.len()];
+        }
+        let mut keep: Vec<bool> = rows.iter().map(|r| row_matches(r, pat)).collect();
+        let index: std::collections::HashMap<&str, usize> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.info.commit.as_str(), i))
+            .collect();
+        let mut hit_groups = std::collections::HashSet::new();
+        for i in 0..rows.len() {
+            if !keep[i] || rows[i].merge.is_none() {
+                continue;
+            }
+            hit_groups.insert(self.folds.row_group.get(i).copied().unwrap_or(0));
+            let mut m = rows[i].merge.as_deref();
+            while let Some(j) = m.and_then(|id| index.get(id).copied()) {
+                keep[j] = true;
+                hit_groups.insert(self.folds.row_group.get(j).copied().unwrap_or(0));
+                m = rows[j].merge.as_deref();
+            }
+        }
+        for (i, r) in rows.iter().enumerate() {
+            let g = self.folds.row_group.get(i).copied().unwrap_or(0);
+            if is_fold_more(&r.info.commit) && g != 0 && hit_groups.contains(&g) {
+                keep[i] = true;
+            }
+        }
+        keep
     }
 
     /// Where `]]` (`forward`) / `[[` go while the filter hides the open

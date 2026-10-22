@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::app::search::find_all;
-use crate::app::{App, MORE_ROW, WORKING_ID, age, short_id};
+use crate::app::{App, MORE_ROW, WORKING_ID, age, is_fold_more, short_id};
 use crate::seen::Status;
 use crate::theme::Palette;
 
@@ -114,6 +114,10 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
                     spans.push(Span::styled(format!("  {s}"), base.fg(pal.cyan)));
                 }
                 return Line::from(spans).style(base);
+            }
+            if is_fold_more(&r.info.commit) {
+                // A fold's `… more` row: no commit, no fields.
+                return Line::styled(format!("  {}", r.info.summary), base.fg(pal.muted));
             }
             let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
             spans.extend(hl(

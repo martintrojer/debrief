@@ -299,7 +299,11 @@ impl App {
 
     /// The log's target: the commit's first file still in the working copy.
     fn log_target(&self) -> Result<(String, u32), String> {
-        let info = self.rows.get(self.cursor).ok_or(NO_FILES)?;
+        let info = self
+            .rows
+            .get(self.cursor)
+            .filter(|r| !super::is_fold_more(&r.info.commit))
+            .ok_or(NO_FILES)?;
         // Hunks whatever `T` says: the line is the first change's. A
         // one-shot key press, so read here (git's working copy too).
         let diff = if info.info.commit == super::WORKING_ID {

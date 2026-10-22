@@ -252,7 +252,10 @@ impl App {
 
     /// The session key of log row `i`: [`WORKING`] for the working copy.
     fn row_key(&self, i: usize) -> Option<String> {
-        let r = self.rows.get(i)?;
+        let r = self
+            .rows
+            .get(i)
+            .filter(|r| !super::is_fold_more(&r.info.commit))?;
         Some(session_key(r.working, &r.info.commit).to_string())
     }
 

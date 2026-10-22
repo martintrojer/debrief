@@ -549,6 +549,10 @@ impl App {
         let Some(row) = self.rows.get(i) else {
             return;
         };
+        if super::is_fold_more(&row.info.commit) {
+            // A fold's `… more` row opens nothing: it loads more.
+            return self.fold_open(i);
+        }
         if row.working {
             return self.open_working();
         }

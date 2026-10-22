@@ -33,6 +33,22 @@ use super::{App, AppEvent, Row, Screen};
 /// never names a commit).
 pub const WORKING_ID: &str = "working-copy";
 
+/// The commit ID prefix of a fold's `… more` row
+/// (`fold-more:<merge>:<parent>`): not a hex ID, so it never names a
+/// commit. Excluded wherever [`WORKING_ID`] is from seen marks, stats,
+/// sessions and search.
+pub const FOLD_MORE_PREFIX: &str = "fold-more:";
+
+/// `id` is a fold's `… more` row (see [`FOLD_MORE_PREFIX`]).
+pub fn is_fold_more(id: &str) -> bool {
+    id.starts_with(FOLD_MORE_PREFIX)
+}
+
+/// A synthetic row's ID: git's working copy or a fold's `… more`.
+pub(super) fn is_synthetic(id: &str) -> bool {
+    id == WORKING_ID || is_fold_more(id)
+}
+
 /// The commit ID of jj's root commit (and any all-zero ID).
 pub fn is_zero_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b == b'0')
@@ -41,7 +57,7 @@ pub fn is_zero_id(id: &str) -> bool {
 /// The short ID shown in the log: the change ID for jj, else the commit
 /// ID, first 8 characters.
 pub fn short_id(c: &CommitInfo) -> &str {
-    if c.commit == WORKING_ID {
+    if is_synthetic(&c.commit) {
         return "";
     }
     let id = c.change.as_deref().unwrap_or(&c.commit);
@@ -143,21 +159,23 @@ struct Moved {
 /// does without a sender.
 fn spawn_page(
     (root, opts, pin): (std::path::PathBuf, OpenOptions, Option<String>),
-    (revset, path): (Option<String>, Option<String>),
+    (revset, path, spine): (Option<String>, Option<String>, bool),
     (request, limit): (u64, usize),
     tx: std::sync::mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
-            .and_then(|v| v.log_in(revset.as_deref(), path.as_deref(), limit, false))
+            .and_then(|v| v.log_in(revset.as_deref(), path.as_deref(), limit, spine))
             .map_err(|e| format!("{e:#}"));
         let _ = tx.send(AppEvent::LogPage { request, result });
     });
 }
 
+/// The commits of `rows`, without synthetic rows (git's working copy, a
+/// fold's `… more`).
 fn infos(rows: &[Row]) -> Vec<CommitInfo> {
     rows.iter()
-        .filter(|r| r.info.commit != WORKING_ID)
+        .filter(|r| !is_synthetic(&r.info.commit))
         .map(|r| r.info.clone())
         .collect()
 }
@@ -189,7 +207,7 @@ impl App {
             self.query.as_deref(),
             self.opts.path.as_deref(),
             limit,
-            false,
+            self.folding(),
         )?;
         let commits = self.trim(commits, limit);
         match self.vcs.kind() {
@@ -235,6 +253,11 @@ impl App {
         self.page.more
     }
 
+    /// How many commits a page adds (the first limit).
+    pub(super) fn page_size(&self) -> usize {
+        self.page.page
+    }
+
     /// A page of the log is loading.
     pub fn loading_more(&self) -> bool {
         self.page.pending.is_some()
@@ -277,7 +300,7 @@ impl App {
                     self.vcs.open_options(),
                     self.vcs.pinned_op(),
                 );
-                let q = (self.query.clone(), self.opts.path.clone());
+                let q = (self.query.clone(), self.opts.path.clone(), self.folding());
                 spawn_page(at, q, (request, limit), tx);
             }
             None => {
@@ -287,7 +310,7 @@ impl App {
                         self.query.as_deref(),
                         self.opts.path.as_deref(),
                         limit,
-                        false,
+                        self.folding(),
                     )
                     .map_err(|e| format!("{e:#}"));
                 self.page_loaded(request, result);
@@ -448,7 +471,7 @@ impl App {
     }
 
     /// git's synthetic row for `self.working`.
-    fn working_row(&self) -> Option<Row> {
+    pub(super) fn working_row(&self) -> Option<Row> {
         let w = self.working.as_ref()?;
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -464,41 +487,47 @@ impl App {
             },
             status: Status::Seen,
             working: true,
+            depth: 0,
+            group: None,
+            groups: Vec::new(),
+            fold: None,
+            merge: None,
         })
     }
 
+    /// The rows from the log query's `commits` (the spine while folding;
+    /// see `fold`), open folds spliced in. Then loads what the new rows
+    /// lack: open folds' contents and merge sizes.
     pub(super) fn set_rows(&mut self, commits: Vec<CommitInfo>) {
-        let mut rows: Vec<Row> = self.working_row().into_iter().collect();
-        rows.extend(commits.into_iter().map(|info| Row {
-            status: self.seen.status(&info),
-            working: self.working_commit.as_deref() == Some(info.commit.as_str()),
-            info,
-        }));
-        self.all_rows = rows;
+        self.all_rows = self.splice(commits);
         // A kept filter narrows the new list too; the caller places the
         // cursor. The commit list's cursor stays on its commit.
         let keep = self.rows.get(self.cursor).map(|r| r.info.commit.clone());
         let cursor = self.cursor;
         self.refilter(keep);
         self.cursor = cursor.min(self.rows.len().saturating_sub(1));
+        self.folds_follow();
     }
 
     fn restatus(&mut self) {
         for r in self.rows.iter_mut().chain(self.all_rows.iter_mut()) {
-            if r.info.commit != WORKING_ID {
+            if !is_synthetic(&r.info.commit) {
                 r.status = self.seen.status(&r.info);
             }
         }
     }
 
-    /// The loaded commits, without git's synthetic row.
+    /// The log query's commits (the spine while folding), for rebuilds:
+    /// never the spliced rows.
     fn commits(&self) -> Vec<CommitInfo> {
-        infos(&self.all_rows)
+        self.folds.spine.clone()
     }
 
     /// The oldest new or updated row (the log is newest first).
     pub(super) fn first_unseen(&self) -> Option<usize> {
-        self.rows.iter().rposition(|r| r.status != Status::Seen)
+        self.rows
+            .iter()
+            .rposition(|r| r.status != Status::Seen && !is_fold_more(&r.info.commit))
     }
 
     /// The log row of the working copy (git's row, jj's `@`), if listed.
@@ -601,9 +630,10 @@ impl App {
         self.commit_reindex();
     }
 
-    /// `m`: every listed commit (the filtered list) is seen.
+    /// `m`: every listed commit (the filtered list) is seen, with the
+    /// loaded fold commits of the listed merges.
     pub(super) fn mark_all(&mut self) {
-        let commits = infos(&self.rows);
+        let commits = self.with_bubbles(infos(&self.rows));
         match self.seen.mark_all(&commits) {
             Ok(()) => {
                 self.restatus();
@@ -616,21 +646,27 @@ impl App {
     /// `w`: the watermark at log row `i`. That commit and every loaded
     /// commit older than it are seen, every newer one is new again, so
     /// the next start puts the cursor just above it. Positions come from
-    /// the whole log, not the filtered rows; git's working-copy row is
-    /// skipped (on it, everything loaded is seen).
+    /// the whole log (the spine while folding: a row inside a fold splits
+    /// at its merge, and a merge's loaded fold commits go with it), not
+    /// the filtered rows; git's working-copy row is skipped (on it,
+    /// everything loaded is seen).
     pub fn set_watermark(&mut self, i: usize) {
         let Some(row) = self.rows.get(i) else { return };
+        if is_fold_more(&row.info.commit) {
+            return;
+        }
+        let spine = &self.folds.spine;
         let at = if row.info.commit == WORKING_ID {
             0
         } else {
-            let id = &row.info.commit;
-            match self.all_rows.iter().position(|r| r.info.commit == *id) {
+            let Some(id) = self.spine_of(i) else { return };
+            match spine.iter().position(|c| c.commit == id) {
                 Some(at) => at,
                 None => return,
             }
         };
-        let unseen = infos(&self.all_rows[..at]);
-        let seen = infos(&self.all_rows[at..]);
+        let unseen = self.with_bubbles(spine[..at].to_vec());
+        let seen = self.with_bubbles(spine[at..].to_vec());
         match self.seen.set_watermark(&seen, &unseen) {
             Ok(()) => {
                 self.restatus();
@@ -649,7 +685,7 @@ impl App {
         let Some(info) = self.rows.get(i).map(|r| r.info.clone()) else {
             return;
         };
-        if info.commit == WORKING_ID {
+        if is_synthetic(&info.commit) {
             return;
         }
         match self.seen.mark(&info) {
@@ -722,6 +758,7 @@ impl App {
             .map(|r| r.info.commit.clone())
             .collect();
         self.page_reset();
+        self.folds_requery();
         let working = self.working.take();
         if let Err(e) = self.reload_strict(false) {
             self.working = working;

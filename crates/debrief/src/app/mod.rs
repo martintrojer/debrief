@@ -10,6 +10,7 @@ pub mod commit_list;
 pub mod config;
 pub mod display;
 pub mod file_tree;
+mod fold;
 mod help;
 pub mod highlight;
 mod keys;
@@ -50,7 +51,9 @@ pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::{Action, KeyResult};
 pub use keys::{LEADER, TOGGLES};
 pub use launch::{Effect, Exit, LaunchCommand};
-pub use log::{MORE_ROW, NOT_LOADED, WORKING_ID, age, is_zero_id, short_id};
+pub use log::{
+    FOLD_MORE_PREFIX, MORE_ROW, NOT_LOADED, WORKING_ID, age, is_fold_more, is_zero_id, short_id,
+};
 pub use motion::Cursor;
 pub use mouse::{Hit, MULTI_CLICK, WHEEL_ROWS};
 pub use picker::{PickerAction, PickerItem, PickerKind, PickerView};
@@ -146,6 +149,27 @@ pub enum AppEvent {
         request: u64,
         result: Result<Vec<CommitInfo>, String>,
     },
+    /// A merge's fold contents from the loader thread, one list per
+    /// group (non-first parent, in parent order), tagged with its request.
+    FoldLoaded {
+        request: u64,
+        merge: String,
+        result: Result<Vec<Vec<CommitInfo>>, String>,
+    },
+    /// One group of a merge's fold re-read with a larger limit (its next
+    /// page), tagged with its request.
+    FoldPage {
+        request: u64,
+        merge: String,
+        parent: String,
+        result: Result<Vec<CommitInfo>, String>,
+    },
+    /// The sizes (commits brought in) of merges on the log, tagged with
+    /// their request.
+    MergeSizes {
+        request: u64,
+        result: Result<Vec<(String, usize)>, String>,
+    },
 }
 
 /// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
@@ -201,15 +225,45 @@ pub struct Row {
     /// The working copy: git's synthetic row (`info.commit` is
     /// [`WORKING_ID`]) or jj's `@`.
     pub working: bool,
+    /// Fold nesting: 0 on the spine, one more per enclosing open fold.
+    pub depth: u8,
+    /// The innermost enclosing octopus group's marker (`groups.last()`).
+    pub group: Option<Group>,
+    /// The group marker of every enclosing octopus fold, outermost first
+    /// (empty on the spine and inside 2-parent folds).
+    pub groups: Vec<Group>,
+    /// A merge row's fold while folding is on.
+    pub fold: Option<Fold>,
+    /// The merge whose fold holds the row; `None` on the spine.
+    pub merge: Option<String>,
+}
+
+/// Which group of an octopus fold a row is in: every group but the last
+/// is `Mid`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    Mid,
+    Last,
+}
+
+/// A merge row's fold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fold {
+    /// Commits the merge brought in, nested ones included; `None` until
+    /// its count is in.
+    pub size: Option<usize>,
+    pub open: bool,
 }
 
 pub struct App {
     vcs: Box<dyn Vcs>,
     opts: StartOptions,
     seen: Seen,
+    /// The spine, open folds and loaded fold contents (`fold`).
+    folds: fold::Folds,
     /// The log rows shown: `all_rows` narrowed by the filter.
     rows: Vec<Row>,
-    /// Every loaded log row.
+    /// Every loaded log row: the spine with open folds spliced in.
     all_rows: Vec<Row>,
     /// The log's `/` search and `f` filter.
     log_search: log_search::LogSearch,
@@ -346,6 +400,7 @@ impl App {
             vcs,
             opts,
             seen,
+            folds: fold::Folds::default(),
             rows: Vec::new(),
             all_rows: Vec::new(),
             log_search: log_search::LogSearch::default(),
@@ -412,6 +467,7 @@ impl App {
         app.context = app.config.view.context;
         app.split = app.config.view.layout == config::Layout::Split;
         app.files_tree = app.config.view.files == config::FilesLayout::Tree;
+        app.folds.on = app.config.view.fold_merges;
         let (keys, mut errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;
         errors.extend(app.config.warnings.iter().cloned());
@@ -429,7 +485,9 @@ impl App {
             // unfiltered run starts caught up.
             let mut all = commits.clone();
             if app.opts.path.is_some() {
-                all.extend(app.vcs.log(app.query.as_deref(), app.opts.limit)?);
+                let spine = app.folding();
+                let q = app.query.as_deref();
+                all.extend(app.vcs.log_in(q, None, app.opts.limit, spine)?);
             }
             app.seen.mark_all(&all).context("cannot write seen state")?;
         }
@@ -458,6 +516,18 @@ impl App {
             AppEvent::Highlighted { request, spans } => self.highlighted(request, spans),
             AppEvent::Stat { request, result } => self.stat_loaded(request, result),
             AppEvent::LogPage { request, result } => self.page_loaded(request, result),
+            AppEvent::FoldLoaded {
+                request,
+                merge,
+                result,
+            } => self.fold_loaded(request, &merge, result),
+            AppEvent::FoldPage {
+                request,
+                merge,
+                parent,
+                result,
+            } => self.fold_page_loaded(request, &merge, &parent, result),
+            AppEvent::MergeSizes { request, result } => self.sizes_loaded(request, result),
             AppEvent::Mouse(m) => {
                 self.mouse(m, Instant::now());
                 self.follow_resume();

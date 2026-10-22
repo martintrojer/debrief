@@ -207,6 +207,9 @@ pub struct ViewConfig {
     pub follow_working: bool,
     /// The commit view's header row: short ID and subject (on by default).
     pub header: bool,
+    /// The log lists the first-parent spine with each merge a fold of
+    /// the commits it brought in (on by default).
+    pub fold_merges: bool,
 }
 
 /// The default `[view] split_min_width`.
@@ -378,6 +381,7 @@ impl Default for ViewConfig {
             tmux_zoom: false,
             follow_working: false,
             header: true,
+            fold_merges: true,
         }
     }
 }
@@ -556,6 +560,7 @@ impl Config {
             set(&mut c.view.tmux_zoom, v.tmux_zoom);
             set(&mut c.view.follow_working, v.follow_working);
             set(&mut c.view.header, v.header);
+            set(&mut c.view.fold_merges, v.fold_merges);
         }
         if let Some(t) = raw.theme {
             let (cfg, resolved) = parse_theme(t, dir)?;
@@ -836,6 +841,7 @@ struct RawView {
     tmux_zoom: Option<bool>,
     follow_working: Option<bool>,
     header: Option<bool>,
+    fold_merges: Option<bool>,
 }
 
 /// `[view] context`.

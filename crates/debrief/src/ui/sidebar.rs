@@ -24,7 +24,7 @@ use super::log::{WORKING_MARKER, hl, marker, more_line};
 use crate::app::config::SidebarSide;
 use crate::app::file_tree::clip_middle;
 use crate::app::sidebar::{GUTTER_COLS, STATUS_COLS, counts_label, lead_col};
-use crate::app::{App, Focus, WORKING_ID, short_id};
+use crate::app::{App, Focus, WORKING_ID, is_fold_more, short_id};
 use crate::theme::Palette;
 use crate::vcs::FileStatus;
 
@@ -141,6 +141,8 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
             };
             if r.info.commit == WORKING_ID {
                 push(&r.info.summary, base.fg(pal.yellow), &mut spans);
+            } else if is_fold_more(&r.info.commit) {
+                push(&r.info.summary, base.fg(pal.muted), &mut spans);
             } else {
                 push(
                     &format!("{} ", short_id(&r.info)),

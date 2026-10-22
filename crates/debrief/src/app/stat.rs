@@ -257,14 +257,18 @@ impl App {
 
     /// The commit under the log cursor ([`WORKING_ID`] on git's
     /// working-copy row).
+    /// `None` on a fold's `… more` row (no commit).
     fn cursor_commit(&self) -> Option<&str> {
-        self.rows.get(self.cursor).map(|r| r.info.commit.as_str())
+        self.rows
+            .get(self.cursor)
+            .map(|r| r.info.commit.as_str())
+            .filter(|id| !super::is_fold_more(id))
     }
 
-    /// What the pane shows for the cursor row; `None` with no rows.
+    /// What the pane shows for the cursor row; `None` with no rows or
+    /// on a fold's `… more` row.
     pub fn stat_pane(&self) -> Option<StatPane> {
-        let row = self.rows.get(self.cursor)?;
-        let id = row.info.commit.as_str();
+        let id = self.cursor_commit()?;
         if let Some(s) = self.stat.peek(id) {
             return Some(StatPane::Ready(s));
         }

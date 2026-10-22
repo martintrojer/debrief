@@ -17,6 +17,7 @@
 //! the op head, as before.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -199,10 +200,13 @@ impl Jj {
     /// on its diff against the auto-merge of its parents (empty for a
     /// clean merge), so each merge's bubble is checked on its own:
     /// `m & ((::m ~ ::first_parent(m)) & files(P))::` is `m` exactly when
-    /// the bubble touches `P`. Merges are checked newest first in batches
-    /// (`limit` merges, doubling up to [`MERGE_BATCH`]) until the page is
-    /// full down to the oldest checked merge, as an older merge can't make
-    /// it: three jj calls per batch, so a page costs about what it shows.
+    /// the bubble touches `P`. Two jj calls list the first `limit` direct
+    /// hits and, in spine order, every merge newer than the last of them;
+    /// the merges are then checked newest first, [`MERGE_BATCH`] a call,
+    /// until the page is full down to the oldest merge checked, and one
+    /// call logs the page. A path touched in fewer than `limit` places
+    /// (rare, absent, deep) fills no page, so it checks every spine merge:
+    /// one call per [`MERGE_BATCH`] merges.
     fn spine_log(
         &self,
         at_op: &str,
@@ -222,39 +226,45 @@ impl Jj {
             return log(s);
         };
         let files = format!("files({})", fileset(p));
-        let hits = |touched: &[String]| match touched {
-            [] => format!("({s}) & {files}"),
-            _ => format!("({s}) & ({files} | {})", touched.join(" | ")),
+        let direct = self.ids(at_op, &format!("({s}) & {files}"), Some(limit))?;
+        // Anything older than a full page of direct hits can't make the
+        // page.
+        let newer = match direct.last() {
+            Some(last) if direct.len() == limit => format!(" & {last}::"),
+            _ => String::new(),
         };
+        // Spine order of the direct hits and the merges, naming the hits
+        // rather than evaluating `files()` again (costly for a deep path).
+        let named: String = direct.iter().map(|d| format!(" | {d}")).collect();
+        let spine = self.ids(at_op, &format!("({s}) & (merges(){named}){newer}"), None)?;
+        let direct: HashSet<&str> = direct.iter().map(String::as_str).collect();
+        let merges: Vec<usize> = (0..spine.len())
+            .filter(|&i| !direct.contains(spine[i].as_str()))
+            .collect();
         let mut touched = Vec::new();
-        // `s` is one first-parent chain, so `::first_parent(m)` is the part
-        // of it older than `m`.
-        let mut older = String::new();
-        // A page needs at most `limit` merges; later batches grow.
-        let mut size = limit.clamp(1, MERGE_BATCH);
-        loop {
-            let batch = self.ids(at_op, &format!("({s}) & merges(){older}"), Some(size))?;
-            let Some(oldest) = batch.last() else {
-                return log(&hits(&touched));
-            };
+        for (k, batch) in merges.chunks(MERGE_BATCH).enumerate() {
             let union = batch
                 .iter()
-                .map(|m| format!("({m} & (({}) & {files})::)", bubble_of(m)))
+                .map(|&i| {
+                    let m = &spine[i];
+                    format!("({m} & (({}) & {files})::)", bubble_of(m))
+                })
                 .collect::<Vec<_>>()
                 .join(" | ");
             touched.extend(self.ids(at_op, &union, None)?);
-            if batch.len() < size {
-                return log(&hits(&touched));
+            // Every hit from the oldest merge checked up is known: a full
+            // page there is the page. Of the spine entries newer than it,
+            // all but the merges before it are direct hits.
+            let (oldest, merges_before) =
+                (batch[batch.len() - 1], k * MERGE_BATCH + batch.len() - 1);
+            if oldest - merges_before + touched.len() >= limit {
+                break;
             }
-            // Every merge from `oldest` up is decided: a full page there is
-            // the page.
-            let page = log(&format!("({}) & {oldest}::", hits(&touched)))?;
-            if page.len() == limit {
-                return Ok(page);
-            }
-            older = format!(" & ::first_parent({oldest})");
-            size = (size * 2).min(MERGE_BATCH);
         }
+        if touched.is_empty() {
+            return log(&format!("({s}) & {files}"));
+        }
+        log(&format!("({s}) & ({files} | {})", touched.join(" | ")))
     }
 
     /// Resolve a commit ID (or change ID) to exactly one full commit ID.

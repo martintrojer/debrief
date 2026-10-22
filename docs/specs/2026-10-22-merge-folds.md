@@ -51,8 +51,10 @@ view. The user rebases their own work but reads repos that merge.
   merge `m` whose bubble touches the path (`(::m ~ ::first_parent(m)) &
   files(P)` not empty), checked per merge in batched revset unions,
   newest first, stopping once the page is full down to the oldest merge
-  checked. `h` is the one head of `R`; a revset with several heads is
-  listed flat. This lists the same commits as git except a merge whose
+  checked. A dense path stops early; a path touched fewer than `limit`
+  times on the spine (rare, absent, a deep subpath) fills no page, so
+  it checks every spine merge, one jj call per 100. `h` is the one head
+  of `R`; a revset with several heads is listed flat. This lists the same commits as git except a merge whose
   bubble touched the path with no net change (changed and changed back):
   git omits it (empty first-parent diff), jj lists it.
 

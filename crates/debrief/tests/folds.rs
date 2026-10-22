@@ -16,7 +16,7 @@ use common::{
 };
 use crossterm::event::KeyCode;
 use debrief::app::config::Config;
-use debrief::app::{App, AppEvent, Group, Screen, StartOptions, is_fold_more};
+use debrief::app::{App, AppEvent, Group, Screen, StartOptions, is_fold_more, short_id};
 use debrief::seen::{Seen, Status};
 use debrief::vcs::{self, CommitInfo};
 use ratatui::Terminal;
@@ -769,6 +769,41 @@ fn the_commit_list_draws_the_fold_marker_and_glyphs() {
     assert_eq!(leads, ["├ ", "├ ", "╰ ", "  "]);
 }
 
+/// `lines` with the age field of each log row blanked: the 6 columns
+/// (` {:>4} `) after the first 8-hex-digit id at column 2. Ages come from
+/// the clock at draw time, so two renders can straddle a second.
+fn mask_ages(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            let c: Vec<char> = l.chars().collect();
+            let id = c.len() >= 16 && c[2..10].iter().all(|ch| ch.is_ascii_hexdigit());
+            if !id {
+                return l.clone();
+            }
+            c[..10].iter().chain(&['#'; 6]).chain(&c[16..]).collect()
+        })
+        .collect()
+}
+
+/// Every commit row of a linear log draws at the spine: its short id at
+/// column 2, no fold glyph or label anywhere on the screen.
+#[track_caller]
+fn assert_spine_layout(app: &App, lines: &[String]) {
+    for r in app.rows() {
+        let id = short_id(&r.info);
+        let line = lines
+            .iter()
+            .find(|l| l.contains(id))
+            .unwrap_or_else(|| panic!("no line for {id}: {lines:#?}"));
+        let at: String = line.chars().skip(2).take(8).collect();
+        assert_eq!(at, id, "id not at column 2: {line:?}");
+    }
+    for l in lines {
+        assert!(!l.contains(['▸', '▾', '├', '╰', '│']), "fold glyph: {l:?}");
+    }
+}
+
 #[test]
 fn a_linear_log_draws_the_same_with_folding_on_and_off() {
     let tmp = tempfile::tempdir().unwrap();
@@ -780,9 +815,12 @@ fn a_linear_log_draws_the_same_with_folding_on_and_off() {
     assert!(app.folding());
     keys(&mut app, "jj");
     let on = screen(&mut app, 100);
+    assert_spine_layout(&app, &on);
     let fit = app.log_fit();
     app.set_folding(false);
     assert!(!app.folding());
-    assert_eq!(screen(&mut app, 100), on);
+    let off = screen(&mut app, 100);
+    assert_spine_layout(&app, &off);
+    assert_eq!(mask_ages(&off), mask_ages(&on));
     assert_eq!(app.log_fit(), fit);
 }

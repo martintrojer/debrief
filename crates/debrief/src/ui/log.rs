@@ -1,5 +1,14 @@
 //! The log: one row per commit, newest first:
-//! `<marker> <short id> <age> <author> <summary>`. git's working copy
+//! `<marker> <lead><short id> <age> <author> [session] [fold] <summary>`.
+//! The lead is 2 columns per fold depth (empty on the spine, so a spine
+//! row's short id starts at column 2): a glyph and a space per enclosing
+//! octopus group, outermost first (`├`/`╰` for the row's own group, `│`
+//! for an enclosing group with more groups after it, blank for an
+//! enclosing last group), then 2 spaces per level a glyph does not cover.
+//! A merge row's fold is `▸ +n` closed or `▾ +n` open (`n` the commits
+//! it hides; `▸` alone until the size is in), after the session marker.
+//! A fold group with more commits to load ends with a dim
+//! `  <lead>… more` row (no id, age or author). git's working copy
 //! is `✎ Working copy  N files` on top; jj's `@` gets the `✎` marker. A
 //! commit with a saved review session shows `` (`3`: three unsent
 //! comments) before its summary; git's working-copy row ends with it.

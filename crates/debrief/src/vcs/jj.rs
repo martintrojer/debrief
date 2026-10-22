@@ -16,7 +16,7 @@
 //! current head. With `--no-snapshot` there is no pin: every call reads
 //! the op head, as before.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -83,6 +83,10 @@ pub struct Jj {
     opts: OpenOptions,
     /// The operation reads are pinned to after the last good snapshot.
     pin: RefCell<Option<String>>,
+    /// Spine merges per bubble query; [`MERGE_BATCH`] but in tests.
+    merge_batch: usize,
+    /// jj processes run, for tests to bound the work a read does.
+    calls: Cell<usize>,
 }
 
 impl Jj {
@@ -92,7 +96,26 @@ impl Jj {
             root,
             opts,
             pin: RefCell::new(None),
+            merge_batch: MERGE_BATCH,
+            calls: Cell::new(0),
         }
+    }
+
+    /// Test hook: check `n` spine merges per call instead of
+    /// [`MERGE_BATCH`], so a small history crosses batches.
+    #[doc(hidden)]
+    pub fn with_merge_batch(self, n: usize) -> Self {
+        assert!(n > 0);
+        Jj {
+            merge_batch: n,
+            ..self
+        }
+    }
+
+    /// Test hook: the jj processes this handle has run.
+    #[doc(hidden)]
+    pub fn jj_calls(&self) -> usize {
+        self.calls.get()
     }
 
     /// Reads pinned to operation `op` (a reopened handle).
@@ -101,6 +124,8 @@ impl Jj {
             root,
             opts,
             pin: RefCell::new(Some(op)),
+            merge_batch: MERGE_BATCH,
+            calls: Cell::new(0),
         }
     }
 
@@ -175,6 +200,7 @@ impl Jj {
             self.root.as_os_str(),
         ];
         argv.extend(args.iter().map(OsStr::new));
+        self.calls.set(self.calls.get() + 1);
         run("jj", argv)
     }
 
@@ -242,7 +268,7 @@ impl Jj {
             .filter(|&i| !direct.contains(spine[i].as_str()))
             .collect();
         let mut touched = Vec::new();
-        for (k, batch) in merges.chunks(MERGE_BATCH).enumerate() {
+        for (k, batch) in merges.chunks(self.merge_batch).enumerate() {
             let union = batch
                 .iter()
                 .map(|&i| {
@@ -255,8 +281,10 @@ impl Jj {
             // Every hit from the oldest merge checked up is known: a full
             // page there is the page. Of the spine entries newer than it,
             // all but the merges before it are direct hits.
-            let (oldest, merges_before) =
-                (batch[batch.len() - 1], k * MERGE_BATCH + batch.len() - 1);
+            let (oldest, merges_before) = (
+                batch[batch.len() - 1],
+                k * self.merge_batch + batch.len() - 1,
+            );
             if oldest - merges_before + touched.len() >= limit {
                 break;
             }

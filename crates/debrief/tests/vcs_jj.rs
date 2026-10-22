@@ -5,7 +5,7 @@ use common::{
     check_bubbles_path, check_bubbles_sizes, check_bubbles_spine, graph_repo, have_jj, rm,
     snapshot, summaries, summaries_of, w,
 };
-use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
+use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions, Vcs};
 
 /// The strict read-only tests open without snapshots.
 const NO_SNAPSHOT: OpenOptions = OpenOptions { snapshot: false };
@@ -348,7 +348,12 @@ fn jj_and_git(
 /// A spine of 60 steps mixing direct commits to `p/direct` and `q/d`
 /// with merges of one side commit touching `p/` or `q/`: spine + path
 /// pages match git's at every limit, including limits whose page ends
-/// inside a merge batch and ones that walk several.
+/// inside a merge batch and ones that walk several. Run at merge batch
+/// sizes 1 and 3 (about 36 merges, so the early stop between batches
+/// decides the page) and at the default 100 (one batch). The jj call
+/// count pins the work too: the bubble checks stop at the first merge at
+/// or below the page's last entry, and never pass the `limit`-th direct
+/// hit (dropping that cut leaves the page alone but costs a call).
 #[test]
 fn spine_path_pages_match_git() {
     if !have_jj() {
@@ -369,15 +374,60 @@ fn spine_path_pages_match_git() {
             }
         }
     }
-    let (_e, [jj, git]) = jj_and_git(&commits);
+    let (e, [_, git]) = jj_and_git(&commits);
+    let root = e.root.canonicalize().unwrap();
     let ids = |log: Vec<vcs::CommitInfo>| log.into_iter().map(|c| c.commit).collect::<Vec<_>>();
-    for path in ["p", "q", "p/direct"] {
-        for limit in [1, 2, 3, 5, 7, 10, 15, 30, 200] {
-            let want = ids(git.log_in(None, Some(path), limit, true).unwrap());
-            let got = ids(jj.log_in(Some(BUBBLES), Some(path), limit, true).unwrap());
-            assert_eq!(got, want, "{path} at {limit}");
+    let spine = git.log_in(None, None, 1000, true).unwrap();
+    for batch in [1, 3, 100] {
+        let jj = vcs::Jj::new(root.clone(), NO_SNAPSHOT).with_merge_batch(batch);
+        for path in ["p", "q", "p/direct"] {
+            let hits = ids(git.log_in(None, Some(path), 1000, true).unwrap());
+            for limit in [1, 2, 3, 5, 7, 10, 15, 30, 200] {
+                let want = ids(git.log_in(None, Some(path), limit, true).unwrap());
+                let before = jj.jj_calls();
+                let got = ids(jj.log_in(Some(BUBBLES), Some(path), limit, true).unwrap());
+                assert_eq!(got, want, "{path} at {limit}, batch {batch}");
+                let checked = merges_checked(&spine, &hits, &want, limit);
+                let calls = 4 + checked.div_ceil(batch);
+                assert_eq!(
+                    jj.jj_calls() - before,
+                    calls,
+                    "{path} at {limit}, batch {batch} calls"
+                );
+            }
         }
     }
+}
+
+/// The spine merges `Jj::spine_log` checks one at a time for a page
+/// `page` of `limit` from the path's first-parent `hits` (newest first):
+/// the merges down to the `limit`-th direct hit, stopping at the first
+/// merge at or below the page's last entry once the page is full.
+fn merges_checked(
+    spine: &[vcs::CommitInfo],
+    hits: &[String],
+    page: &[String],
+    limit: usize,
+) -> usize {
+    let is_merge = |c: &vcs::CommitInfo| c.parents.len() > 1;
+    let pos = |id: &String| spine.iter().position(|c| &c.commit == id).unwrap();
+    let direct: Vec<usize> = hits
+        .iter()
+        .map(pos)
+        .filter(|&i| !is_merge(&spine[i]))
+        .collect();
+    let cut = if direct.len() >= limit {
+        direct[limit - 1] + 1
+    } else {
+        spine.len()
+    };
+    let merges: Vec<usize> = (0..cut).filter(|&i| is_merge(&spine[i])).collect();
+    if page.len() < limit {
+        return merges.len();
+    }
+    let last = pos(&page[page.len() - 1]);
+    let newer = merges.iter().filter(|&&i| i < last).count();
+    newer + usize::from(merges.iter().any(|&i| i >= last))
 }
 
 /// A bubble that changes `p` and changes it back: git's first-parent

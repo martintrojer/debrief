@@ -6,8 +6,10 @@
 //! middle, keeping the extension.
 //!
 //! Under the tree, the commit list (`[view] sidebar_commits`): a rule,
-//! then the log's rows as `<marker> <short id> [session] <summary>`,
-//! clipped to the width; the open commit's row on the cursor-row
+//! then the log's rows as
+//! `<marker> <lead><short id> [session] [fold] <summary>`, clipped to the
+//! width (the lead, fold marker and size, and closed-fold marker as in
+//! the log); the open commit's row on the cursor-row
 //! background, the list's cursor bold on it while the list has focus;
 //! the log's dim `… more` row ends it while more commits may exist. The
 //! log's search and filter matches are marked as in the log, and a
@@ -128,7 +130,7 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
             if focused && i == cursor {
                 base = base.add_modifier(Modifier::BOLD);
             }
-            let (mut m, mut mc) = marker(pal, r.status);
+            let (mut m, mut mc) = marker(pal, app.row_status(i));
             if r.working {
                 (m, mc) = (WORKING_MARKER, pal.yellow);
             }
@@ -142,8 +144,13 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
             if r.info.commit == WORKING_ID {
                 push(&r.info.summary, base.fg(pal.yellow), &mut spans);
             } else if is_fold_more(&r.info.commit) {
-                push(&r.info.summary, base.fg(pal.muted), &mut spans);
+                push(
+                    &format!("{}{}", r.lead(), r.info.summary),
+                    base.fg(pal.muted),
+                    &mut spans,
+                );
             } else {
+                push(&r.lead(), base.fg(pal.muted), &mut spans);
                 push(
                     &format!("{} ", short_id(&r.info)),
                     base.fg(pal.purple),
@@ -151,6 +158,9 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
                 );
                 if let Some(s) = app.session_marker(r) {
                     push(&format!("{s} "), base.fg(pal.cyan), &mut spans);
+                }
+                if let Some(f) = r.fold_label() {
+                    push(&format!("{f} "), base.fg(pal.muted), &mut spans);
                 }
                 push(&r.info.summary, base, &mut spans);
             }

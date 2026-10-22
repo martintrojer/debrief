@@ -92,7 +92,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         .skip(app.scroll())
         .take(area.height as usize)
         .map(|(i, r)| {
-            let (mut m, mut mc) = marker(pal, r.status);
+            let (mut m, mut mc) = marker(pal, app.row_status(i));
             if r.working {
                 (m, mc) = (WORKING_MARKER, pal.yellow);
             }
@@ -117,9 +117,14 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             }
             if is_fold_more(&r.info.commit) {
                 // A fold's `… more` row: no commit, no fields.
-                return Line::styled(format!("  {}", r.info.summary), base.fg(pal.muted));
+                let text = format!("  {}{}", r.lead(), r.info.summary);
+                return Line::styled(text, base.fg(pal.muted));
             }
             let mut spans = vec![Span::styled(format!("{m} "), base.fg(mc))];
+            let lead = r.lead();
+            if !lead.is_empty() {
+                spans.push(Span::styled(lead, base.fg(pal.muted)));
+            }
             spans.extend(hl(
                 short_id(&r.info).to_string(),
                 base.fg(pal.purple),
@@ -139,6 +144,9 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(Span::styled(" ", base));
             if let Some(s) = session {
                 spans.push(Span::styled(format!("{s} "), base.fg(pal.cyan)));
+            }
+            if let Some(f) = r.fold_label() {
+                spans.push(Span::styled(format!("{f} "), base.fg(pal.muted)));
             }
             spans.extend(hl(r.info.summary.clone(), base, &pats, pal));
             Line::from(spans).style(base)

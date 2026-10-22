@@ -31,6 +31,50 @@ use super::{App, AppEvent, Fold, Group, MORE_ROW, Row};
 /// Said when a revset's spine fell back to a flat list.
 pub(super) const FLAT: &str = "merges flat: several heads";
 
+/// A merge row's fold marker: closed / open.
+pub const FOLD_CLOSED: &str = "▸";
+pub const FOLD_OPEN: &str = "▾";
+/// An octopus group's glyph: every group but the last / the last; an
+/// enclosing group with more groups after it continues as a bar.
+pub const GROUP_MID: &str = "├";
+pub const GROUP_LAST: &str = "╰";
+pub const GROUP_BAR: &str = "│";
+
+impl Row {
+    /// The columns before the row's short ID, 2 per depth level: one
+    /// glyph and a space per entry of `groups` (outermost first; the
+    /// innermost the group's own `├` / `╰`, an enclosing `Mid` group a
+    /// `│`, an enclosing `Last` blank), then 2 spaces per level not
+    /// covered by a glyph. Empty on the spine.
+    pub fn lead(&self) -> String {
+        let n = self.groups.len();
+        let mut out = String::new();
+        for (k, g) in self.groups.iter().enumerate() {
+            out.push_str(match (k + 1 == n, g) {
+                (true, Group::Mid) => GROUP_MID,
+                (true, Group::Last) => GROUP_LAST,
+                (false, Group::Mid) => GROUP_BAR,
+                (false, Group::Last) => " ",
+            });
+            out.push(' ');
+        }
+        let rest = usize::from(self.depth).saturating_sub(n);
+        out.extend(std::iter::repeat_n(' ', 2 * rest));
+        out
+    }
+
+    /// A merge row's fold marker and size, `▸ +5` / `▾ +5`, or `▸` alone
+    /// before the size is in; `None` off a fold.
+    pub fn fold_label(&self) -> Option<String> {
+        let f = self.fold?;
+        let m = if f.open { FOLD_OPEN } else { FOLD_CLOSED };
+        Some(match f.size {
+            Some(n) => format!("{m} +{n}"),
+            None => m.to_string(),
+        })
+    }
+}
+
 /// One group's paging.
 #[derive(Debug, Clone, Copy)]
 struct GroupPage {
@@ -314,6 +358,31 @@ impl App {
         let mut out = Vec::new();
         self.loaded_bubble(&row.info.commit, &mut out, &mut HashSet::new());
         Some(out)
+    }
+
+    /// The status row `i` shows: a closed fold's is its bubble's, New if
+    /// any loaded commit in it is, else Updated if any is, else the
+    /// merge's own (also while the fold is not loaded). A New merge stays
+    /// New.
+    pub fn row_status(&self, i: usize) -> Status {
+        let Some(row) = self.rows.get(i) else {
+            return Status::Seen;
+        };
+        if row.fold.is_none_or(|f| f.open) {
+            return row.status;
+        }
+        let Some(bubble) = self.bubble(i) else {
+            return row.status;
+        };
+        let mut out = row.status;
+        for c in &bubble {
+            match self.seen.status(c) {
+                Status::New => return Status::New,
+                Status::Updated if out == Status::Seen => out = Status::Updated,
+                _ => {}
+            }
+        }
+        out
     }
 
     /// Push `merge`'s loaded fold commits (nested where loaded) to `out`.
@@ -760,5 +829,60 @@ impl App {
                 f.size = sizes.get(&r.info.commit).copied();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(depth: u8, groups: &[Group], fold: Option<Fold>) -> Row {
+        Row {
+            info: CommitInfo {
+                commit: "c".into(),
+                change: None,
+                author: String::new(),
+                time: 0,
+                summary: String::new(),
+                parents: Vec::new(),
+            },
+            status: Status::Seen,
+            working: false,
+            depth,
+            group: groups.last().copied(),
+            groups: groups.to_vec(),
+            fold,
+            merge: None,
+        }
+    }
+
+    #[test]
+    fn lead_draws_a_glyph_column_per_group_and_indents_the_rest() {
+        use Group::{Last, Mid};
+        for (depth, groups, want) in [
+            (0, &[][..], ""),
+            (1, &[], "  "),
+            (2, &[], "    "),
+            (1, &[Mid], "├ "),
+            (1, &[Last], "╰ "),
+            // A 2-parent fold inside an octopus group: the group's glyph,
+            // then indent.
+            (2, &[Mid], "├   "),
+            // An octopus inside an octopus: the outer group continues as
+            // a bar while it has groups after it, else blank.
+            (2, &[Mid, Last], "│ ╰ "),
+            (2, &[Last, Mid], "  ├ "),
+        ] {
+            assert_eq!(row(depth, groups, None).lead(), want, "{depth} {groups:?}");
+        }
+    }
+
+    #[test]
+    fn fold_label_shows_the_marker_and_the_size_once_in() {
+        let f = |open, size| row(0, &[], Some(Fold { size, open })).fold_label();
+        assert_eq!(f(false, Some(3)).as_deref(), Some("▸ +3"));
+        assert_eq!(f(true, Some(3)).as_deref(), Some("▾ +3"));
+        assert_eq!(f(false, None).as_deref(), Some("▸"));
+        assert_eq!(row(0, &[], None).fold_label(), None);
     }
 }

@@ -42,7 +42,12 @@ pub const STACKED_MIN_H: u16 = 5;
 pub const LOG_MIN_W: u16 = 72;
 /// Side by side, the log's widest share of the terminal, in percent.
 pub const LOG_MAX_PCT: u32 = 60;
-/// A log row's columns before its summary: marker, ID, age, author.
+/// A spine row's columns before its summary: marker, ID, age, author.
+/// A fold row adds its glyph and indent columns ([`Row::lead`]), a
+/// merge row its fold marker and size ([`Row::fold_label`]) and a space.
+///
+/// [`Row::lead`]: super::Row::lead
+/// [`Row::fold_label`]: super::Row::fold_label
 pub const LOG_ROW_PREFIX: u16 = 29;
 /// From this many rows the stacked pane takes half the height, not 40%:
 /// the log keeps 20 rows or more, and the pane's message and files get
@@ -194,16 +199,18 @@ impl App {
     }
 
     /// The columns most log rows need: the 90th percentile of the loaded
-    /// rows (all of them, so a filter doesn't move the split), plus one
-    /// column of padding, as the file list's auto width does.
+    /// rows (all of them, so a filter doesn't move the split), each with
+    /// its fold columns, plus one column of padding, as the file list's
+    /// auto width does.
     pub fn log_fit(&self) -> u16 {
         use unicode_width::UnicodeWidthStr;
         let need: Vec<u16> = self
             .all_rows
             .iter()
             .map(|r| {
-                let summary = r.info.summary.width().min(usize::from(u16::MAX)) as u16;
-                LOG_ROW_PREFIX.saturating_add(summary)
+                let fold = r.fold_label().map_or(0, |l| l.width() + 1);
+                let cols = r.lead().width() + fold + r.info.summary.width();
+                LOG_ROW_PREFIX.saturating_add(cols.min(usize::from(u16::MAX)) as u16)
             })
             .collect();
         super::sidebar::fit_width(&need)

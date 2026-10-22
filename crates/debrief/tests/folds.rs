@@ -1,7 +1,8 @@
 //! Merge folds in the log, at the App level: with folding on the log
 //! lists the first-parent spine, each merge row a fold whose groups splice
 //! in when it opens (loaded lazily: off the UI thread with an event
-//! sender, inline without), over `common::bubbles_repo`.
+//! sender, inline without), over `common::bubbles_repo`; and how the log
+//! and the commit list draw them (marker, size, indent, octopus glyphs).
 
 mod common;
 
@@ -14,9 +15,13 @@ use common::{
     press, w,
 };
 use crossterm::event::KeyCode;
+use debrief::app::config::Config;
 use debrief::app::{App, AppEvent, Group, Screen, StartOptions, is_fold_more};
-use debrief::seen::Status;
-use debrief::vcs;
+use debrief::seen::{Seen, Status};
+use debrief::vcs::{self, CommitInfo};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -583,4 +588,201 @@ impl GotoSummary for App {
             keys(self, "k");
         }
     }
+}
+
+// --- drawing -------------------------------------------------------------
+
+/// Render at `cols` x 30 (or `rows`) and return the screen's lines, trimmed.
+fn screen(app: &mut App, cols: u16) -> Vec<String> {
+    screen_at(app, cols, 30)
+}
+
+fn screen_at(app: &mut App, cols: u16, rows: u16) -> Vec<String> {
+    let mut t = Terminal::new(TestBackend::new(cols, rows)).unwrap();
+    t.draw(|f| app.render(f)).unwrap();
+    let buf = t.backend().buffer().clone();
+    (0..buf.area.height)
+        .map(|y| {
+            let l: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+            l.trim_end().to_string()
+        })
+        .collect()
+}
+
+/// The screen line ending with `summary`.
+#[track_caller]
+fn line_of(lines: &[String], summary: &str) -> String {
+    lines
+        .iter()
+        .find(|l| l.ends_with(summary))
+        .unwrap_or_else(|| panic!("no line {summary}: {lines:#?}"))
+        .clone()
+}
+
+/// A log line after its status marker and space, up to its ID: the glyph
+/// and indent columns.
+fn lead(line: &str) -> String {
+    let body: String = line.chars().skip(2).collect();
+    body.split(|c: char| c.is_ascii_hexdigit())
+        .next()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a_merge_row_draws_its_fold_marker_and_size_before_the_summary() {
+    let f = fixture();
+    let mut app = f.app();
+    let lines = screen(&mut app, 100);
+    assert!(line_of(&lines, "Octopus x y z").ends_with(" ▸ +3 Octopus x y z"));
+    assert!(line_of(&lines, "Merge n").ends_with(" ▸ +4 Merge n"));
+    let m1 = line_of(&lines, "m1");
+    assert!(!m1.contains('▸'), "{m1}");
+    assert_eq!(lead(&m1), "", "spine rows keep their columns");
+    app.fold_open(0);
+    let lines = screen(&mut app, 100);
+    assert!(line_of(&lines, "Octopus x y z").ends_with(" ▾ +3 Octopus x y z"));
+    let leads: Vec<String> = ["x1", "y1", "z1"]
+        .iter()
+        .map(|s| lead(&line_of(&lines, s)))
+        .collect();
+    assert_eq!(leads, ["├ ", "├ ", "╰ "]);
+}
+
+#[test]
+fn a_nested_open_fold_indents_twice_and_a_fold_more_row_sits_at_its_lead() {
+    let f = fixture();
+    let mut opts = f.opts();
+    opts.limit = 3;
+    let mut app = f.app_with(opts);
+    open_fold(&mut app, "Merge n");
+    open_fold(&mut app, "Merge s");
+    let lines = screen(&mut app, 100);
+    assert!(line_of(&lines, "Merge s").ends_with(" ▾ +1 Merge s"));
+    assert_eq!(lead(&line_of(&lines, "Merge s")), "  ");
+    assert_eq!(lead(&line_of(&lines, "s1")), "    ");
+    assert_eq!(lead(&line_of(&lines, "n2")), "  ");
+    // Merge n's group (Merge s, n2, n1) fills the page of 3: `… more`.
+    let i = lines.iter().position(|l| l.ends_with("n1")).unwrap();
+    assert_eq!(lines[i + 1], "    … more");
+}
+
+#[test]
+fn a_closed_fold_shows_its_bubbles_marker_once_loaded() {
+    let f = fixture();
+    // Seen: the spine only (a seen file, so the first run marks nothing).
+    let v = vcs::open(&f.root, vcs::OpenOptions::default()).unwrap();
+    let spine = v.log_in(None, None, 200, true).unwrap();
+    Seen::open(&f.cache, &f.root)
+        .unwrap()
+        .mark_all(&spine)
+        .unwrap();
+    let mut app = f.app();
+    let marker = |app: &mut App| line_of(&screen(app, 100), "Octopus x y z").remove(0);
+    assert_eq!(marker(&mut app), ' ', "not loaded: the merge's own");
+    app.fold_open(0);
+    assert_eq!(marker(&mut app), ' ', "open: the merge's own");
+    app.fold_close(0);
+    assert_eq!(app.rows()[0].status, Status::Seen);
+    assert_eq!(marker(&mut app), '●', "closed: a new commit inside");
+    app.fold_open(0);
+    keys(&mut app, "m");
+    app.fold_close(0);
+    assert_eq!(marker(&mut app), ' ', "all seen: the merge's own");
+}
+
+#[test]
+fn a_closed_fold_with_an_updated_commit_shows_updated_unless_one_is_new() {
+    if !have_jj() {
+        return;
+    }
+    let env = JjEnv::over_git(bubbles_repo);
+    let v = vcs::open(&env.root, vcs::OpenOptions::default()).unwrap();
+    let by = common::bubbles_by_summary(&*v, "::@ ~ root()");
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    // Everything seen but z1; x1 seen only as its change (rewritten since).
+    let mut seen: Vec<CommitInfo> = by
+        .iter()
+        .filter(|(s, _)| !["x1", "z1"].contains(&s.as_str()))
+        .map(|(_, c)| c.clone())
+        .collect();
+    seen.push(CommitInfo {
+        commit: "f".repeat(40),
+        ..by["x1"].clone()
+    });
+    Seen::open(&cache, &env.root)
+        .unwrap()
+        .mark_all(&seen)
+        .unwrap();
+    let mut opts = StartOptions::new(cache);
+    opts.config.view.stats = false;
+    let mut app = App::new(v, opts).unwrap();
+    let at = row(&app, "Octopus x y z");
+    app.fold_open(at);
+    assert_eq!(app.rows()[row(&app, "x1")].status, Status::Updated);
+    app.fold_close(at);
+    let marker = |app: &mut App| line_of(&screen(app, 100), "Octopus x y z").remove(0);
+    assert_eq!(marker(&mut app), '●', "z1 is new: new wins");
+    app.fold_open(at);
+    app.mark_row(row(&app, "z1"));
+    app.fold_close(at);
+    assert_eq!(marker(&mut app), '◐');
+}
+
+#[test]
+fn the_commit_list_draws_the_fold_marker_and_glyphs() {
+    let f = fixture();
+    let mut opts = f.opts();
+    opts.config =
+        Config::parse("[view]\nsidebar_commits = true\nheader = false\nsidebar_width = 40\n")
+            .unwrap();
+    let mut app = f.app_with(opts);
+    app.event(AppEvent::Resize(160, 40));
+    app.fold_open(0);
+    open_fold(&mut app, "Merge n");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen(), Screen::Commit(0));
+    let l = app.commit_layout(Rect::new(0, 0, 160, 39));
+    let c = l.commits.expect("the commit list is shown");
+    let lines = screen_at(&mut app, 160, 40);
+    let list: Vec<String> = (c.y + 1..c.y + c.height)
+        .map(|y| {
+            let l = &lines[y as usize];
+            l.chars()
+                .skip(c.x as usize)
+                .take(c.width as usize - 1)
+                .collect::<String>()
+        })
+        .map(|l| l.trim_end().to_string())
+        .collect();
+    let row = |s: &str| line_of(&list, s);
+    assert!(
+        row("Octopus x y z").ends_with(" ▾ +3 Octopus x y z"),
+        "{list:#?}"
+    );
+    assert!(row("Merge s").ends_with(" ▸ +1 Merge s"), "{list:#?}");
+    let leads: Vec<String> = ["x1", "y1", "z1", "Merge s"]
+        .iter()
+        .map(|s| lead(&row(s)))
+        .collect();
+    assert_eq!(leads, ["├ ", "├ ", "╰ ", "  "]);
+}
+
+#[test]
+fn a_linear_log_draws_the_same_with_folding_on_and_off() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    let names = ["c1", "c2", "c3", "c4", "c5", "c6"];
+    let commits: Vec<_> = names.iter().map(|m| (*m, vec![w(m, "x\n")])).collect();
+    common::git_repo(&root, &commits);
+    let mut app = open(&root, StartOptions::new(tmp.path().join("cache")));
+    assert!(app.folding());
+    keys(&mut app, "jj");
+    let on = screen(&mut app, 100);
+    let fit = app.log_fit();
+    app.set_folding(false);
+    assert!(!app.folding());
+    assert_eq!(screen(&mut app, 100), on);
+    assert_eq!(app.log_fit(), fit);
 }

@@ -46,6 +46,20 @@ again, so the next start lands just above it. It counts the whole loaded
 log, not just the filtered rows; on git's working-copy row it marks
 everything seen. The log reloads when the repo changes.
 
+With `[view] fold_merges` on (the default), the log lists the
+first-parent spine and each merge row is a fold of the commits it brought
+in. A merge row shows `▸ +5` before its summary: closed, 5 commits
+inside, nested ones counted (`▸` alone until the count is in). Open, it
+shows `▾ +5` and its commits follow it, indented two columns per level of
+nesting; a merge inside is a fold of its own, closed until opened. An
+octopus merge's rows mark their group in the first indent column, `├`
+for every group but the last and `╰` for the last, so the lines it
+merged stay apart. A fold too long for a page ends with its own dim
+`… more` row. A closed fold's marker speaks for what's inside once it
+has been loaded: `●` if any commit in it is new, else `◐` if any is
+updated, else the merge's own. A linear history looks the same either
+way.
+
 The log loads `--limit` commits (`[log] limit`, 200 by default). While
 more may exist, a dim `… more` row ends the log. Moving past the last row
 (`j`, `G` without a count, `C-d`, or the wheel once the `… more` row is on
@@ -294,8 +308,9 @@ file list's area: the tree on top (60%), a rule, and the log's commits
 below, so you can flip between commits without going back to the log.
 It uses the same side and width as the file list, and hides when the
 area is under 12 rows. A row is the log's marker (`●` new, `◐` updated,
-`✎` the working copy), the short ID, the session marker and the
-summary, cut at the list's edge. The rows are the log's: a filter
+`✎` the working copy), the short ID, the session marker, a merge's
+fold marker and size, and the summary, cut at the list's edge; fold
+rows are indented and marked as in the log. The rows are the log's: a filter
 narrows them, git's working-copy row is there, and a reload keeps them
 in step, so the list, `]]` / `[[` and the log agree.
 

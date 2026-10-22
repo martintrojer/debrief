@@ -136,6 +136,40 @@ impl Git {
             .find(|r| self.exists(r))
     }
 
+    /// `git log` of `revs` (each one argv element after
+    /// `--end-of-options`), newest first, narrowed to `path`;
+    /// `first_parent` walks first parents only.
+    fn log_revs(
+        &self,
+        revs: &[&str],
+        path: Option<&str>,
+        limit: usize,
+        first_parent: bool,
+    ) -> Result<Vec<CommitInfo>> {
+        let limit = limit.to_string();
+        let spec = path.map(pathspec);
+        let mut args = vec![
+            "log",
+            "-z",
+            "--no-color",
+            "--format=%H%x1f%an%x1f%at%x1f%s%x1f%P",
+            "-n",
+            &limit,
+        ];
+        if first_parent {
+            args.push("--first-parent");
+        }
+        args.push("--end-of-options");
+        args.extend_from_slice(revs);
+        args.push("--");
+        args.extend(spec.as_deref());
+        let out = self.git(&args)?;
+        out.split('\0')
+            .filter(|r| !r.trim().is_empty())
+            .map(parse_record)
+            .collect()
+    }
+
     /// Untracked, non-ignored paths (repo-relative).
     fn untracked(&self) -> Result<Vec<String>> {
         let out = self.git(&["ls-files", "-z", "--others", "--exclude-standard", "--"])?;
@@ -273,7 +307,7 @@ impl Vcs for Git {
     }
 
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {
-        self.log_in(revset, None, limit)
+        self.log_in(revset, None, limit, false)
     }
 
     fn log_in(
@@ -281,32 +315,53 @@ impl Vcs for Git {
         revset: Option<&str>,
         path: Option<&str>,
         limit: usize,
+        spine: bool,
     ) -> Result<Vec<CommitInfo>> {
         // Before the first commit the default log is empty; a named
         // revision still has to exist.
         if revset.is_none() && self.head().is_none() {
             return Ok(Vec::new());
         }
-        let limit = limit.to_string();
-        let rev = revset.unwrap_or("HEAD");
-        let spec = path.map(pathspec);
-        let mut args = vec![
-            "log",
-            "-z",
-            "--no-color",
-            "--format=%H%x1f%an%x1f%at%x1f%s%x1f%P",
-            "-n",
-            &limit,
+        self.log_revs(&[revset.unwrap_or("HEAD")], path, limit, spine)
+    }
+
+    fn fold(
+        &self,
+        merge: &str,
+        parent: &str,
+        path: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
+        // `^x`, not `--not x`: after --end-of-options that is a revision.
+        let base = format!("^{merge}^1");
+        self.log_revs(&[parent, &base], path, limit, true)
+    }
+
+    fn merge_size(&self, merge: &str) -> Result<usize> {
+        let base = format!("^{merge}^1");
+        let out = self.git(&[
+            "rev-list",
+            "--count",
             "--end-of-options",
-            rev,
+            merge,
+            &base,
             "--",
-        ];
-        args.extend(spec.as_deref());
-        let out = self.git(&args)?;
-        out.split('\0')
-            .filter(|r| !r.trim().is_empty())
-            .map(parse_record)
-            .collect()
+        ])?;
+        let n: usize = out
+            .trim()
+            .parse()
+            .with_context(|| format!("bad rev-list count: {out:?}"))?;
+        // The count includes the merge.
+        Ok(n.saturating_sub(1))
+    }
+
+    fn bubble(&self, merge: &str, limit: usize) -> Result<Vec<CommitInfo>> {
+        let id = self.resolve(merge)?;
+        let base = format!("^{id}^1");
+        let mut log = self.log_revs(&[&id, &base], None, limit.saturating_add(1), false)?;
+        log.retain(|c| c.commit != id);
+        log.truncate(limit);
+        Ok(log)
     }
 
     fn branches(&self) -> Result<Vec<String>> {

@@ -462,8 +462,9 @@ impl vcs::Vcs for BranchReads {
         revset: Option<&str>,
         path: Option<&str>,
         limit: usize,
+        spine: bool,
     ) -> anyhow::Result<Vec<vcs::CommitInfo>> {
-        self.inner.log_in(revset, path, limit)
+        self.inner.log_in(revset, path, limit, spine)
     }
     fn branches(&self) -> anyhow::Result<Vec<String>> {
         self.inner.branches()

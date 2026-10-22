@@ -177,6 +177,71 @@ impl Jj {
         run("jj", argv)
     }
 
+    /// The commit IDs `revset` lists, newest first, at most `limit`.
+    fn ids(&self, at_op: &str, revset: &str, limit: Option<usize>) -> Result<Vec<String>> {
+        let rev = format!("--revisions={revset}");
+        let n = limit.map(|n| n.to_string());
+        let mut args = vec!["log", "--no-graph", &rev, "-T", r#"commit_id ++ "\n""#];
+        if let Some(n) = &n {
+            args.extend(["-n", n]);
+        }
+        let out = self.jj(at_op, &args)?;
+        Ok(out
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// The first-parent chain `s` (newest first), narrowed to `path` as
+    /// git's `--first-parent -- <path>` narrows it: a commit touching the
+    /// path, and a merge whose bubble does. jj's `files()` matches a merge
+    /// on its diff against the auto-merge of its parents (empty for a
+    /// clean merge), so each merge's bubble is checked on its own:
+    /// `m & ((::m ~ ::first_parent(m)) & files(P))::` is `m` exactly when
+    /// the bubble touches `P`. At most three jj calls a page, plus one per
+    /// [`MERGE_BATCH`] merges.
+    fn spine_log(
+        &self,
+        at_op: &str,
+        s: &str,
+        path: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
+        let n = limit.to_string();
+        let log = |revset: &str| -> Result<Vec<CommitInfo>> {
+            let rev = format!("--revisions={revset}");
+            parse_log(&self.jj(
+                at_op,
+                &["log", "--no-graph", "-n", &n, "-T", LOG_TEMPLATE, &rev],
+            )?)
+        };
+        let Some(p) = path else {
+            return log(s);
+        };
+        let files = format!("files({})", fileset(p));
+        let direct = self.ids(at_op, &format!("({s}) & {files}"), Some(limit))?;
+        // Merges older than a full page of direct hits can't make the page.
+        let merges = match direct.get(limit.saturating_sub(1)) {
+            Some(last) if direct.len() == limit => format!("({s}) & merges() & {last}::"),
+            _ => format!("({s}) & merges()"),
+        };
+        let merges = self.ids(at_op, &merges, None)?;
+        let mut touched = Vec::new();
+        for batch in merges.chunks(MERGE_BATCH) {
+            let union = batch
+                .iter()
+                .map(|m| format!("({m} & (({}) & {files})::)", bubble_of(m)))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            touched.extend(self.ids(at_op, &union, None)?);
+        }
+        if touched.is_empty() {
+            return log(&format!("({s}) & {files}"));
+        }
+        log(&format!("({s}) & ({files} | {})", touched.join(" | ")))
+    }
+
     /// Resolve a commit ID (or change ID) to exactly one full commit ID.
     fn resolve(&self, at_op: &str, id: &str) -> Result<String> {
         if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
@@ -248,28 +313,63 @@ impl Vcs for Jj {
     }
 
     fn log(&self, revset: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {
-        self.log_in(revset, None, limit)
+        self.log_in(revset, None, limit, false)
     }
 
+    /// `spine`: the revset `R` (default `::@`) narrowed to the first
+    /// ancestors of its one head `h`, `first_ancestors(h) & (R)`. When
+    /// `R` has several heads (`trunk()..(b | @)` with `@` off `b`, say)
+    /// there is no single spine and `R` is listed flat.
     fn log_in(
         &self,
         revset: Option<&str>,
         path: Option<&str>,
         limit: usize,
+        spine: bool,
     ) -> Result<Vec<CommitInfo>> {
-        let limit = limit.to_string();
+        let op = self.at_op()?;
+        let r = revset.unwrap_or("::@");
+        if spine {
+            let heads = self.ids(&op, &format!("heads({r})"), Some(2))?;
+            if let [h] = &heads[..] {
+                let s = format!("first_ancestors({h}) & ({r})");
+                return self.spine_log(&op, &s, path, limit);
+            }
+        }
         // One argv element, so the revset can never be read as a flag.
-        let rev = format!("--revisions={}", revset.unwrap_or("::@"));
+        let rev = format!("--revisions={r}");
         let fileset = path.map(fileset);
+        let limit = limit.to_string();
         let mut args = vec!["log", "--no-graph", "-n", &limit, "-T", LOG_TEMPLATE, &rev];
         if let Some(f) = &fileset {
             args.extend(["--", f]);
         }
-        let out = self.jj(&self.at_op()?, &args)?;
-        out.split('\x1e')
-            .filter(|r| !r.trim().is_empty())
-            .map(parse_record)
-            .collect()
+        parse_log(&self.jj(&op, &args)?)
+    }
+
+    fn fold(
+        &self,
+        merge: &str,
+        parent: &str,
+        path: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
+        let (merge, parent) = (symbol(merge)?, symbol(parent)?);
+        let s = format!("first_ancestors({parent}) ~ ::first_parent({merge})");
+        self.spine_log(&self.at_op()?, &s, path, limit)
+    }
+
+    fn merge_size(&self, merge: &str) -> Result<usize> {
+        let rev = format!("--revisions={}", bubble_of(symbol(merge)?));
+        let out = self.jj(&self.at_op()?, &["log", "--no-graph", &rev, "-T", r#""x""#])?;
+        Ok(out.len())
+    }
+
+    fn bubble(&self, merge: &str, limit: usize) -> Result<Vec<CommitInfo>> {
+        let rev = format!("--revisions={}", bubble_of(symbol(merge)?));
+        let limit = limit.to_string();
+        let args = ["log", "--no-graph", "-n", &limit, "-T", LOG_TEMPLATE, &rev];
+        parse_log(&self.jj(&self.at_op()?, &args)?)
     }
 
     fn branches(&self) -> Result<Vec<String>> {
@@ -391,6 +491,32 @@ impl Vcs for Jj {
             files: file_stats(&parse_unified(&patch)),
         })
     }
+}
+
+/// `id` (a commit or change ID) as a revset symbol, refusing anything
+/// else so it can't be read as an operator or a flag.
+fn symbol(id: &str) -> Result<&str> {
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        bail!("not a commit ID: {id:?}");
+    }
+    Ok(id)
+}
+
+/// The commits merge `m` brought in, nested bubbles included, `m`
+/// excluded.
+fn bubble_of(m: &str) -> String {
+    format!("::{m} ~ ::first_parent({m}) ~ {m}")
+}
+
+/// Spine merges per revset in [`Jj::spine_log`]'s bubble query, so the
+/// argument stays a sane size.
+const MERGE_BATCH: usize = 100;
+
+fn parse_log(out: &str) -> Result<Vec<CommitInfo>> {
+    out.split('\x1e')
+        .filter(|r| !r.trim().is_empty())
+        .map(parse_record)
+        .collect()
 }
 
 /// [`STAT_TEMPLATE`]'s output: author, email, time, then the description.

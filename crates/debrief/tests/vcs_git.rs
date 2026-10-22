@@ -3,8 +3,9 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::{
-    assert_same, commit, git, git_branch_repo, git_dir_snapshot, git_repo, rm, sh, snapshot,
-    summaries_of, w,
+    assert_same, bubbles_by_summary, bubbles_repo, check_bubbles_groups, check_bubbles_path,
+    check_bubbles_sizes, check_bubbles_spine, commit, git, git_branch_repo, git_dir_snapshot,
+    git_repo, rm, sh, snapshot, summaries_of, w,
 };
 use debrief::vcs::{self, Context, Kind, LineKind};
 
@@ -300,7 +301,58 @@ fn option_like_revisions_are_rejected() {
     let flag = format!("--output={}", out.display());
     assert!(v.log(Some(&flag), 10).is_err());
     assert!(v.show(&flag, Context::Default).is_err());
+    assert!(v.log_in(Some(&flag), None, 10, true).is_err());
+    assert!(v.fold(&flag, "HEAD", None, 10).is_err());
+    assert!(v.fold("HEAD", &flag, None, 10).is_err());
+    assert!(v.merge_size(&flag).is_err());
+    assert!(v.bubble(&flag, 10).is_err());
     assert!(!out.exists());
+}
+
+/// [`bubbles_repo`], opened.
+fn bubbles() -> (tempfile::TempDir, Box<dyn vcs::Vcs>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    bubbles_repo(&root);
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    (tmp, v)
+}
+
+#[test]
+fn spine_lists_first_parents() {
+    let (_t, v) = bubbles();
+    check_bubbles_spine(&*v, None, &[]);
+    check_bubbles_spine(&*v, Some("main"), &[]);
+}
+
+#[test]
+fn fold_lists_each_group_of_a_merge() {
+    let (_t, v) = bubbles();
+    check_bubbles_groups(&*v, &bubbles_by_summary(&*v, "HEAD"));
+}
+
+#[test]
+fn merge_size_and_bubble_count_nested_commits() {
+    let (_t, v) = bubbles();
+    check_bubbles_sizes(&*v, &bubbles_by_summary(&*v, "HEAD"));
+}
+
+#[test]
+fn spine_with_a_path_lists_merges_whose_bubble_touched_it() {
+    let (_t, v) = bubbles();
+    check_bubbles_path(&*v, None, &bubbles_by_summary(&*v, "HEAD"));
+}
+
+#[test]
+fn linear_history_is_the_same_spine_or_not() {
+    let (_t, root) = repo();
+    let v = vcs::open(&root, vcs::OpenOptions::default()).unwrap();
+    let flat = v.log_in(None, None, 10, false).unwrap();
+    assert_eq!(flat.len(), 3);
+    assert_eq!(v.log_in(None, None, 10, true).unwrap(), flat);
+    let a = v.log_in(None, Some("a.txt"), 10, false).unwrap();
+    assert_eq!(v.log_in(None, Some("a.txt"), 10, true).unwrap(), a);
+    assert_eq!(v.merge_size(&flat[0].commit).unwrap(), 0);
 }
 
 #[test]

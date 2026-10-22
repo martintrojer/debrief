@@ -149,7 +149,7 @@ fn spawn_page(
 ) {
     std::thread::spawn(move || {
         let result = crate::vcs::reopen(&root, opts, pin)
-            .and_then(|v| v.log_in(revset.as_deref(), path.as_deref(), limit))
+            .and_then(|v| v.log_in(revset.as_deref(), path.as_deref(), limit, false))
             .map_err(|e| format!("{e:#}"));
         let _ = tx.send(AppEvent::LogPage { request, result });
     });
@@ -185,9 +185,12 @@ impl App {
     /// the working copy.
     pub(super) fn load_refreshed(&mut self) -> anyhow::Result<Vec<CommitInfo>> {
         let limit = self.page.limit;
-        let commits = self
-            .vcs
-            .log_in(self.query.as_deref(), self.opts.path.as_deref(), limit)?;
+        let commits = self.vcs.log_in(
+            self.query.as_deref(),
+            self.opts.path.as_deref(),
+            limit,
+            false,
+        )?;
         let commits = self.trim(commits, limit);
         match self.vcs.kind() {
             Kind::Git if self.on_checked_out() => self.load_working(),
@@ -280,7 +283,12 @@ impl App {
             None => {
                 let result = self
                     .vcs
-                    .log_in(self.query.as_deref(), self.opts.path.as_deref(), limit)
+                    .log_in(
+                        self.query.as_deref(),
+                        self.opts.path.as_deref(),
+                        limit,
+                        false,
+                    )
                     .map_err(|e| format!("{e:#}"));
                 self.page_loaded(request, result);
             }

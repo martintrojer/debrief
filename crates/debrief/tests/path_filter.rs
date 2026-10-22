@@ -68,7 +68,7 @@ fn screen(app: &mut App, w: u16, h: u16) -> Vec<String> {
 fn git_log_in_a_file_a_directory_and_odd_names() {
     let (_t, root) = repo();
     let v = vcs::open(&root, OpenOptions::default()).unwrap();
-    let log = |p| v.log_in(None, Some(p), 10).unwrap();
+    let log = |p| v.log_in(None, Some(p), 10, false).unwrap();
     assert_eq!(summaries(&log("a/x.txt")), ["m3", "m0"]);
     assert_eq!(summaries(&log("a")), ["m4", "m3", "m2", "m0"]);
     assert_eq!(summaries(&log("a/sub")), ["m2"]);
@@ -78,7 +78,7 @@ fn git_log_in_a_file_a_directory_and_odd_names() {
     assert!(log("nope").is_empty());
     // The limit counts matching commits.
     assert_eq!(
-        summaries(&v.log_in(None, Some("a"), 2).unwrap()),
+        summaries(&v.log_in(None, Some("a"), 2, false).unwrap()),
         ["m4", "m3"]
     );
     // Deleted files keep their history.
@@ -117,19 +117,21 @@ fn jj_log_in_a_file_and_a_directory() {
     e.write("a/q\"y.txt", "2\n");
     e.jj(&["--quiet", "commit", "-m", "m2"]);
     let v = vcs::open(&e.root, OpenOptions { snapshot: false }).unwrap();
-    let log = |p| v.log_in(Some("::@ ~ root()"), Some(p), 10).unwrap();
+    let log = |p| v.log_in(Some("::@ ~ root()"), Some(p), 10, false).unwrap();
     assert_eq!(summaries(&log("a")), ["m2", "m0"]);
     assert_eq!(summaries(&log("b.txt")), ["m1"]);
     assert_eq!(summaries(&log("a/q\"y.txt")), ["m2"]);
     assert!(log("nope").is_empty());
     // The limit counts matching commits.
-    let one = v.log_in(Some("::@ ~ root()"), Some("a"), 1).unwrap();
+    let one = v.log_in(Some("::@ ~ root()"), Some("a"), 1, false).unwrap();
     assert_eq!(summaries(&one), ["m2"]);
     // Deleted files keep their history.
     std::fs::remove_file(e.root.join("b.txt")).unwrap();
     e.jj(&["--quiet", "commit", "-m", "rm b"]);
     let v = vcs::open(&e.root, OpenOptions { snapshot: false }).unwrap();
-    let log = v.log_in(Some("::@ ~ root()"), Some("b.txt"), 10).unwrap();
+    let log = v
+        .log_in(Some("::@ ~ root()"), Some("b.txt"), 10, false)
+        .unwrap();
     assert_eq!(summaries(&log), ["rm b", "m1"]);
 }
 

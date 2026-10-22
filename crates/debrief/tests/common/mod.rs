@@ -166,14 +166,28 @@ pub fn rm(path: &str) -> Change {
 pub fn git_repo(root: &Path, commits: &[(&str, Vec<Change>)]) {
     std::fs::create_dir_all(root).unwrap();
     git(root, &["init", "-q", "-b", "main"]);
-    fast_import(root, &import_stream(commits, "refs/heads/main", &[]), &[]);
+    let stream = import_stream(&chain(commits), "refs/heads/main", &[]);
+    fast_import(root, &stream, &[]);
     // Unlike `reset --hard`, writes no ORIG_HEAD or reflog entry.
     git(root, &["read-tree", "-u", "--reset", "HEAD"]);
 }
 
+/// One commit of a fast-import stream: message, parents (commit numbers
+/// from 1; none: the previous commit on the ref), changes.
+type Node<'a> = (&'a str, &'a [usize], &'a [Change]);
+
+/// `commits` as [`Node`]s on one line.
+fn chain<'a>(commits: &'a [(&'a str, Vec<Change>)]) -> Vec<Node<'a>> {
+    commits
+        .iter()
+        .map(|(m, c)| (*m, &[][..], c.as_slice()))
+        .collect()
+}
+
 /// A fast-import stream of `commits` (as in [`git_repo`]) on `tip`,
-/// marked `:1` up, then each of `refs` (ref, commit number from 1).
-fn import_stream(commits: &[(&str, Vec<Change>)], tip: &str, refs: &[(String, usize)]) -> Vec<u8> {
+/// marked `:1` up, then each of `refs` (ref, commit number from 1). A
+/// commit naming parents starts from the first and merges the rest.
+fn import_stream(commits: &[Node], tip: &str, refs: &[(String, usize)]) -> Vec<u8> {
     use std::io::Write;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -181,7 +195,7 @@ fn import_stream(commits: &[(&str, Vec<Change>)], tip: &str, refs: &[(String, us
         .as_secs();
     let base = now - commits.len() as u64;
     let mut s = Vec::new();
-    for (i, (msg, changes)) in commits.iter().enumerate() {
+    for (i, (msg, parents, changes)) in commits.iter().enumerate() {
         let mut msg = msg.to_string();
         if !msg.ends_with('\n') {
             msg.push('\n');
@@ -194,7 +208,13 @@ fn import_stream(commits: &[(&str, Vec<Change>)], tip: &str, refs: &[(String, us
             msg.len()
         )
         .unwrap();
-        for c in changes {
+        if let Some((first, rest)) = parents.split_first() {
+            writeln!(s, "from :{first}").unwrap();
+            for m in rest {
+                writeln!(s, "merge :{m}").unwrap();
+            }
+        }
+        for c in changes.iter() {
             match c {
                 Change::Write(p, data) => {
                     writeln!(s, "M 100644 inline {}\ndata {}", quote(p), data.len()).unwrap();
@@ -210,6 +230,103 @@ fn import_stream(commits: &[(&str, Vec<Change>)], tip: &str, refs: &[(String, us
         write!(s, "reset {r}\nfrom :{n}\n\n").unwrap();
     }
     s
+}
+
+/// [`bubbles_repo`]'s first-parent spine, newest first. The octopus is
+/// the tip, so a fresh log's first row is a merge.
+pub const BUBBLES_SPINE: &[&str] = &[
+    "Octopus x y z",
+    "Merge n",
+    "m1",
+    "Merge b",
+    "Merge a",
+    "base",
+];
+
+/// [`bubbles_repo`]'s merges (by summary) and their fold groups, one per
+/// non-first parent in parent order, each newest first. `Merge s` is the
+/// merge nested in `Merge n`'s bubble.
+pub const BUBBLES_GROUPS: &[(&str, &[&[&str]])] = &[
+    ("Octopus x y z", &[&["x1"], &["y1"], &["z1"]]),
+    ("Merge n", &[&["Merge s", "n2", "n1"]]),
+    ("Merge s", &[&["s1"]]),
+    ("Merge b", &[&["b2", "b1"]]),
+    ("Merge a", &[&["a2", "a1"]]),
+];
+
+/// [`bubbles_repo`]'s merges (by summary) and the paths their bubble's
+/// commits touch, sorted.
+pub const BUBBLES_FILES: &[(&str, &[&str])] = &[
+    ("Octopus x y z", &["x.txt", "y.txt", "z.txt"]),
+    ("Merge n", &["n/1.txt", "n/2.txt", "n/s1.txt"]),
+    ("Merge s", &["n/s1.txt"]),
+    ("Merge b", &["b/1.txt", "b/2.txt", "notes.txt"]),
+    ("Merge a", &["a/1.txt", "a/2.txt", "notes.txt"]),
+];
+
+/// The path two separate bubbles (`Merge a`'s, `Merge b`'s) and one
+/// direct spine commit (`m1`) touch.
+pub const BUBBLES_SHARED: &str = "notes.txt";
+
+/// A git repo at `root` (created if missing) on `main`, checked out
+/// clean: `base`; bubbles `a1 a2` and `b1 b2` merged in turn (`Merge a`,
+/// `Merge b`); `m1` on the spine; a nested bubble `n1 n2` that merged
+/// its own sub-branch `s1` (`Merge s`) before landing (`Merge n`); then
+/// an octopus of `x1`, `y1`, `z1` at the tip. Summaries are unique; IDs
+/// vary (dates follow the clock). See [`BUBBLES_SPINE`],
+/// [`BUBBLES_GROUPS`], [`BUBBLES_FILES`].
+pub fn bubbles_repo(root: &Path) {
+    let c = |p: &str, d: &str| vec![w(p, d)];
+    let n = BUBBLES_SHARED;
+    // A merge commit writes its bubble's files itself: fast-import starts
+    // its tree from the first parent's.
+    let commits: Vec<(&str, Vec<usize>, Vec<Change>)> = vec![
+        ("base", vec![], c("base.txt", "base\n")), // 1
+        ("a1", vec![1], c("a/1.txt", "a1\n")),     // 2
+        ("a2", vec![2], vec![w("a/2.txt", "a2\n"), w(n, "a\n")]), // 3
+        (
+            "Merge a",
+            vec![1, 3],
+            vec![w("a/1.txt", "a1\n"), w("a/2.txt", "a2\n"), w(n, "a\n")],
+        ), // 4
+        ("b1", vec![4], vec![w("b/1.txt", "b1\n"), w(n, "a\nb\n")]), // 5
+        ("b2", vec![5], c("b/2.txt", "b2\n")),     // 6
+        (
+            "Merge b",
+            vec![4, 6],
+            vec![w("b/1.txt", "b1\n"), w("b/2.txt", "b2\n"), w(n, "a\nb\n")],
+        ), // 7
+        ("m1", vec![7], c(n, "a\nb\nm\n")),        // 8
+        ("n1", vec![8], c("n/1.txt", "n1\n")),     // 9
+        ("s1", vec![9], c("n/s1.txt", "s1\n")),    // 10
+        ("n2", vec![9], c("n/2.txt", "n2\n")),     // 11
+        ("Merge s", vec![11, 10], c("n/s1.txt", "s1\n")), // 12
+        (
+            "Merge n",
+            vec![8, 12],
+            vec![
+                w("n/1.txt", "n1\n"),
+                w("n/2.txt", "n2\n"),
+                w("n/s1.txt", "s1\n"),
+            ],
+        ), // 13
+        ("x1", vec![13], c("x.txt", "x\n")),       // 14
+        ("y1", vec![13], c("y.txt", "y\n")),       // 15
+        ("z1", vec![13], c("z.txt", "z\n")),       // 16
+        (
+            "Octopus x y z",
+            vec![13, 14, 15, 16],
+            vec![w("x.txt", "x\n"), w("y.txt", "y\n"), w("z.txt", "z\n")],
+        ), // 17
+    ];
+    let nodes: Vec<Node> = commits
+        .iter()
+        .map(|(m, p, c)| (*m, p.as_slice(), c.as_slice()))
+        .collect();
+    std::fs::create_dir_all(root).unwrap();
+    git(root, &["init", "-q", "-b", "main"]);
+    fast_import(root, &import_stream(&nodes, "refs/heads/main", &[]), &[]);
+    git(root, &["read-tree", "-u", "--reset", "HEAD"]);
 }
 
 /// Feed `stream` to `git fast-import` in `dir`.
@@ -308,7 +425,7 @@ impl JjEnv {
             .iter()
             .map(|(b, n)| (format!("refs/heads/{b}"), *n))
             .collect();
-        let mut stream = import_stream(commits, tip, &refs);
+        let mut stream = import_stream(&chain(commits), tip, &refs);
         stream.extend_from_slice(format!("reset {tip}\n\n").as_bytes());
         let marks = dir.join("marks");
         let marks_arg = format!("--export-marks={}", marks.display());
@@ -319,6 +436,23 @@ impl JjEnv {
             .find_map(|l| l.strip_prefix(&format!(":{at} ")))
             .unwrap();
         std::fs::write(git_dir.join("HEAD"), format!("{head}\n")).unwrap();
+        env.jj(&[
+            "--quiet",
+            "git",
+            "init",
+            "--git-repo",
+            git_dir.to_str().unwrap(),
+        ]);
+        env.finish()
+    }
+
+    /// A non-colocated repo over the git repo `build` makes in the
+    /// directory it is given (beside the root), with jj's new empty `@`
+    /// on the git `HEAD`: one `jj git init --git-repo`.
+    pub fn over_git(build: impl FnOnce(&Path)) -> Self {
+        let env = Self::unborn();
+        let git_dir = env._tmp.path().join("git");
+        build(&git_dir);
         env.jj(&[
             "--quiet",
             "git",
@@ -413,4 +547,133 @@ pub fn summaries_of(v: &dyn vcs::Vcs, revset: &str) -> Vec<String> {
         .into_iter()
         .map(|c| c.summary)
         .collect()
+}
+
+/// Summaries, in order.
+pub fn summaries(log: &[vcs::CommitInfo]) -> Vec<&str> {
+    log.iter().map(|c| c.summary.as_str()).collect()
+}
+
+/// [`bubbles_repo`] as `v` reads it: every commit, by summary.
+pub fn bubbles_by_summary(v: &dyn vcs::Vcs, revset: &str) -> BTreeMap<String, vcs::CommitInfo> {
+    v.log(Some(revset), 200)
+        .unwrap()
+        .into_iter()
+        .map(|c| (c.summary.clone(), c))
+        .collect()
+}
+
+/// `v`'s spine of `revset` is [`BUBBLES_SPINE`] (after `extra`, rows a
+/// backend adds on top), and listing it with a limit cuts it.
+pub fn check_bubbles_spine(v: &dyn vcs::Vcs, revset: Option<&str>, extra: &[&str]) {
+    let want: Vec<&str> = extra.iter().chain(BUBBLES_SPINE).copied().collect();
+    let log = v.log_in(revset, None, 200, true).unwrap();
+    assert_eq!(summaries(&log), want);
+    let two = v.log_in(revset, None, 2, true).unwrap();
+    assert_eq!(summaries(&two), want[..2]);
+    // Off, the side commits are listed too.
+    let flat = v.log_in(revset, None, 200, false).unwrap();
+    assert_eq!(flat.len(), want.len() + 11, "{:?}", summaries(&flat));
+}
+
+/// Every merge's fold groups are [`BUBBLES_GROUPS`]: one per non-first
+/// parent, a nested merge a row of its own, not flattened.
+pub fn check_bubbles_groups(v: &dyn vcs::Vcs, all: &BTreeMap<String, vcs::CommitInfo>) {
+    for (merge, groups) in BUBBLES_GROUPS {
+        let m = &all[*merge];
+        assert_eq!(m.parents.len(), groups.len() + 1, "{merge}");
+        for (parent, want) in m.parents[1..].iter().zip(groups.iter()) {
+            let got = v.fold(&m.commit, parent, None, 200).unwrap();
+            assert_eq!(summaries(&got), *want, "{merge}");
+        }
+    }
+    let n = &all["Merge n"];
+    let one = v.fold(&n.commit, &n.parents[1], None, 1).unwrap();
+    assert_eq!(summaries(&one), ["Merge s"]);
+}
+
+/// Every merge's size and bubble: the commits it brought in, nested
+/// included, the merge excluded; the bubble touches [`BUBBLES_FILES`].
+pub fn check_bubbles_sizes(v: &dyn vcs::Vcs, all: &BTreeMap<String, vcs::CommitInfo>) {
+    let sizes = [
+        ("Octopus x y z", 3),
+        ("Merge n", 4),
+        ("Merge s", 1),
+        ("Merge b", 2),
+        ("Merge a", 2),
+    ];
+    for (merge, size) in sizes {
+        let id = &all[merge].commit;
+        assert_eq!(v.merge_size(id).unwrap(), size, "{merge}");
+        let bubble = v.bubble(id, 200).unwrap();
+        assert_eq!(bubble.len(), size, "{merge}: {:?}", summaries(&bubble));
+        assert!(bubble.iter().all(|c| &c.commit != id), "{merge}");
+        let mut got = summaries(&bubble);
+        got.sort();
+        let mut want = flatten(merge);
+        want.sort();
+        assert_eq!(got, want, "{merge}");
+    }
+    let n = &all["Merge n"].commit;
+    assert_eq!(v.bubble(n, 2).unwrap().len(), 2);
+    // A merge's file list is what its bubble's own diffs touch.
+    for (merge, files) in BUBBLES_FILES {
+        let id = &all[*merge].commit;
+        let mut got: Vec<String> = v
+            .bubble(id, 200)
+            .unwrap()
+            .iter()
+            .filter(|c| c.parents.len() == 1)
+            .flat_map(|c| v.stat(&c.commit).unwrap().files)
+            .map(|f| f.path)
+            .collect();
+        got.sort();
+        got.dedup();
+        assert_eq!(got, *files, "{merge}");
+    }
+}
+
+/// The summaries `merge`'s bubble holds, from [`BUBBLES_GROUPS`].
+fn flatten(merge: &str) -> Vec<&'static str> {
+    let groups = BUBBLES_GROUPS.iter().find(|(m, _)| *m == merge).unwrap().1;
+    let mut out = Vec::new();
+    for s in groups.iter().flat_map(|g| g.iter()) {
+        out.push(*s);
+        if BUBBLES_GROUPS.iter().any(|(m, _)| m == s) {
+            out.extend(flatten(s));
+        }
+    }
+    out
+}
+
+/// Spine + path lists a spine merge whose bubble touched the path, as
+/// git's `--first-parent -- <path>` does, and a fold narrows the same.
+pub fn check_bubbles_path(
+    v: &dyn vcs::Vcs,
+    revset: Option<&str>,
+    all: &BTreeMap<String, vcs::CommitInfo>,
+) {
+    let shared = v.log_in(revset, Some(BUBBLES_SHARED), 200, true).unwrap();
+    assert_eq!(summaries(&shared), ["m1", "Merge b", "Merge a"]);
+    let page = v.log_in(revset, Some(BUBBLES_SHARED), 2, true).unwrap();
+    assert_eq!(summaries(&page), ["m1", "Merge b"]);
+    // Through a nested bubble, and a directory.
+    for (path, want) in [
+        ("n/s1.txt", &["Merge n"][..]),
+        ("n", &["Merge n"]),
+        ("y.txt", &["Octopus x y z"]),
+    ] {
+        let log = v.log_in(revset, Some(path), 200, true).unwrap();
+        assert_eq!(summaries(&log), want, "{path}");
+    }
+    let a = &all["Merge a"];
+    let fold = v
+        .fold(&a.commit, &a.parents[1], Some(BUBBLES_SHARED), 200)
+        .unwrap();
+    assert_eq!(summaries(&fold), ["a2"]);
+    let n = &all["Merge n"];
+    let fold = v
+        .fold(&n.commit, &n.parents[1], Some("n/s1.txt"), 200)
+        .unwrap();
+    assert_eq!(summaries(&fold), ["Merge s"]);
 }

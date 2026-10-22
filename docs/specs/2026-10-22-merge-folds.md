@@ -45,7 +45,13 @@ view. The user rebases their own work but reads repos that merge.
 - **Path filter:** git `--first-parent -- <path>` lists the merges whose
   first-parent diff touches the path, not the side commits. That composes
   with folds (the merge stands for its bubble) as long as a fold's contents
-  are fetched with the same path filter (below).
+  are fetched with the same path filter (below). jj lists the same
+  commits: its `files()` matches a merge on its diff against the
+  auto-merge (empty for a clean merge), so the spine is
+  `first_ancestors(h) & (R) & files(P)` plus every spine merge `m` whose
+  bubble touches the path (`(::m ~ ::first_parent(m)) & files(P)` not
+  empty), checked per merge in batched revset unions. `h` is the one head
+  of `R`; a revset with several heads is listed flat.
 
 ### A merge row
 

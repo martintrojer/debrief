@@ -292,16 +292,48 @@ pub trait Vcs {
     /// [`Vcs::log`] narrowed to the commits touching `path` (repo-relative,
     /// `/`-separated: a file, or everything under a directory). Renames
     /// are not followed. A backend without path support refuses a path.
+    ///
+    /// `spine`: only the first-parent spine of what it lists (a merge
+    /// stands for its bubble; see [`Vcs::fold`]). With a path, a spine
+    /// merge is listed when its first-parent diff touches the path, as
+    /// git's `--first-parent -- <path>` does. A backend without merges
+    /// ignores it.
     fn log_in(
         &self,
         revset: Option<&str>,
         path: Option<&str>,
         limit: usize,
+        _spine: bool,
     ) -> Result<Vec<CommitInfo>> {
         match path {
             None => self.log(revset, limit),
             Some(p) => bail!("cannot filter the log by path: {p}"),
         }
+    }
+    /// One group of merge `merge`'s fold: its parent `parent`'s own
+    /// first-parent spine, down to where it meets `merge`'s first parent,
+    /// newest first, narrowed to `path` as [`Vcs::log_in`] narrows the
+    /// spine. IDs as returned by `log`. A backend without merges lists
+    /// none.
+    fn fold(
+        &self,
+        _merge: &str,
+        _parent: &str,
+        _path: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<CommitInfo>> {
+        Ok(Vec::new())
+    }
+    /// How many commits `merge` brought in (`p1..merge`), nested bubbles
+    /// included, the merge itself excluded. A backend without merges: 0.
+    fn merge_size(&self, _merge: &str) -> Result<usize> {
+        Ok(0)
+    }
+    /// Every commit `merge` brought in, as [`Vcs::merge_size`] counts
+    /// them, newest first, at most `limit`, no path filter. A backend
+    /// without merges lists none.
+    fn bubble(&self, _merge: &str, _limit: usize) -> Result<Vec<CommitInfo>> {
+        Ok(Vec::new())
     }
     /// git: [`Vcs::working_status`], `None` unless something under `path`
     /// (when given) is changed or untracked; the count is still the whole

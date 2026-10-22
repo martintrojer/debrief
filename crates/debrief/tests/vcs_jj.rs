@@ -1,6 +1,10 @@
 mod common;
 
-use common::{JjEnv as Env, assert_same, have_jj, rm, snapshot, summaries_of, w};
+use common::{
+    JjEnv as Env, assert_same, bubbles_by_summary, bubbles_repo, check_bubbles_groups,
+    check_bubbles_path, check_bubbles_sizes, check_bubbles_spine, have_jj, rm, snapshot,
+    summaries_of, w,
+};
 use debrief::vcs::{self, Context, Kind, LineKind, OpenOptions};
 
 /// The strict read-only tests open without snapshots.
@@ -253,7 +257,95 @@ fn option_like_revsets_are_rejected() {
         v.show("@-", Context::Default).is_err(),
         "show takes IDs, not revsets"
     );
+    assert!(v.log_in(Some(&flag), None, 10, true).is_err());
+    assert!(v.fold(&flag, "zzzzzzzz", None, 10).is_err());
+    assert!(
+        v.fold("zzzzzzzz", "@-", None, 10).is_err(),
+        "fold takes IDs"
+    );
+    assert!(v.merge_size(&flag).is_err());
+    assert!(v.bubble("@-", 10).is_err(), "bubble takes IDs");
     assert!(!out.exists());
+}
+
+/// [`bubbles_repo`] under jj, `@` an empty commit on the octopus.
+fn bubbles() -> (Env, Box<dyn vcs::Vcs>) {
+    let e = Env::over_git(bubbles_repo);
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    (e, v)
+}
+
+/// The fixture's history, without `@` and the root.
+const BUBBLES: &str = "::@- ~ root()";
+
+#[test]
+fn spine_lists_first_parents() {
+    if !have_jj() {
+        return;
+    }
+    let (_e, v) = bubbles();
+    check_bubbles_spine(&*v, Some(BUBBLES), &[]);
+    // The default `::@`: `@` on top, jj's root commit below.
+    let all = v.log_in(None, None, 200, true).unwrap();
+    let got: Vec<_> = all.iter().map(|c| c.summary.as_str()).collect();
+    let mut want = vec![""];
+    want.extend(common::BUBBLES_SPINE);
+    want.push("");
+    assert_eq!(got, want);
+}
+
+#[test]
+fn spine_of_a_revset_with_several_heads_is_flat() {
+    if !have_jj() {
+        return;
+    }
+    let (_e, v) = bubbles();
+    let all = bubbles_by_summary(&*v, BUBBLES);
+    let r = format!("{} | {}", all["x1"].commit, all["y1"].commit);
+    let flat = v.log_in(Some(&r), None, 10, false).unwrap();
+    assert_eq!(flat.len(), 2);
+    assert_eq!(v.log_in(Some(&r), None, 10, true).unwrap(), flat);
+}
+
+#[test]
+fn fold_lists_each_group_of_a_merge() {
+    if !have_jj() {
+        return;
+    }
+    let (_e, v) = bubbles();
+    check_bubbles_groups(&*v, &bubbles_by_summary(&*v, BUBBLES));
+}
+
+#[test]
+fn merge_size_and_bubble_count_nested_commits() {
+    if !have_jj() {
+        return;
+    }
+    let (_e, v) = bubbles();
+    check_bubbles_sizes(&*v, &bubbles_by_summary(&*v, BUBBLES));
+}
+
+#[test]
+fn spine_with_a_path_lists_merges_whose_bubble_touched_it() {
+    if !have_jj() {
+        return;
+    }
+    let (_e, v) = bubbles();
+    check_bubbles_path(&*v, Some(BUBBLES), &bubbles_by_summary(&*v, BUBBLES));
+}
+
+#[test]
+fn linear_history_is_the_same_spine_or_not() {
+    if !have_jj() {
+        return;
+    }
+    let e = sample();
+    let v = vcs::open(&e.root, NO_SNAPSHOT).unwrap();
+    for (r, p) in [(None, None), (Some("::@ ~ root()"), Some("a.txt"))] {
+        let flat = v.log_in(r, p, 10, false).unwrap();
+        assert!(!flat.is_empty());
+        assert_eq!(v.log_in(r, p, 10, true).unwrap(), flat);
+    }
 }
 
 #[test]

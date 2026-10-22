@@ -98,9 +98,9 @@ trunk, or its whole history when it is trunk or already in it. Trunk is
 (jj: `trunk()`, else a `main` or `master` bookmark). Picking a branch
 never checks it out.
 
-A `⎇ main` row tops the log and the commit list's rule, and the status
-line shows `branch: main`; the commit view's header shows the branch
-after the short ID. Without a current branch it reads `⎇ HEAD` (jj
+A `⎇ main` row tops the log and the commit list's rule, and the log's
+status line shows `branch: main`; the commit view's header shows the
+branch after the short ID. Without a current branch it reads `⎇ HEAD` (jj
 `⎇ @`), and with `--revset` `⎇ revset: R`.
 
 `<leader>b` (on the log and the commit screen) opens the branch picker:
@@ -184,9 +184,11 @@ Uncommitted changes show in the log and take comments like any commit.
 The message, then every file's diff in one stream, with a file list on the
 left. A header row on top keeps the commit's short ID and subject in view
 while you scroll; a conventional-commit type (`feat:`, `fix(ui):`) shows
-as a coloured badge. A commit with no subject (git's working copy, a jj
-change without a description) has no header. `[view] header = false`
-hides it.
+as a coloured badge. The short ID is the one the log shows (jj: the
+change ID). The status line leaves out what the header shows: the ID, and
+the branch when it fits there. A commit with no subject (git's working
+copy, a jj change without a description) has no header, and the status
+line names it instead. `[view] header = false` hides it.
 
 Both the log and commit status lines keep the repo root at the right,
 before `g? help`, so two debriefs side by side tell apart.

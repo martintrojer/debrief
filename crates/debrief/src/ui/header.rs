@@ -1,7 +1,9 @@
 //! The commit screen's header row (`[view] header`): a conventional
 //! commit's `type(scope)` as a coloured badge and the subject, centred,
-//! and the short ID on the right. The subject is cut to fit, the row
-//! staying centred; with no room for the ID the row is blank.
+//! and the short ID (jj: the change ID, as in the log) and the branch on
+//! the right. The subject is cut to fit, the row staying centred; with no
+//! room for the ID the row is blank. The status line leaves out what the
+//! header shows ([`shows`]).
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -51,6 +53,37 @@ fn fit(s: &str, max: usize) -> String {
     out
 }
 
+/// The right of the row in `width` columns: the short ID, then the branch
+/// the log lists (dim), the branch only while the row stays centred with
+/// room for some subject.
+fn right_side(app: &App, id: &str, width: usize) -> (String, Option<String>) {
+    let branch = app
+        .branch_name()
+        .map(|b| format!(" {} {} ", super::log::BRANCH_MARKER, fit(b, 24)))
+        .filter(|b| {
+            let w = Span::raw(b.as_str()).width() + id.chars().count() + 1;
+            2 * (w + 1) + 12 <= width
+        });
+    let right = match branch {
+        Some(_) => format!(" {id}"),
+        None => format!(" {id} "),
+    };
+    (right, branch)
+}
+
+/// What a header row `width` columns wide shows: (the short ID, the
+/// branch). `None` when the commit has no header (no subject). The status
+/// line leaves out what this shows.
+pub(super) fn shows(app: &App, width: u16) -> Option<(bool, bool)> {
+    let (id, _) = app.commit_header()?;
+    let width = width as usize;
+    let (right, branch) = right_side(app, &id, width);
+    let right_w = right.chars().count() + branch.as_deref().map_or(0, |b| Span::raw(b).width());
+    // `draw` leaves the row blank when the ID does not fit.
+    let id = right_w <= width;
+    Some((id, id && branch.is_some()))
+}
+
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let pal = &app.theme().palette;
     let base = Style::new().fg(pal.text).bg(pal.bg_dark);
@@ -59,20 +92,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     };
     let width = area.width as usize;
     let text = subject.text;
-    // The short ID, then the branch the log lists, dim.
-    // Only while the row stays centred with room for some subject.
-    let branch = app
-        .branch_name()
-        .map(|b| format!(" {} {} ", super::log::BRANCH_MARKER, fit(b, 24)))
-        .filter(|b| {
-            let w = Span::raw(b.as_str()).width() + id.chars().count() + 1;
-            2 * (w + 1) + 12 <= width
-        });
-    let right = if branch.is_some() {
-        format!(" {id}")
-    } else {
-        format!(" {id} ")
-    };
+    let (right, branch) = right_side(app, &id, width);
     let branch_w = branch.as_deref().map_or(0, |b| Span::raw(b).width());
     let right_w = right.chars().count() + branch_w;
     // The badge and subject are centred on the row, kept clear of the ID.

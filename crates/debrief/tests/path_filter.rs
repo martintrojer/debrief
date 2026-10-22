@@ -304,7 +304,10 @@ fn a_commit_opens_on_the_first_file_under_the_path() {
         s.iter().any(|l| l.contains("─ ⎇ main  ⌕ b.txt ─")),
         "{s:#?}"
     );
-    assert!(s[29].contains("branch: main  path: b.txt"), "{}", s[29]);
+    // The header names the branch; the status line keeps the path.
+    assert!(s[0].contains("⎇ main"), "{}", s[0]);
+    assert!(s[29].contains("path: b.txt"), "{}", s[29]);
+    assert!(!s[29].contains("branch:"), "{}", s[29]);
 }
 
 /// Enter a path in the `F` prompt, replacing what it holds.

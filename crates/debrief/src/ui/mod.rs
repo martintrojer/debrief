@@ -36,6 +36,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     fill(frame, app, frame.area());
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+    // What the commit header shows (ID, branch); the status line skips it.
+    let mut shown = (false, false);
     match app.screen() {
         Screen::Log => {
             let l = app.log_layout(main);
@@ -51,6 +53,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             let l = app.commit_layout(main);
             if let Some(h) = l.header {
                 header::draw(frame, app, h);
+                shown = header::shows(app, h.width).unwrap_or_default();
             }
             // The diff first: an overlaid file list is drawn over it.
             commit::draw(frame, app, l.diff);
@@ -64,7 +67,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             comment_box::draw(frame, app, app.side_pane(l.diff));
         }
     }
-    status::draw(frame, app, status);
+    status::draw(frame, app, status, shown);
     clue::draw(frame, app, main);
     popup::draw(frame, app, main);
     picker::draw(frame, app, main);

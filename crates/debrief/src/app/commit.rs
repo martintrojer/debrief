@@ -1069,21 +1069,37 @@ impl App {
         self.commit.as_ref().map(|v| v.commit.as_str())
     }
 
+    /// The open commit's log row, unless it is git's working-copy row
+    /// (whose summary is made up, not a subject).
+    fn open_log_row(&self) -> Option<&super::Row> {
+        let v = self.commit.as_ref()?;
+        self.view_index(v)
+            .and_then(|i| self.rows.get(i))
+            .filter(|r| r.info.commit != super::WORKING_ID)
+    }
+
+    /// The open commit's short ID as the log shows it (jj: the change ID),
+    /// else the first 8 characters of its commit ID; `working copy` for
+    /// git's working copy.
+    pub fn commit_short_id(&self) -> Option<String> {
+        let v = self.commit.as_ref()?;
+        if v.commit == super::WORKING_ID {
+            return Some("working copy".to_string());
+        }
+        Some(match self.open_log_row() {
+            Some(r) => super::short_id(&r.info).to_string(),
+            None => v.commit.get(..8).unwrap_or(&v.commit).to_string(),
+        })
+    }
+
     /// The header row's commit: its short ID (as the log shows it) and
     /// subject, from its log row, else the first line of the loaded
     /// message. `None` with no subject (git's working copy, a jj change
     /// without a description): the header row hides.
     pub fn commit_header(&self) -> Option<(String, Subject<'_>)> {
         let v = self.commit.as_ref()?;
-        // git's working-copy row has a made-up summary, not a subject.
-        let row = self
-            .view_index(v)
-            .and_then(|i| self.rows.get(i))
-            .filter(|r| r.info.commit != super::WORKING_ID);
-        let id = match row {
-            Some(r) => super::short_id(&r.info).to_string(),
-            None => v.commit.get(..8).unwrap_or(&v.commit).to_string(),
-        };
+        let row = self.open_log_row();
+        let id = self.commit_short_id()?;
         let line = row
             .map(|r| r.info.summary.as_str())
             .filter(|s| !s.trim().is_empty())

@@ -60,7 +60,7 @@ pub(super) fn elide_right(s: &str, max: usize) -> String {
 /// first (from the right), down to what the path leaves; the path keeps
 /// at least 12 columns of the text filter's room and is cut from the
 /// left.
-fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
+fn filter_spans(app: &App, base: Style, room: usize, branch: bool) -> Vec<Span<'static>> {
     let pal = &app.theme().palette;
     const LEAD: &str = "  path: ";
     const BRANCH: &str = "  branch: ";
@@ -74,7 +74,7 @@ fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
     let fit = room
         .saturating_sub(others)
         .min(BRANCH.len() + label.width());
-    if fit > BRANCH.len() {
+    if branch && fit > BRANCH.len() {
         let b = format!("{BRANCH}{}", elide_right(&label, fit - BRANCH.len()));
         room = room.saturating_sub(b.width());
         spans.push(Span::styled(b, base.fg(pal.green)));
@@ -100,7 +100,9 @@ fn filter_spans(app: &App, base: Style, room: usize) -> Vec<Span<'static>> {
     spans
 }
 
-pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+/// `header`: what the commit screen's header row shows (ID, branch); the
+/// commit status line leaves those out.
+pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, header: (bool, bool)) {
     let pal = &app.theme().palette;
     let base = Style::new().fg(pal.text).bg(pal.bg_dark);
     // The quit prompt draws over a search or filter prompt it interrupted.
@@ -120,7 +122,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
     if let Screen::Commit(_) = app.screen() {
-        return draw_commit(frame, app, area, base);
+        return draw_commit(frame, app, area, base, header);
     }
     let kind = match app.kind() {
         Kind::Git => "git",
@@ -148,7 +150,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     // Filters and messages take priority over the repo path in the footer.
     let tail = [format!(" {kind}"), format!("  {counts}")];
     let fixed: usize = tail.iter().map(|t| t.width()).sum::<usize>() + msg.width() + right.width();
-    let filters = filter_spans(app, base, (area.width as usize).saturating_sub(fixed));
+    let filters = filter_spans(app, base, (area.width as usize).saturating_sub(fixed), true);
     let [kind, counts] = tail;
     let mut spans = vec![Span::styled(kind, base.fg(pal.muted))];
     // `branch: …` and `path: …` before the counts, the text filter after.
@@ -168,19 +170,24 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
 /// The commit screen: mode, commit ID, the log's path filter and kept
 /// text filter, loading/status message, the repo root, position.
-fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
+fn draw_commit(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    base: Style,
+    (header_id, header_branch): (bool, bool),
+) {
     let pal = &app.theme().palette;
-    let id = app.commit_id().unwrap_or("");
-    let id = if app.commit_id() == Some(crate::app::WORKING_ID) {
-        "working copy"
-    } else {
-        id.get(..8).unwrap_or(id)
-    };
     let mut spans = Vec::new();
     if app.mode() == Mode::Visual {
         spans.push(Span::styled(" V-LINE ", base.fg(pal.bg).bg(pal.purple)));
     }
-    spans.push(Span::styled(format!(" {id}"), base.fg(pal.purple)));
+    // The ID, unless the header shows it: the log row's short ID (jj: the
+    // change ID), so both screens name a commit alike.
+    if !header_id {
+        let id = app.commit_short_id().unwrap_or_default();
+        spans.push(Span::styled(format!(" {id}"), base.fg(pal.purple)));
+    }
     let preview = app.review_preview();
     let msg = if app.commit_loading() {
         "loading…"
@@ -205,6 +212,7 @@ fn draw_commit(frame: &mut Frame, app: &App, area: Rect, base: Style) {
         app,
         base,
         (area.width as usize).saturating_sub(used),
+        !header_branch,
     ));
     if !msg.is_empty() {
         spans.push(Span::styled(format!("  {msg}"), base.fg(pal.yellow)));

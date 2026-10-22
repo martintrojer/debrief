@@ -115,8 +115,10 @@ fn the_repo_path_yields_to_filters_and_has_an_eight_column_minimum() {
         } else {
             " 1/2 ".to_string()
         };
+        // At these widths the commit screen's header has room for the ID
+        // but not the branch, so the status line keeps the branch only.
         let left = if detail {
-            format!(" {}  branch: main", &app.commit_id().unwrap()[..8])
+            "  branch: main".to_string()
         } else {
             " git  branch: main  0 new".to_string()
         };

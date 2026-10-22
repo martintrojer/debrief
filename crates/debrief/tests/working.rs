@@ -195,7 +195,11 @@ fn enter_shows_the_working_copy_diff_with_its_header() {
     row_of(&app, "── new.txt (added) ──", RowKind::FileHeader);
     row_of(&app, "n2", RowKind::Line(LineKind::Added));
     let s = screen(&mut app, 100, 12);
-    assert!(s[11].contains("working copy"), "{}", s[11]);
+    // The header names the working copy (not a cut `working-copy` ID);
+    // the status line leaves it to the header.
+    assert!(s[0].contains("working copy"), "{s:#?}");
+    assert!(!s[0].contains("working-"), "{s:#?}");
+    assert!(!s[11].contains("working copy"), "{s:#?}");
     // ]] goes on to the commits, in log order.
     keys(&mut app, "]]");
     assert_eq!(app.screen(), Screen::Commit(1));
@@ -1154,4 +1158,40 @@ fn threaded_r_on_a_clean_tree_leaves_the_working_copy_view() {
     assert_eq!(app.screen(), Screen::Log, "the obsolete diff is closed");
     assert_eq!(app.status(), "The working copy is clean");
     assert_eq!(summaries(&app), ["second", "base"]);
+}
+
+/// The commit screen names a jj commit once, by its change ID as the log
+/// shows it: the header has the ID and branch, the status line neither.
+#[test]
+fn jj_commit_screen_names_the_change_id_once() {
+    if !have_jj() {
+        return;
+    }
+    let e = JjEnv::with_history(
+        &[
+            ("first", vec![w("a.txt", "one\n")]),
+            ("second", vec![w("a.txt", "two\n")]),
+        ],
+        &[("main", 2)],
+        2,
+    );
+    let mut app = jj_app(&e, OpenOptions::default(), None);
+    let i = app
+        .rows()
+        .iter()
+        .position(|r| r.info.summary == "second")
+        .expect("second in the log");
+    let change = debrief::app::short_id(&app.rows()[i].info).to_string();
+    let commit = app.rows()[i].info.commit[..8].to_string();
+    assert_ne!(change, commit);
+    for _ in 0..i {
+        app.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    }
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let s = screen(&mut app, 120, 12);
+    assert!(s[0].contains(&change), "header: {}", s[0]);
+    assert!(s[0].contains("⎇ main"), "header: {}", s[0]);
+    assert!(!s[11].contains(&change), "status: {}", s[11]);
+    assert!(!s[11].contains("branch:"), "status: {}", s[11]);
+    assert!(!s.iter().any(|l| l.contains(&commit)), "{s:#?}");
 }

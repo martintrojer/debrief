@@ -78,22 +78,6 @@ fn trim(mut commits: Vec<CommitInfo>) -> Vec<CommitInfo> {
     commits
 }
 
-/// The spine `commits` fell back to a flat list (a revset with several
-/// heads). Without a path a spine is a first-parent chain; with one it
-/// skips commits, so the sign is a listed commit that is a non-first
-/// parent of a listed merge.
-fn is_flat(commits: &[CommitInfo], path: bool) -> bool {
-    if !path {
-        return commits
-            .windows(2)
-            .any(|w| w[0].parents.first() != Some(&w[1].commit));
-    }
-    let ids: HashSet<&str> = commits.iter().map(|c| c.commit.as_str()).collect();
-    commits
-        .iter()
-        .any(|c| c.parents.iter().skip(1).any(|p| ids.contains(p.as_str())))
-}
-
 /// The `… more` row ID of `merge`'s group of `parent`.
 fn more_id(merge: &str, parent: &str) -> String {
     format!("{FOLD_MORE_PREFIX}{merge}:{parent}")
@@ -140,6 +124,20 @@ impl App {
     /// Merges fold: the log lists the spine.
     pub fn folding(&self) -> bool {
         self.folds.on
+    }
+
+    /// After the log query `query` was read: whether its spine fell back
+    /// to a flat list (several heads, [`Vcs::spine_flat`]), said once when
+    /// it starts to.
+    ///
+    /// [`Vcs::spine_flat`]: crate::vcs::Vcs::spine_flat
+    pub(super) fn folds_check_flat(&mut self) -> anyhow::Result<()> {
+        let was = self.folds.flat;
+        self.folds.flat = self.folds.on && self.vcs.spine_flat(self.query.as_deref())?;
+        if self.folds.flat && !was {
+            self.set_status(FLAT);
+        }
+        Ok(())
     }
 
     /// Folds show on this query: folding is on and the spine did not
@@ -379,11 +377,6 @@ impl App {
     /// with its open folds' rows. Drops fold state for merges no longer
     /// listed.
     pub(super) fn splice(&mut self, commits: Vec<CommitInfo>) -> Vec<Row> {
-        let was_flat = self.folds.flat;
-        self.folds.flat = self.folds.on && is_flat(&commits, self.opts.path.is_some());
-        if self.folds.flat && !was_flat {
-            self.set_status(FLAT);
-        }
         self.folds.spine = commits;
         let mut rows: Vec<Row> = self.working_row().into_iter().collect();
         let mut groups = vec![0; rows.len()];

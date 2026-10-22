@@ -311,6 +311,13 @@ pub trait Vcs {
             Some(p) => bail!("cannot filter the log by path: {p}"),
         }
     }
+    /// `revset` (`None`: the default) has several heads, so
+    /// [`Vcs::log_in`] with `spine` lists it flat, not as one spine.
+    /// A backend whose spine never falls back (git walks first parents
+    /// from every tip) says false.
+    fn spine_flat(&self, _revset: Option<&str>) -> Result<bool> {
+        Ok(false)
+    }
     /// One group of merge `merge`'s fold: its parent `parent`'s own
     /// first-parent spine, down to where it meets `merge`'s first parent,
     /// newest first, narrowed to `path` as [`Vcs::log_in`] narrows the

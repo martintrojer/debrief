@@ -209,6 +209,7 @@ impl App {
             limit,
             self.folding(),
         )?;
+        self.folds_check_flat()?;
         let commits = self.trim(commits, limit);
         match self.vcs.kind() {
             Kind::Git if self.on_checked_out() => self.load_working(),

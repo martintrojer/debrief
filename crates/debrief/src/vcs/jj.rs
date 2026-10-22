@@ -87,6 +87,8 @@ pub struct Jj {
     merge_batch: usize,
     /// jj processes run, for tests to bound the work a read does.
     calls: Cell<usize>,
+    /// The last [`Jj::heads`] answer: (op, revset, up to two heads).
+    heads: RefCell<Option<(String, String, Vec<String>)>>,
 }
 
 impl Jj {
@@ -98,6 +100,7 @@ impl Jj {
             pin: RefCell::new(None),
             merge_batch: MERGE_BATCH,
             calls: Cell::new(0),
+            heads: RefCell::new(None),
         }
     }
 
@@ -126,6 +129,7 @@ impl Jj {
             pin: RefCell::new(Some(op)),
             merge_batch: MERGE_BATCH,
             calls: Cell::new(0),
+            heads: RefCell::new(None),
         }
     }
 
@@ -218,6 +222,25 @@ impl Jj {
             .filter(|l| !l.is_empty())
             .map(str::to_string)
             .collect())
+    }
+
+    /// Up to two heads of revset `r` at `op`. `cached`: reuse the last
+    /// answer for the same op and revset, so [`Vcs::spine_flat`] after
+    /// [`Vcs::log_in`] runs no jj. Answers at `@` (no pinned op) are not
+    /// kept.
+    fn heads(&self, op: &str, r: &str, cached: bool) -> Result<Vec<String>> {
+        if cached
+            && let Some((o, q, h)) = &*self.heads.borrow()
+            && o == op
+            && q == r
+        {
+            return Ok(h.clone());
+        }
+        let h = self.ids(op, &format!("heads({r})"), Some(2))?;
+        if op != "@" {
+            *self.heads.borrow_mut() = Some((op.to_string(), r.to_string(), h.clone()));
+        }
+        Ok(h)
     }
 
     /// The first-parent chain `s` (newest first), narrowed to `path` as
@@ -382,12 +405,9 @@ impl Vcs for Jj {
     ) -> Result<Vec<CommitInfo>> {
         let op = self.at_op()?;
         let r = revset.unwrap_or("::@");
-        if spine {
-            let heads = self.ids(&op, &format!("heads({r})"), Some(2))?;
-            if let [h] = &heads[..] {
-                let s = format!("first_ancestors({h}) & ({r})");
-                return self.spine_log(&op, &s, path, limit);
-            }
+        if spine && let [h] = &self.heads(&op, r, false)?[..] {
+            let s = format!("first_ancestors({h}) & ({r})");
+            return self.spine_log(&op, &s, path, limit);
         }
         // One argv element, so the revset can never be read as a flag.
         let rev = format!("--revisions={r}");
@@ -398,6 +418,11 @@ impl Vcs for Jj {
             args.extend(["--", f]);
         }
         parse_log(&self.jj(&op, &args)?)
+    }
+
+    fn spine_flat(&self, revset: Option<&str>) -> Result<bool> {
+        let op = self.at_op()?;
+        Ok(self.heads(&op, revset.unwrap_or("::@"), true)?.len() > 1)
     }
 
     fn fold(

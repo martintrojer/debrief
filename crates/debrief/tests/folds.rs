@@ -547,6 +547,27 @@ fn a_revset_with_several_heads_is_listed_flat_without_folds() {
     );
 }
 
+#[test]
+fn a_one_head_revset_that_skips_spine_commits_keeps_its_folds() {
+    if !have_jj() {
+        return;
+    }
+    let env = JjEnv::over_git(bubbles_repo);
+    let tmp = tempfile::tempdir().unwrap();
+    let mut opts = StartOptions::new(tmp.path().join("cache"));
+    opts.config.view.stats = false;
+    opts.revset = Some(r#"::@- ~ root() ~ description(exact:"m1\n")"#.to_string());
+    let app = open(&env.root, opts);
+    let want: Vec<&str> = BUBBLES_SPINE
+        .iter()
+        .copied()
+        .filter(|s| *s != "m1")
+        .collect();
+    assert_eq!(summaries(&app), want);
+    assert!(app.rows()[0].fold.is_some(), "the octopus folds");
+    assert_eq!(app.status(), "");
+}
+
 trait GotoSummary {
     fn goto_summary(&mut self, s: &str);
 }

@@ -6,6 +6,7 @@
 - **Slow** (before closing work, and once per merged batch): `bash scripts/check.sh` — fmt, clippy `-D warnings`, `cargo test --workspace`. ~1 min warm with a fast git (below); ~4.5 min through a slow git wrapper. CI runs it on Linux with tmux and jj installed.
 - **Targeted slow**: `cargo nextest run -p debrief --test tui_e2e` (real binary in tmux) and `--test vcs_jj` (needs jj; skipped without it). A skip is not a pass: say so in the gate record.
 - **Budget**: slow gate 5 min. Over budget is a trigger for test upkeep, not a stop.
+- **History**: read the latest `docs/test-health/` report before test upkeep; it holds what was measured, merged and refuted. End an upkeep pass with a new dated report.
 
 Record each gate run in the task note (`GATE: commit tree command scope`, `RESULT: exit duration counts skips`, `CONDITIONS: host, git, load, cache`).
 

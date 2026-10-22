@@ -574,12 +574,10 @@ impl App {
         merge: &str,
         result: Result<Vec<Vec<CommitInfo>>, String>,
     ) {
-        let Some((_, parents, limit)) = self
-            .folds
-            .pending
-            .remove(merge)
-            .filter(|(r, _, _)| *r == request)
-        else {
+        if self.folds.pending.get(merge).map(|p| p.0) != Some(request) {
+            return;
+        }
+        let Some((_, parents, limit)) = self.folds.pending.remove(merge) else {
             return;
         };
         let groups = match result {
@@ -667,12 +665,10 @@ impl App {
         result: Result<Vec<CommitInfo>, String>,
     ) {
         let key = (merge.to_string(), parent.to_string());
-        let Some((_, limit)) = self
-            .folds
-            .page_pending
-            .remove(&key)
-            .filter(|(r, _)| *r == request)
-        else {
+        if self.folds.page_pending.get(&key).map(|p| p.0) != Some(request) {
+            return;
+        }
+        let Some((_, limit)) = self.folds.page_pending.remove(&key) else {
             return;
         };
         let commits = match result {

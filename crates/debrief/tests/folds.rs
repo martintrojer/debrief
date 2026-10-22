@@ -445,6 +445,83 @@ fn a_group_page_arrives_as_a_fold_page_event() {
 }
 
 #[test]
+fn a_stale_fold_loaded_leaves_the_live_request_pending() {
+    let f = fixture();
+    let mut app = f.app();
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    app.fold_open(0);
+    let merge = app.rows()[0].info.commit.clone();
+    // An answer to an older request (0: requests count from 1) is dropped
+    // and the live one still lands.
+    app.event(AppEvent::FoldLoaded {
+        request: 0,
+        merge,
+        result: Ok(Vec::new()),
+    });
+    assert_eq!(settle_events(&mut app, &rx, 1), ["FoldLoaded"]);
+    assert!(app.rows()[0].fold.unwrap().open);
+    assert_eq!(summaries(&app)[1..4], ["x1", "y1", "z1"]);
+}
+
+#[test]
+fn a_stale_fold_page_leaves_the_live_request_pending() {
+    let f = fixture();
+    let mut opts = f.opts();
+    opts.limit = 2;
+    let mut app = f.app_with(opts);
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    open_fold(&mut app, "Merge n");
+    assert_eq!(
+        settle_events(&mut app, &rx, 2),
+        ["FoldLoaded", "MergeSizes"]
+    );
+    let merge = id(&app, "Merge n");
+    let parent = app.rows()[row(&app, "Merge n")].info.parents[1].clone();
+    let i = row(&app, "… more");
+    app.fold_open(i);
+    app.event(AppEvent::FoldPage {
+        request: 0,
+        merge,
+        parent,
+        result: Ok(Vec::new()),
+    });
+    assert_eq!(settle_events(&mut app, &rx, 1), ["FoldPage"]);
+    assert_eq!(summaries(&app)[2..], ["Merge s", "n2", "n1"]);
+}
+
+/// jj: no working-row event re-triggers the fold load, so the fold
+/// reloads under the new path only if the requery's own request survives
+/// the stale answer to the first.
+#[test]
+fn a_path_requery_during_a_fold_load_ends_with_the_fold_loaded() {
+    if !have_jj() {
+        return;
+    }
+    let env = JjEnv::over_git(bubbles_repo);
+    let tmp = tempfile::tempdir().unwrap();
+    let mut opts = StartOptions::new(tmp.path().join("cache"));
+    opts.config.view.stats = false;
+    let mut app = open(&env.root, opts);
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    open_fold(&mut app, "Merge a");
+    // The load's answer stays queued while the path changes.
+    keys(&mut app, &format!("F{BUBBLES_SHARED}"));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(summaries(&app), ["m1", "Merge b", "Merge a"]);
+    // The first load (stale), the requery's reload of the open fold.
+    assert_eq!(
+        settle_events(&mut app, &rx, 2),
+        ["FoldLoaded", "FoldLoaded"]
+    );
+    let a = &app.rows()[row(&app, "Merge a")];
+    assert!(a.fold.unwrap().open);
+    assert_eq!(summaries(&app), ["m1", "Merge b", "Merge a", "a2"]);
+}
+
+#[test]
 fn a_revset_with_several_heads_is_listed_flat_without_folds() {
     if !have_jj() {
         return;

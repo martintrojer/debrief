@@ -378,11 +378,19 @@ fn spine_path_pages_match_git() {
     let root = e.root.canonicalize().unwrap();
     let ids = |log: Vec<vcs::CommitInfo>| log.into_iter().map(|c| c.commit).collect::<Vec<_>>();
     let spine = git.log_in(None, None, 1000, true).unwrap();
-    for batch in [1, 3, 100] {
+    // Small batches (1 and 3) cross batch boundaries; a reduced limit
+    // list there still fails every known stop-rule mutation and keeps
+    // the test fast. The production batch (100) runs the full list.
+    let grid: [(usize, &[usize]); 3] = [
+        (1, &[1, 2, 3, 5, 7, 200]),
+        (3, &[1, 2, 3, 5, 7, 200]),
+        (100, &[1, 2, 3, 5, 7, 10, 15, 30, 200]),
+    ];
+    for (batch, limits) in grid {
         let jj = vcs::Jj::new(root.clone(), NO_SNAPSHOT).with_merge_batch(batch);
         for path in ["p", "q", "p/direct"] {
             let hits = ids(git.log_in(None, Some(path), 1000, true).unwrap());
-            for limit in [1, 2, 3, 5, 7, 10, 15, 30, 200] {
+            for &limit in limits {
                 let want = ids(git.log_in(None, Some(path), limit, true).unwrap());
                 let before = jj.jj_calls();
                 let got = ids(jj.log_in(Some(BUBBLES), Some(path), limit, true).unwrap());

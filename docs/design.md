@@ -95,6 +95,9 @@ paging then count matching commits.
 - **Seen state.** A first run marks what it lists seen and, under a path
   filter, the unfiltered log's first page too, so neither a later
   unfiltered run nor this one starts with old commits marked new.
+  Folded, it also marks each listed merge's bubble (`Vcs::bubble`, one
+  `BubbleLoaded` per merge from a worker once the event loop's sender is
+  set), as opening a merge does.
 - **The open commit** stays open when a new path drops it from the log;
   `]]` / `[[` then go to the nearest shown commit around its old place.
 

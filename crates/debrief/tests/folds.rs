@@ -6,6 +6,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -97,11 +98,26 @@ fn settle_events(app: &mut App, rx: &mpsc::Receiver<AppEvent>, n: usize) -> Vec<
             AppEvent::FoldLoaded { .. } => "FoldLoaded",
             AppEvent::FoldPage { .. } => "FoldPage",
             AppEvent::MergeSizes { .. } => "MergeSizes",
+            AppEvent::BubbleLoaded { .. } => "BubbleLoaded",
             _ => "other",
         });
         app.event(ev);
     }
     kinds
+}
+
+/// Give `app` an event sender and feed it the first run's bubble marks:
+/// one [`AppEvent::BubbleLoaded`] per listed merge (`merges`; 0 when the
+/// seen file existed).
+#[track_caller]
+fn with_sender(app: &mut App, merges: usize) -> mpsc::Receiver<AppEvent> {
+    let (tx, rx) = mpsc::channel();
+    app.set_sender(tx);
+    assert_eq!(
+        settle_events(app, &rx, merges),
+        vec!["BubbleLoaded"; merges]
+    );
+    rx
 }
 
 #[test]
@@ -406,8 +422,7 @@ fn a_path_filter_narrows_the_spine_and_the_fold() {
 fn with_a_sender_folds_and_sizes_load_off_the_ui_thread() {
     let f = fixture();
     let mut app = f.app();
-    let (tx, rx) = mpsc::channel();
-    app.set_sender(tx);
+    let rx = with_sender(&mut app, 4);
     app.fold_open(0);
     assert_eq!(
         summaries(&app),
@@ -436,8 +451,8 @@ fn a_group_page_arrives_as_a_fold_page_event() {
     let mut opts = f.opts();
     opts.limit = 2;
     let mut app = f.app_with(opts);
-    let (tx, rx) = mpsc::channel();
-    app.set_sender(tx);
+    // The first page of 2: the octopus and Merge n.
+    let rx = with_sender(&mut app, 2);
     open_fold(&mut app, "Merge n");
     assert_eq!(
         settle_events(&mut app, &rx, 2),
@@ -453,8 +468,7 @@ fn a_group_page_arrives_as_a_fold_page_event() {
 fn a_stale_fold_loaded_leaves_the_live_request_pending() {
     let f = fixture();
     let mut app = f.app();
-    let (tx, rx) = mpsc::channel();
-    app.set_sender(tx);
+    let rx = with_sender(&mut app, 4);
     app.fold_open(0);
     let merge = app.rows()[0].info.commit.clone();
     // An answer to an older request (0: requests count from 1) is dropped
@@ -475,8 +489,8 @@ fn a_stale_fold_page_leaves_the_live_request_pending() {
     let mut opts = f.opts();
     opts.limit = 2;
     let mut app = f.app_with(opts);
-    let (tx, rx) = mpsc::channel();
-    app.set_sender(tx);
+    // The first page of 2: the octopus and Merge n.
+    let rx = with_sender(&mut app, 2);
     open_fold(&mut app, "Merge n");
     assert_eq!(
         settle_events(&mut app, &rx, 2),
@@ -509,8 +523,7 @@ fn a_path_requery_during_a_fold_load_ends_with_the_fold_loaded() {
     let mut opts = StartOptions::new(tmp.path().join("cache"));
     opts.config.view.stats = false;
     let mut app = open(&env.root, opts);
-    let (tx, rx) = mpsc::channel();
-    app.set_sender(tx);
+    let rx = with_sender(&mut app, 4);
     open_fold(&mut app, "Merge a");
     // The load's answer stays queued while the path changes.
     keys(&mut app, &format!("F{BUBBLES_SHARED}"));
@@ -588,6 +601,157 @@ impl GotoSummary for App {
             keys(self, "k");
         }
     }
+}
+
+// --- seen ----------------------------------------------------------------
+
+/// Every commit of the fixture at `root`, by summary.
+fn by_summary(root: &Path, revset: &str) -> BTreeMap<String, CommitInfo> {
+    let v = vcs::open(root, vcs::OpenOptions::default()).unwrap();
+    common::bubbles_by_summary(&*v, revset)
+}
+
+/// Mark only `commits` seen in `cache` before the app starts, so its run
+/// is not a first one (which marks everything listed).
+fn seen_before(cache: &Path, root: &Path, commits: &[CommitInfo]) {
+    Seen::open(cache, root).unwrap().mark_all(commits).unwrap();
+}
+
+/// The fixture's spine commits.
+fn spine(root: &Path) -> Vec<CommitInfo> {
+    let v = vcs::open(root, vcs::OpenOptions::default()).unwrap();
+    v.log_in(None, None, 200, true).unwrap()
+}
+
+/// The summaries among `want` whose seen status in `app` is not `status`.
+fn not_status(
+    app: &App,
+    by: &BTreeMap<String, CommitInfo>,
+    want: &[&str],
+    status: Status,
+) -> Vec<String> {
+    want.iter()
+        .filter(|s| app.seen().status(&by[**s]) != status)
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Feed the app every worker event until `n` [`AppEvent::BubbleLoaded`]
+/// have landed (a diff's `Loaded` / `Highlighted` race them); each event
+/// has 20s to arrive.
+#[track_caller]
+fn settle_bubbles(app: &mut App, rx: &mpsc::Receiver<AppEvent>, n: usize) {
+    let mut got = 0;
+    while got < n {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap_or_else(|e| panic!("bubble {} of {n}: {e}", got + 1));
+        got += usize::from(matches!(ev, AppEvent::BubbleLoaded { .. }));
+        app.event(ev);
+    }
+}
+
+/// No summaries: every one checked has the status.
+const NONE: [&str; 0] = [];
+const OCTOPUS_BUBBLE: &[&str] = &["x1", "y1", "z1"];
+const MERGE_N_BUBBLE: &[&str] = &["Merge s", "n2", "n1", "s1"];
+
+#[test]
+fn opening_the_octopus_marks_its_bubble_seen_inline_and_off_the_ui_thread() {
+    let f = fixture();
+    let by = by_summary(&f.root, "HEAD");
+    seen_before(&f.cache, &f.root, &spine(&f.root));
+    let mut app = f.app();
+    assert_eq!(not_status(&app, &by, OCTOPUS_BUBBLE, Status::New), NONE);
+    app.goto_summary("Octopus x y z");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(not_status(&app, &by, OCTOPUS_BUBBLE, Status::Seen), NONE);
+    assert_eq!(not_status(&app, &by, MERGE_N_BUBBLE, Status::New), NONE);
+
+    let f = fixture();
+    let by = by_summary(&f.root, "HEAD");
+    seen_before(&f.cache, &f.root, &spine(&f.root));
+    let mut app = f.app();
+    let rx = with_sender(&mut app, 0);
+    app.goto_summary("Octopus x y z");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        not_status(&app, &by, OCTOPUS_BUBBLE, Status::New),
+        NONE,
+        "nothing marked before the event"
+    );
+    settle_bubbles(&mut app, &rx, 1);
+    assert_eq!(not_status(&app, &by, OCTOPUS_BUBBLE, Status::Seen), NONE);
+}
+
+#[test]
+fn opening_a_merge_with_a_nested_bubble_marks_it_all_without_its_fold() {
+    let f = fixture();
+    let by = by_summary(&f.root, "HEAD");
+    seen_before(&f.cache, &f.root, &spine(&f.root));
+    let mut app = f.app();
+    app.goto_summary("Merge n");
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.rows()[row(&app, "Merge n")].fold.unwrap().open);
+    assert_eq!(not_status(&app, &by, MERGE_N_BUBBLE, Status::Seen), NONE);
+    assert_eq!(not_status(&app, &by, OCTOPUS_BUBBLE, Status::New), NONE);
+}
+
+#[test]
+fn a_closed_fold_shows_new_inside_until_its_merge_is_opened() {
+    let f = fixture();
+    seen_before(&f.cache, &f.root, &spine(&f.root));
+    let mut app = f.app();
+    let marker = |app: &mut App| line_of(&screen(app, 100), "Octopus x y z").remove(0);
+    assert_eq!(cursor_summary(&app), "Octopus x y z");
+    assert_eq!(app.rows()[0].status, Status::Seen);
+    keys(&mut app, "lh");
+    assert_eq!(marker(&mut app), '●', "loaded and closed: x1 y1 z1 new");
+    press(&mut app, KeyCode::Enter);
+    keys(&mut app, "q");
+    assert_eq!(app.screen(), Screen::Log);
+    assert_eq!(marker(&mut app), ' ', "opened: the bubble is seen");
+}
+
+#[test]
+fn a_first_run_marks_every_listed_merges_bubble_once_it_has_a_sender() {
+    let f = fixture();
+    let by = by_summary(&f.root, "HEAD");
+    let mut app = f.app();
+    let all: Vec<&str> = by.keys().map(String::as_str).collect();
+    assert!(
+        app.seen().status(&by["x1"]) == Status::New,
+        "start reads no bubble"
+    );
+    // One BubbleLoaded per listed merge: the octopus, Merge n, b and a.
+    with_sender(&mut app, 4);
+    assert_eq!(not_status(&app, &by, &all, Status::Seen), NONE);
+}
+
+#[test]
+fn jj_opening_a_merge_at_marks_its_bubble_seen() {
+    if !have_jj() {
+        return;
+    }
+    let env = JjEnv::over_git(bubbles_repo);
+    let by = by_summary(&env.root, "::@ ~ root()");
+    // @ merges Merge b and n2: its bubble is m1, n1, n2.
+    env.jj(&["--quiet", "new", &by["Merge b"].commit, &by["n2"].commit]);
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    seen_before(&cache, &env.root, &[by["base"].clone()]);
+    let mut opts = StartOptions::new(cache);
+    opts.config.view.stats = false;
+    let mut app = open(&env.root, opts);
+    let at = app.working_row_index().unwrap();
+    assert_eq!(app.rows()[at].info.parents.len(), 2);
+    let bubble = ["m1", "n1", "n2"];
+    assert_eq!(not_status(&app, &by, &bubble, Status::New), NONE);
+    keys(&mut app, &format!("{}G", at + 1));
+    press(&mut app, KeyCode::Enter);
+    assert!(app.viewing_working_copy());
+    assert_eq!(not_status(&app, &by, &bubble, Status::Seen), NONE);
+    assert_eq!(not_status(&app, &by, &["Merge a"], Status::New), NONE);
 }
 
 // --- drawing -------------------------------------------------------------

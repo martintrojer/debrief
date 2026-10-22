@@ -57,8 +57,10 @@ for every group but the last and `╰` for the last, so the lines it
 merged stay apart. A fold too long for a page ends with its own dim
 `… more` row. A closed fold's marker speaks for what's inside once it
 has been loaded: `●` if any commit in it is new, else `◐` if any is
-updated, else the merge's own. A linear history looks the same either
-way.
+updated, else the merge's own. Opening a merge (Enter) marks it and
+every commit it brought in seen: its diff, from the first parent, covers
+them all. The first run marks the listed merges' commits seen too. A
+linear history looks the same either way.
 
 The log loads `--limit` commits (`[log] limit`, 200 by default). While
 more may exist, a dim `… more` row ends the log. Moving past the last row

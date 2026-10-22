@@ -44,6 +44,10 @@ pub fn is_fold_more(id: &str) -> bool {
     id.starts_with(FOLD_MORE_PREFIX)
 }
 
+/// The most commits of one bubble a seen mark reads (opening a merge, or
+/// the first run); a larger bubble has only these marked.
+const BUBBLE_CAP: usize = 10_000;
+
 /// A synthetic row's ID: git's working copy or a fold's `… more`.
 pub(super) fn is_synthetic(id: &str) -> bool {
     id == WORKING_ID || is_fold_more(id)
@@ -690,6 +694,65 @@ impl App {
             return;
         }
         match self.seen.mark(&info) {
+            Ok(()) => self.restatus(),
+            Err(e) => self.set_status(format!("cannot write seen state: {e}")),
+        }
+    }
+
+    /// Read the bubbles of `merges` to mark them seen: on a worker with
+    /// an event sender (one [`AppEvent::BubbleLoaded`] per merge, in
+    /// order), inline without.
+    pub(super) fn bubbles_request(&mut self, merges: Vec<String>) {
+        if merges.is_empty() {
+            return;
+        }
+        let Some(tx) = self.sender.clone() else {
+            for merge in merges {
+                let result = self
+                    .vcs
+                    .bubble(&merge, BUBBLE_CAP)
+                    .map_err(|e| format!("{e:#}"));
+                self.bubble_loaded(&merge, result);
+            }
+            return;
+        };
+        let (root, opts, pin) = (
+            self.vcs.root().to_path_buf(),
+            self.vcs.open_options(),
+            self.vcs.pinned_op(),
+        );
+        std::thread::spawn(move || {
+            let v = crate::vcs::reopen(&root, opts, pin);
+            for merge in merges {
+                let result = match &v {
+                    Ok(v) => v.bubble(&merge, BUBBLE_CAP),
+                    Err(e) => Err(anyhow::anyhow!("{e:#}")),
+                };
+                let result = result.map_err(|e| format!("{e:#}"));
+                if tx.send(AppEvent::BubbleLoaded { merge, result }).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    /// A merge's bubble from [`App::bubbles_request`]: marked seen.
+    pub(super) fn bubble_loaded(&mut self, merge: &str, result: Result<Vec<CommitInfo>, String>) {
+        match result {
+            Ok(commits) => self.mark_bubble(&commits),
+            Err(e) => self.set_status(format!(
+                "cannot mark {}'s commits seen: {e}",
+                &merge[..merge.len().min(8)]
+            )),
+        }
+    }
+
+    /// Mark a merge's bubble (`commits`) seen.
+    pub(super) fn mark_bubble(&mut self, commits: &[CommitInfo]) {
+        if commits.is_empty() {
+            return;
+        }
+        match self.seen.mark_all(commits) {
             Ok(()) => self.restatus(),
             Err(e) => self.set_status(format!("cannot write seen state: {e}")),
         }

@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use common::{JjEnv, commit, git, have_jj, w};
+use common::{BUBBLES_FILES, JjEnv, bubbles_repo, commit, git, have_jj, w};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
@@ -178,6 +178,49 @@ fn git_log_renders_moves_and_quits() {
     assert_eq!(position(&screen).as_deref(), Some("1/3"), "{screen}");
     tmux.keys(&["j"]);
     tmux.wait_for("cursor on row 2", |s| position(s).as_deref() == Some("2/3"));
+    assert_eq!(tmux.quit(&status), "0");
+}
+
+/// Only the real binary shows that folding is on by default, that `l` /
+/// `h` reach the fold through the terminal's key decoding, and that the
+/// diff on screen is the merge's first-parent one (its bubble's files).
+#[test]
+fn git_folded_log_opens_a_fold_and_the_merges_diff() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    bubbles_repo(&root);
+    let status = dir.path().join("status");
+    let Some(tmux) = start(&root, &dir.path().join("cache"), &status, "") else {
+        return;
+    };
+    let octopus = |s: &str| {
+        s.lines()
+            .find(|l| l.contains("Octopus x y z"))
+            .map(str::to_string)
+    };
+    // Row 0 is the octopus, a closed fold of 3 once its size is in.
+    let screen = tmux.wait_for("the folded log", |s| {
+        octopus(s).is_some_and(|l| l.contains("▸ +3"))
+    });
+    assert_eq!(position(&screen).as_deref(), Some("1/6"), "{screen}");
+    assert!(!screen.contains("x1"), "{screen}");
+    tmux.keys(&["l"]);
+    tmux.wait_for("the fold's groups", |s| {
+        octopus(s).is_some_and(|l| l.contains("▾ +3"))
+            && s.lines().any(|l| l.contains("├") && l.ends_with("x1"))
+            && s.lines().any(|l| l.contains("╰") && l.ends_with("z1"))
+    });
+    tmux.keys(&["h"]);
+    tmux.wait_for("the fold closed", |s| !s.contains("x1"));
+    tmux.keys(&["Enter"]);
+    let files = BUBBLES_FILES[0].1;
+    tmux.wait_for("the merge's first-parent diff", |s| {
+        s.contains("Octopus x y z") && files.iter().all(|f| s.contains(f))
+    });
+    tmux.keys(&["q"]);
+    tmux.wait_for("the log", |s| {
+        octopus(s).is_some_and(|l| l.contains("▸ +3"))
+    });
     assert_eq!(tmux.quit(&status), "0");
 }
 

@@ -171,6 +171,13 @@ pub enum AppEvent {
         request: u64,
         result: Result<Vec<(String, usize)>, String>,
     },
+    /// Every commit `merge` brought in, to mark seen (opening a merge, or
+    /// the first run). Keyed by the merge, never stale: commit IDs stay
+    /// valid whatever the log shows now.
+    BubbleLoaded {
+        merge: String,
+        result: Result<Vec<CommitInfo>, String>,
+    },
 }
 
 /// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
@@ -369,6 +376,9 @@ pub struct App {
     terminal: Box<TerminalWriter>,
     /// Saved review sessions and the commits visited this run.
     sessions: session::Sessions,
+    /// The first run's merges whose bubbles are marked seen once there is
+    /// an event sender (off the UI thread, not at start).
+    bubbles_due: Vec<String>,
 }
 
 /// Writes bytes straight to the terminal and flushes them.
@@ -459,6 +469,7 @@ impl App {
             after_export: None,
             terminal: Box::new(stdout_write),
             sessions: session::Sessions::new(crate::session::Store::new(&opts_state, &root)),
+            bubbles_due: Vec::new(),
         };
         app.review_open();
         app.config = app.opts.config.clone();
@@ -491,6 +502,20 @@ impl App {
                 all.extend(app.vcs.log_in(q, None, app.opts.limit, spine)?);
             }
             app.seen.mark_all(&all).context("cannot write seen state")?;
+            // Folded, the listed merges' bubbles are not listed: they are
+            // marked too, so old folds don't show new once loaded. That
+            // is a read per merge, left to the worker once there is a
+            // sender ([`App::set_sender`]): App::new has none in the
+            // binary, and start must not wait on them.
+            if app.folds_shown() {
+                let mut due: Vec<String> = Vec::new();
+                for c in all.iter().filter(|c| c.parents.len() > 1) {
+                    if !due.contains(&c.commit) {
+                        due.push(c.commit.clone());
+                    }
+                }
+                app.bubbles_due = due;
+            }
         }
         app.set_rows(commits);
         app.cursor = app.first_unseen().unwrap_or(0);
@@ -529,6 +554,7 @@ impl App {
                 result,
             } => self.fold_page_loaded(request, &merge, &parent, result),
             AppEvent::MergeSizes { request, result } => self.sizes_loaded(request, result),
+            AppEvent::BubbleLoaded { merge, result } => self.bubble_loaded(&merge, result),
             AppEvent::Mouse(m) => {
                 self.mouse(m, Instant::now());
                 self.follow_resume();
@@ -664,9 +690,13 @@ impl App {
         root.display().to_string()
     }
 
-    /// Where watcher events go; call before [`App::start_watcher`].
+    /// Where watcher events go; call before [`App::start_watcher`]. A
+    /// first run's bubble marks start here (see [`AppEvent::BubbleLoaded`]);
+    /// an app that never gets a sender leaves them unmarked.
     pub fn set_sender(&mut self, tx: Sender<AppEvent>) {
         self.sender = Some(tx);
+        let due = std::mem::take(&mut self.bubbles_due);
+        self.bubbles_request(due);
     }
 
     /// Watch the repository and send [`AppEvent::Reload`] on changes; for

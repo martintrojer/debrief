@@ -593,6 +593,11 @@ impl App {
         let from_list = self.commit_list.opening;
         let id = self.rows[i].info.commit.clone();
         self.mark_row(i);
+        // Its first-parent diff covers its whole bubble: that is read too.
+        let merge = self.rows[i].info.parents.len() > 1;
+        if merge && !super::log::is_synthetic(&id) {
+            self.bubbles_request(vec![id.clone()]);
+        }
         self.cursor = i;
         self.screen = Screen::Commit(i);
         self.mode = Mode::Normal;

@@ -186,7 +186,7 @@ impl App {
 
     /// Folds show on this query: folding is on and the spine did not
     /// fall back to a flat list.
-    fn folds_shown(&self) -> bool {
+    pub(super) fn folds_shown(&self) -> bool {
         self.folds.on && !self.folds.flat
     }
 

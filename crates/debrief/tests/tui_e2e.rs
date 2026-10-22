@@ -213,10 +213,24 @@ fn git_folded_log_opens_a_fold_and_the_merges_diff() {
     tmux.keys(&["h"]);
     tmux.wait_for("the fold closed", |s| !s.contains("x1"));
     tmux.keys(&["Enter"]);
+    // The log's stats pane already lists the octopus's files, so wait
+    // for what only the commit screen draws: each file's diff header
+    // with its hunk.
     let files = BUBBLES_FILES[0].1;
-    tmux.wait_for("the merge's first-parent diff", |s| {
-        s.contains("Octopus x y z") && files.iter().all(|f| s.contains(f))
+    let screen = tmux.wait_for("the merge's first-parent diff", |s| {
+        s.contains("Octopus x y z")
+            && files
+                .iter()
+                .all(|f| s.contains(&format!("── {f} (added) ")))
+            && s.matches("@@ -0,0 +1 @@").count() == files.len()
     });
+    // The stats pane (under a full-width rule) is gone.
+    assert!(
+        !screen
+            .lines()
+            .any(|l| !l.trim().is_empty() && l.trim().chars().all(|c| c == '─')),
+        "{screen}"
+    );
     tmux.keys(&["q"]);
     tmux.wait_for("the log", |s| {
         octopus(s).is_some_and(|l| l.contains("▸ +3"))

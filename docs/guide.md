@@ -544,12 +544,11 @@ where a branch's log stops), `[vcs]` (the git program),
 debrief runs `git` from `PATH` many times: at start, on each refresh and
 for each diff. When that `git` is a slow wrapper, point `[vcs] git` at a
 faster one, a name looked up on `PATH` or a path. `$DEBRIEF_GIT`
-overrides it for one run. A path is used as is (no `~` expansion). For
-example, after `mise use -g conda:git`, the path `mise which git` prints:
+overrides it for one run. A path is used as is (no `~` expansion):
 
 ```toml
 [vcs]
-git = "/Users/me/.local/share/mise/installs/conda-git/2.56.0/bin/git"
+git = "/usr/bin/git"
 ```
 
 ### Theme

@@ -182,7 +182,8 @@ fn the_wheel_loads_once_the_more_row_is_on_screen() {
     wheel_down(&mut app, 5, 2);
     assert_eq!(app.rows().len(), 5, "scrolled to the more row");
     let s = screen(&mut app, 80, 6);
-    assert_eq!(s[4].trim(), MORE, "{s:#?}");
+    // `starts_with`: the scrollbar may cover the last column.
+    assert!(s[4].trim().starts_with(MORE), "{s:#?}");
     wheel_down(&mut app, 5, 2);
     assert_eq!(app.rows().len(), 10);
 }
@@ -193,7 +194,8 @@ fn the_more_row_shows_when_the_cursor_is_on_the_last_commit() {
     keys(&mut app, "4j");
     let s = screen(&mut app, 80, 6);
     assert!(s[3].contains("commit 8"), "{s:#?}");
-    assert_eq!(s[4].trim(), MORE, "{s:#?}");
+    // `starts_with`: the scrollbar may cover the last column.
+    assert!(s[4].trim().starts_with(MORE), "{s:#?}");
 }
 
 #[test]
@@ -518,5 +520,6 @@ fn the_commit_list_shows_the_more_row_when_its_commits_fill_it() {
     assert_eq!(app.rows().len(), 12);
     let l = list_lines(&mut app);
     assert!(l[10].contains(short_id(&app.rows()[11].info)), "{l:#?}");
-    assert_eq!(l[11].trim(), MORE, "{l:#?}");
+    // `starts_with`: the scrollbar may cover the last column.
+    assert!(l[11].trim().starts_with(MORE), "{l:#?}");
 }

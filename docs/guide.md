@@ -638,6 +638,7 @@ session. The rows without a key are set only in the file.
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
 | header row (short ID and subject) on the commit screen | — | `view.header` | `true` |
 | the log lists the first-parent spine, merges as folds | `<leader>m` | `view.fold_merges` | `true` |
+| a scrollbar on a long list's right edge for a second after it scrolls | — | `view.scrollbars` | `true` |
 | git: the open working-copy view follows file changes | `r` | `view.follow_working` | `false` |
 | zoom the tmux pane while debrief runs (see [Panes and tmux](#panes-and-tmux)) | — | `view.tmux_zoom` | `false` |
 | syntax highlighting | — | `render.highlight` | `true` |

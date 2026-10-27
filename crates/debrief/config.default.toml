@@ -85,6 +85,10 @@
 # same either way. <leader>m flips it for the session.
 # fold_merges = true
 
+# A scrollbar on the right edge of a long list (log, diff, file list,
+# stats, help, pickers), shown for a second after the list scrolls.
+# scrollbars = true
+
 
 # ── Which commits load ──────────────────────────────────────────────────────
 

@@ -369,6 +369,8 @@ pub struct App {
     picker: Option<picker::Picker>,
     /// The last click and a drag in progress.
     mouse: mouse::MouseState,
+    /// When each list's scrollbar last moved (it auto-hides).
+    scrollbars: crate::ui::scrollbar::Scrollbars,
     /// Test hook between a send's export and its removal.
     after_export: Option<Box<dyn FnMut()>>,
     /// Writes and flushes bytes to the terminal (stdout; a send's OSC 52
@@ -466,6 +468,7 @@ impl App {
             popup_scroll: 0,
             picker: None,
             mouse: mouse::MouseState::default(),
+            scrollbars: Default::default(),
             after_export: None,
             terminal: Box::new(stdout_write),
             sessions: session::Sessions::new(crate::session::Store::new(&opts_state, &root)),
@@ -603,6 +606,11 @@ impl App {
         self.commit_follow();
         self.stat_follow();
         crate::ui::draw(frame, self);
+    }
+
+    /// The lists' auto-hiding scrollbars.
+    pub fn scrollbars(&self) -> &crate::ui::scrollbar::Scrollbars {
+        &self.scrollbars
     }
 
     /// The resolved theme: palette, syntax colours, `fill`.

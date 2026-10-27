@@ -124,6 +124,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         let rect = Rect::new(area.x, area.y + y as u16, area.width, 1);
         draw_row(frame, app, &pane, i, r, rect);
     }
+    super::scrollbar::draw(frame, app, "diff", area, rows.len(), scroll);
 }
 
 /// The diff line a row shows, if it is one.

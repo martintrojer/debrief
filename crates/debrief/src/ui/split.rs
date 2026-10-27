@@ -95,4 +95,6 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             );
         }
     }
+    let total = left.rows.len();
+    super::scrollbar::draw(frame, app, "diff", area, total, scroll);
 }

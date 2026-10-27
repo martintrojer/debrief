@@ -256,7 +256,8 @@ fn motions_and_enter() {
     key(&mut app, 'G');
     let s = screen(&mut app);
     assert!(
-        s[10].ends_with("commit 0"),
+        // `contains`: the scrollbar may cover the last column.
+        s[10].contains("commit 0"),
         "scrolled to the cursor: {s:#?}"
     );
     // Enter marks the commit seen and opens it.
@@ -918,4 +919,30 @@ fn w_under_a_filter_counts_the_whole_log() {
     assert_eq!(app.rows().len(), 5);
     use Status::{New, Seen};
     assert_eq!(markers(&app), [New, New, Seen, Seen, Seen]);
+}
+
+/// The scrollbar shows on the log's right edge once it scrolls (it hides
+/// after `SHOW_FOR`; that timing is the unit test's), not before, and
+/// never with `[view] scrollbars = false`.
+#[test]
+fn the_log_shows_a_scrollbar_after_it_scrolls_unless_turned_off() {
+    let (tmp, root) = git_repo(30);
+    let cache = tmp.path().join("cache");
+    let has_bar = |s: &[String]| s[1..11].iter().any(|l| l.ends_with('┃'));
+    let mut app = open(&root, &cache);
+    keys(&mut app, "gg");
+    assert!(!has_bar(&screen(&mut app)), "first frame: no move yet");
+    key(&mut app, 'G');
+    let s = screen(&mut app);
+    assert!(has_bar(&s), "scrolled: {s:#?}");
+
+    let mut opts = StartOptions::new(cache.clone());
+    opts.config.view.stats = false;
+    opts.config.view.scrollbars = false;
+    let mut app = App::new(vcs::open(&root, vcs::OpenOptions::default()).unwrap(), opts).unwrap();
+    keys(&mut app, "gg");
+    screen(&mut app);
+    key(&mut app, 'G');
+    let s = screen(&mut app);
+    assert!(!has_bar(&s), "off: {s:#?}");
 }

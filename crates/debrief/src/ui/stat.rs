@@ -273,6 +273,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect, side_by_side: bool)
                 all.scroll((scroll.min(u16::MAX as usize) as u16, 0))
             };
             frame.render_widget(p, inner);
+            let total = max_scroll + h;
+            super::scrollbar::draw(frame, app, "stat", inner, total, scroll);
             return;
         }
     };

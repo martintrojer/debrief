@@ -165,6 +165,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(more_line(pal));
     }
     frame.render_widget(Paragraph::new(lines), area);
+    let total = app.rows().len() + usize::from(app.more_row());
+    super::scrollbar::draw(frame, app, "log", area, total, app.scroll());
 }
 
 /// The path filter's marker before its path.

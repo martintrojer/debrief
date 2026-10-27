@@ -174,6 +174,9 @@ pub(super) fn draw_commits(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(more_line(pal));
     }
     frame.render_widget(Paragraph::new(lines), list);
+    let total = app.rows().len() + usize::from(app.more_row());
+    let pos = app.commit_list_offset();
+    super::scrollbar::draw(frame, app, "commits", list, total, pos);
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
@@ -234,4 +237,6 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
+    let total = list.visible.rows.len();
+    super::scrollbar::draw(frame, app, "files", inner, total, skip);
 }

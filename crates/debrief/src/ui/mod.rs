@@ -9,6 +9,7 @@ mod help;
 mod log;
 mod picker;
 mod popup;
+pub mod scrollbar;
 mod sidebar;
 mod split;
 mod stat;
@@ -33,6 +34,7 @@ pub(crate) fn fill(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw one full screen: the log or the commit, the status line, overlays.
 pub fn draw(frame: &mut Frame, app: &App) {
+    app.scrollbars().next_frame();
     fill(frame, app, frame.area());
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());

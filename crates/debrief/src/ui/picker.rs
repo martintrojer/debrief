@@ -66,6 +66,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
     frame.render_widget(Paragraph::new(lines).style(base), list);
+    let total = view.items.len();
+    super::scrollbar::draw(frame, app, "picker", list, total, skip);
     frame.render_widget(
         Paragraph::new(view.footer).style(base.fg(pal.muted)),
         footer,

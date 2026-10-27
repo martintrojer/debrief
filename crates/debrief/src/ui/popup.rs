@@ -27,5 +27,8 @@ pub(super) fn draw(frame: &mut Frame, app: &App, _area: Rect) {
         .take(body)
         .map(|l| Line::raw(l.as_str()))
         .collect();
+    let inner = block.inner(rect);
     frame.render_widget(Paragraph::new(shown).block(block).style(base), rect);
+    let total = v.lines.len();
+    super::scrollbar::draw(frame, app, "popup", inner, total, v.scroll);
 }

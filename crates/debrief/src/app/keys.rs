@@ -169,8 +169,10 @@ pub enum Action {
     Comment(super::comment::CommentAction),
     /// `]r` / `[r`.
     ReviewJump(bool, Option<usize>),
-    /// `K`: the comments on the cursor row.
+    /// `K`: the comments on the cursor row, else the commit message.
     Hover,
+    /// `gK`: the commit message.
+    MessagePopup,
     /// Closes the `K` popup.
     PopupClose,
     /// Scrolls the `K` popup.
@@ -419,6 +421,7 @@ impl App {
             };
             let action = match (prefix, c) {
                 ('g', 'g') => A::GotoTop(count),
+                ('g', 'K') => A::MessagePopup,
                 ('z', 'z') => A::Center,
                 ('z', 't') => A::CursorTop,
                 ('z', 'b') => A::CursorBottom,
@@ -806,6 +809,7 @@ impl App {
             A::Comment(a) => return self.comment_action(a),
             A::ReviewJump(f, c) => return self.review_jump(f, n(c)),
             A::Hover => return self.review_hover(),
+            A::MessagePopup => return self.message_popup(),
             A::PopupClose => return self.popup_close(),
             A::PopupMove(m) => return self.popup_move(m),
             A::ToggleSidebar => return self.toggle_sidebar(),
@@ -925,6 +929,7 @@ fn visual_ok(a: Action) -> bool {
             | A::DiffEnter
             | A::Launch(_)
             | A::Hover
+            | A::MessagePopup
             | A::PopupClose
             | A::PopupMove(_)
             | A::ReviewList

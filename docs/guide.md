@@ -443,7 +443,8 @@ longer scrolls the log's stats pane.
 | box: `Tab` / `S-Tab` | next / previous kind, back round to untyped |
 | box: `PageUp` / `PageDown` | scroll the diff behind the box |
 | `]r` `[r` | next / previous commented line (`●` in the gutter) |
-| `K` | show the comments on this line; `j` `k` `C-d` `C-u` `gg` `G` scroll, `q` `K` `Esc` close |
+| `K` | show the comments on this line, or the commit message on a line without any; `j` `k` `C-d` `C-u` `gg` `G` scroll, `q` `K` `Esc` close |
+| `gK` | show the commit message in the same popup, from anywhere in the diff |
 | `<leader>rl` | list the batch: type to filter, `Enter` go, `C-d` remove, `C-e` edit |
 | `<leader>rr` | send the batch |
 

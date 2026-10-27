@@ -365,6 +365,8 @@ pub struct App {
     popup: Option<String>,
     /// The `K` popup's first visible wrapped line.
     popup_scroll: usize,
+    /// What the `K` popup shows: comments or the commit message.
+    popup_kind: review::PopupKind,
     /// The `<leader>rl` picker.
     picker: Option<picker::Picker>,
     /// The last click and a drag in progress.
@@ -466,6 +468,7 @@ impl App {
             draft: None,
             popup: None,
             popup_scroll: 0,
+            popup_kind: review::PopupKind::Comments,
             picker: None,
             mouse: mouse::MouseState::default(),
             scrollbars: Default::default(),

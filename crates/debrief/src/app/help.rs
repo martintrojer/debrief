@@ -339,7 +339,13 @@ pub(crate) const BINDINGS: &[Binding] = {
         b("cc", C, G::Review, "comment on the diff line"),
         b("]r", C, G::Review, "next commented line"),
         b("[r", C, G::Review, "previous commented line"),
-        b("K", C, G::Review, "show the comments on this line"),
+        b(
+            "K",
+            C,
+            G::Review,
+            "show the comments on this line, else the commit message",
+        ),
+        b("gK", C, G::Review, "show the commit message"),
         b("Enter", P, G::Review, "in a comment: save"),
         b(
             "C-j",

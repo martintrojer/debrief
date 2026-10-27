@@ -237,11 +237,12 @@ impl App {
     }
 
     /// `K`: every comment on the cursor row, `● line a` / `● lines a-b`
-    /// (and its kind, `[ISSUE]`) over its body, in a popup.
+    /// (and its kind, `[ISSUE]`) over its body, in a popup. A row without
+    /// comments shows the commit message instead.
     pub(super) fn review_hover(&mut self) {
         let cs = self.comments_at(self.commit_cursor().row);
         if cs.is_empty() {
-            return self.set_status("No comment here");
+            return self.message_popup();
         }
         let parts: Vec<String> = cs
             .iter()
@@ -256,9 +257,35 @@ impl App {
                 format!("{}\n{}", head.trim_end(), c.body.trim_end())
             })
             .collect();
-        self.popup = Some(parts.join("\n\n"));
+        self.open_popup(PopupKind::Comments, parts.join("\n\n"));
+    }
+
+    /// `gK` (and `K` on a row without comments): the open commit's whole
+    /// message in the popup.
+    pub(super) fn message_popup(&mut self) {
+        let msg = self
+            .commit_diff()
+            .map(|d| d.message.trim_end().to_string())
+            .unwrap_or_default();
+        if msg.trim().is_empty() {
+            return self.set_status(NO_MESSAGE);
+        }
+        self.open_popup(PopupKind::Message, msg);
+    }
+
+    fn open_popup(&mut self, kind: PopupKind, text: String) {
+        self.popup = Some(text);
+        self.popup_kind = kind;
         self.popup_scroll = 0;
         self.mode = Mode::Popup;
+    }
+
+    /// The popup's title: ` review ` or ` message `.
+    pub fn popup_title(&self) -> &'static str {
+        match self.popup_kind {
+            PopupKind::Comments => " review ",
+            PopupKind::Message => " message ",
+        }
     }
 
     /// The `K` popup's text while it is open.
@@ -269,14 +296,19 @@ impl App {
     /// The `K` popup laid out for the current screen: its box, its text
     /// wrapped to the box, and the first visible line. The box grows with
     /// the wrapped line count up to the screen height minus 2 (one row of
-    /// margin above and below).
+    /// margin above and below). A commit message gets 72 text columns, the
+    /// usual wrap width, so its lines don't re-wrap.
     pub fn popup_view(&self) -> Option<PopupView> {
         let text = self.popup.as_deref()?;
         let (sw, sh) = (self.size.0, self.size.1.saturating_sub(1));
         if sw < 6 || sh < 3 {
             return None;
         }
-        let w = sw.saturating_sub(4).clamp(1, 72);
+        let cap = match self.popup_kind {
+            PopupKind::Comments => 72,
+            PopupKind::Message => 74,
+        };
+        let w = sw.saturating_sub(4).clamp(1, cap);
         let lines = wrap(text, w.saturating_sub(2).max(1) as usize);
         let body = (lines.len() as u16).min(sh.saturating_sub(4)).max(1);
         let h = body + 2;
@@ -313,6 +345,18 @@ impl App {
             self.mode = Mode::Normal;
         }
     }
+}
+
+/// The status when `gK` finds no commit message.
+pub const NO_MESSAGE: &str = "No commit message";
+
+/// What the `K` popup holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopupKind {
+    /// The review comments on the cursor row.
+    Comments,
+    /// The open commit's message.
+    Message,
 }
 
 /// Scrolling in the `K` popup.

@@ -1403,3 +1403,74 @@ fn a_scrolled_selection_keeps_the_box_off_its_rows_at_small_heights() {
         }
     }
 }
+
+/// A repo whose top commit has `message`; the app with it open.
+fn open_with_message(message: &str) -> (tempfile::TempDir, App) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    git_repo(
+        &root,
+        &[
+            ("base", vec![w("a.txt", "a1\n")]),
+            (message, vec![w("a.txt", "a1 new\n")]),
+        ],
+    );
+    let mut app = app_on(&root, &tmp.path().join("cache"));
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.screen(), Screen::Commit(0));
+    (tmp, app)
+}
+
+#[test]
+fn k_without_comments_and_gk_show_the_commit_message() {
+    let f = fixture();
+    let mut app = f.open();
+    let row = added(&app, "a40 new");
+    goto(&mut app, row);
+    keys(&mut app, "K");
+    assert_eq!(app.mode(), Mode::Popup, "{}", app.status());
+    assert_eq!(app.popup(), Some("change"));
+    let s = screen(&mut app);
+    assert!(s.iter().any(|l| l.contains(" message ")), "{s:#?}");
+    keys(&mut app, "K");
+    assert_eq!(app.mode(), Mode::Normal);
+
+    // On a commented row `K` shows the comment and `gK` the message.
+    keys(&mut app, "cc");
+    type_and_save(&mut app, "a note");
+    keys(&mut app, "K");
+    assert!(app.popup().unwrap().contains("a note"));
+    let s = screen(&mut app);
+    assert!(s.iter().any(|l| l.contains(" review ")), "{s:#?}");
+    keys(&mut app, "q");
+    keys(&mut app, "gK");
+    assert_eq!(app.popup(), Some("change"));
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode(), Mode::Normal);
+    assert_eq!(app.commit_cursor().row, row, "the cursor stayed put");
+}
+
+#[test]
+fn the_message_popup_fits_72_columns_and_grows_to_the_screen() {
+    let wide = "x".repeat(72);
+    let (_t, mut app) = open_with_message(&format!("subject\n\n{wide}\nend"));
+    keys(&mut app, "gK");
+    screen(&mut app);
+    let v = app.popup_view().unwrap();
+    assert_eq!(v.lines, ["subject", "", wide.as_str(), "end"], "no re-wrap");
+    assert_eq!(v.rect.height, 4 + 2, "the whole message shows");
+
+    let body: String = (1..=40).map(|i| format!("line {i}\n")).collect();
+    let (_t, mut app) = open_with_message(&format!("subject\n\n{body}"));
+    keys(&mut app, "gK");
+    let s = screen(&mut app);
+    let v = app.popup_view().unwrap();
+    assert_eq!(v.rect.height, 29 - 2, "capped at the screen height minus 2");
+    assert_eq!(v.scroll, 0, "opens at the top");
+    assert!(v.max_scroll > 0);
+    assert!(s.iter().any(|l| l.contains("subject")), "{s:#?}");
+    keys(&mut app, "G");
+    let s = screen(&mut app);
+    assert!(s.iter().any(|l| l.contains("line 40")), "{s:#?}");
+}

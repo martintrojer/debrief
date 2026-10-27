@@ -1,4 +1,5 @@
-//! The `K` popup: the review comments on the cursor row, in a centered box.
+//! The `K` popup: the review comments on the cursor row, or the commit
+//! message, in a centered box.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -17,7 +18,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, _area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(pal.muted))
-        .title(" review ")
+        .title(app.popup_title())
         .style(base);
     let body = rect.height.saturating_sub(2) as usize;
     let shown: Vec<Line> = v

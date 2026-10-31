@@ -248,6 +248,7 @@ pub(super) fn plain(key: &KeyEvent) -> Option<char> {
 impl App {
     /// Handle one key press.
     pub fn key(&mut self, key: KeyEvent) {
+        self.editor_touch(std::time::Instant::now());
         self.key_inner(key);
         self.follow_resume();
         self.stat_follow();

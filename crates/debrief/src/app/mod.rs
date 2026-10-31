@@ -9,6 +9,7 @@ pub mod commit;
 pub mod commit_list;
 pub mod config;
 pub mod display;
+pub mod editor_follow;
 pub mod file_tree;
 mod fold;
 mod help;
@@ -47,6 +48,7 @@ use crate::vcs::{CommitDiff, CommitInfo, CommitStat, Kind, Vcs, WorkingCopy, Wor
 pub use clue::{CLUE_DELAY, ClueRow};
 pub use comment::{CommentAction, CommentBox, Draft};
 pub use commit::{Focus, Row as DiffRow, RowKind, Subject};
+pub use editor_follow::FOLLOW_GRACE;
 pub use fold::{FOLD_CLOSED, FOLD_OPEN, GROUP_BAR, GROUP_LAST, GROUP_MID};
 pub use help::{HelpLine, HelpView, help_rect};
 pub use keys::{Action, KeyResult};
@@ -84,6 +86,8 @@ pub struct StartOptions {
     pub limit: usize,
     /// `~/.config/debrief/config.toml` over the defaults.
     pub config: config::Config,
+    /// `--follow`: listen for the editor's cursor from the start.
+    pub follow: bool,
 }
 
 impl StartOptions {
@@ -98,6 +102,7 @@ impl StartOptions {
             path: None,
             limit: DEFAULT_LIMIT,
             config: config::Config::defaults(),
+            follow: false,
         }
     }
 }
@@ -178,6 +183,9 @@ pub enum AppEvent {
         merge: String,
         result: Result<Vec<CommitInfo>, String>,
     },
+    /// The editor's cursor is on this line (1-based) of this absolute
+    /// path (`--follow`; from the socket listener), at this time.
+    EditorAt(PathBuf, usize, Instant),
 }
 
 /// `text` as one prompt line: each line break (`\r\n`, `\n`, `\r`) and
@@ -319,6 +327,13 @@ pub struct App {
     /// `[view] follow_working`: a tree change waits for V or the comment
     /// box to close.
     follow_stale: bool,
+    /// Editor updates are dropped until then (a key, click or paste).
+    editor_quiet_until: Option<Instant>,
+    /// The editor-follow socket, while listening; dropping it removes it.
+    #[cfg(unix)]
+    editor_listener: Option<debrief_follow::Listener>,
+    #[cfg(not(unix))]
+    editor_listener: Option<()>,
     /// jj: the commit ID of `@` at the pinned operation.
     working_commit: Option<String>,
     /// The open commit (on `Screen::Commit`).
@@ -445,6 +460,8 @@ impl App {
             working_request: 0,
             follow_request: None,
             follow_stale: false,
+            editor_quiet_until: None,
+            editor_listener: None,
             working_commit: None,
             commit: None,
             next_request: 0,
@@ -539,7 +556,11 @@ impl App {
                 self.commit_list_refocus();
                 self.commit_follow();
             }
-            AppEvent::Paste(text) => self.paste(&text),
+            AppEvent::Paste(text) => {
+                self.editor_touch(Instant::now());
+                self.paste(&text);
+            }
+            AppEvent::EditorAt(path, line, now) => self.editor_at(&path, line, now),
             AppEvent::Reload => self.reload(false),
             AppEvent::WorkingChanged => self.working_changed(),
             AppEvent::Loaded { request, result } => self.loaded(request, result),
@@ -562,7 +583,11 @@ impl App {
             AppEvent::MergeSizes { request, result } => self.sizes_loaded(request, result),
             AppEvent::BubbleLoaded { merge, result } => self.bubble_loaded(&merge, result),
             AppEvent::Mouse(m) => {
-                self.mouse(m, Instant::now());
+                let now = Instant::now();
+                if m.kind != crossterm::event::MouseEventKind::Moved {
+                    self.editor_touch(now);
+                }
+                self.mouse(m, now);
                 self.follow_resume();
             }
         }

@@ -466,3 +466,112 @@ fn tmux_zoom_zooms_the_pane_and_unzooms_on_quit() {
     );
     assert!(!zoomed(), "unzoomed after quit");
 }
+
+/// `<leader>O` end to end: tmux splits the editor off beside debrief
+/// without suspending it, the first follow launch starts the listener,
+/// and the editor's `debrief --goto` (the stub below, in the new pane)
+/// moves the diff to a line that was off screen. Only the binary shows
+/// tmux taking `split-window -- argv` and the scope matching across
+/// panes of one window.
+#[test]
+fn leader_shift_o_splits_the_editor_and_follows_its_goto() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    let lines: Vec<String> = (1..=120).map(|i| format!("l{i}")).collect();
+    // Hunks at every 10th line: far more rows than the 20-row pane.
+    let mut changed = lines.clone();
+    for i in (4..120).step_by(10) {
+        changed[i] = format!("l{} edited", i + 1);
+    }
+    common::git_repo(
+        &root,
+        &[
+            ("base", vec![w("long.txt", lines.join("\n") + "\n")]),
+            ("change", vec![w("long.txt", changed.join("\n") + "\n")]),
+        ],
+    );
+    let root = root.canonicalize().unwrap();
+    // A short socket base under /tmp (socket paths are capped near 104
+    // bytes); the editor pane gets tmux's environment, not debrief's, so
+    // the stub sets it itself.
+    let run = tempfile::Builder::new()
+        .prefix("f")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let editor = dir.path().join("editor");
+    let bin = env!("CARGO_BIN_EXE_debrief");
+    std::fs::write(
+        &editor,
+        format!(
+            "#!/bin/sh\nXDG_RUNTIME_DIR={} {} --goto {}:105\nsleep 600\n",
+            quote(run.path()),
+            quote(Path::new(bin)),
+            quote(&root.join("long.txt")),
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let status = dir.path().join("status");
+    let env = format!(
+        "XDG_RUNTIME_DIR={} VISUAL={}",
+        quote(run.path()),
+        quote(&editor)
+    );
+    let Some(tmux) = start(&root, &dir.path().join("cache"), &status, &env) else {
+        return;
+    };
+    tmux.wait_for("the log", |s| s.contains("change"));
+    tmux.keys(&["Enter"]);
+    let screen = tmux.wait_for("the diff", |s| s.contains("l5 edited"));
+    assert!(
+        !screen.contains("l105 edited"),
+        "starts off screen:\n{screen}"
+    );
+    // On the first hunk: the message row has no file.
+    tmux.keys(&["]", "c", "Space", "O"]);
+    let panes = || {
+        let out = tmux.cmd(&["display-message", "-p", "-t", "e2e", "#{window_panes}"]);
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while panes() != "2" {
+        assert!(Instant::now() < deadline, "no split:\n{}", tmux.capture());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // The editor pane has focus; debrief is pane 0 of the window. The
+    // stub sends once, as soon as it starts: the listener is bound before
+    // tmux runs the split, so it can't miss it.
+    let debrief_pane = || {
+        String::from_utf8_lossy(&tmux.cmd(&["capture-pane", "-p", "-t", "e2e.0"]).stdout)
+            .into_owned()
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let s = debrief_pane();
+        if s.contains("l105 edited") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "did not follow:\n{s}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // The shared layout: `debrief-follow-<uid>/<scope>.debrief.<pid>.sock`.
+    let dirs: Vec<_> = std::fs::read_dir(run.path()).unwrap().flatten().collect();
+    assert_eq!(dirs.len(), 1, "one socket dir");
+    let name = dirs[0].file_name().to_string_lossy().into_owned();
+    assert!(name.starts_with("debrief-follow-"), "{name}");
+    let socks: Vec<String> = std::fs::read_dir(dirs[0].path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        socks.len() == 1
+            && socks[0].starts_with('t')
+            && socks[0].contains(".debrief.")
+            && socks[0].ends_with(".sock"),
+        "{socks:?}"
+    );
+}

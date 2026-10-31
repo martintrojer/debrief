@@ -43,6 +43,9 @@ pub type EnvLookup = dyn Fn(&str) -> Option<String>;
 pub enum Effect {
     /// Run a launcher.
     Launch(LaunchCommand),
+    /// A `follow = true` launcher inside tmux: `tmux split-window` running
+    /// the command beside debrief. Runs without suspending the TUI.
+    Split(LaunchCommand),
     /// `C-e` in the comment prompt: edit the draft in the editor, then save.
     EditComment(super::comment::Draft),
     /// `C-e` in the review picker: edit comment `id`'s body.
@@ -114,12 +117,19 @@ pub fn parse_key(key: &str) -> Result<Vec<char>, String> {
 /// Launcher key bindings: the chars after the leader and the index into
 /// `Config.launch`. Bad keys are skipped with a message.
 pub(super) fn bindings(launchers: &[Launcher]) -> (Vec<(Vec<char>, usize)>, Vec<String>) {
-    let mut out = Vec::new();
+    let mut out: Vec<(Vec<char>, usize)> = Vec::new();
     let mut errors = Vec::new();
     for (i, l) in launchers.iter().enumerate() {
         let Some(key) = &l.key else { continue };
         match parse_key(key) {
-            Ok(seq) => out.push((seq, i)),
+            Ok(seq) => {
+                // A later entry (the user's, after the defaults) takes the key.
+                if let Some(j) = out.iter().position(|(s, _)| *s == seq) {
+                    let lost = &launchers[out.remove(j).1].name;
+                    errors.push(format!("launcher {}: {key} is taken by {}", lost, l.name));
+                }
+                out.push((seq, i));
+            }
             Err(e) => errors.push(format!("launcher {}: {e}", l.name)),
         }
     }
@@ -231,14 +241,46 @@ impl App {
     }
 
     /// Run the queued side effect (if any). The caller has suspended the
-    /// TUI; `run` does this. Afterwards the batch is re-read; the view
-    /// stays where it was.
+    /// TUI when [`App::effect_suspends`]; `run` does this. Afterwards the
+    /// batch is re-read; the view stays where it was.
     pub fn run_pending_effect(&mut self) {
         match self.effect.take() {
             Some(Effect::Launch(cmd)) => {
                 self.run_launch(&cmd);
                 // The command may have changed files.
                 self.after_launch();
+            }
+            // tmux returns once the pane is up; the watchers see saves.
+            // Listen first, so the editor's first `--goto` can't be
+            // missed; then split through the pane runner (no terminal I/O
+            // while the TUI is up).
+            Some(Effect::Split(cmd)) => {
+                self.status.clear();
+                self.editor_follow_start();
+                // The key that launched it hands over to the editor: its
+                // first position (on opening the file) is wanted.
+                self.editor_quiet_until = None;
+                let ran = (self.pane_runner)(&cmd);
+                // A slow tmux still opens the split.
+                let ran = match ran {
+                    Err(e) if e.is::<super::pane_nav::StillRunning>() => Ok(Exit::Code(0)),
+                    r => r,
+                };
+                if let Err(e) = ran.and_then(|x| match x {
+                    Exit::Code(0) => Ok(()),
+                    Exit::Code(n) => anyhow::bail!("tmux exited with status {n}"),
+                    Exit::Signal(n) => anyhow::bail!("tmux killed by signal {n}"),
+                }) {
+                    // Keep a "follow off" from the listener beside it.
+                    let msg = format!("{}: {e:#}", cmd.name);
+                    let prev = std::mem::take(&mut self.status);
+                    self.set_status(if prev.is_empty() {
+                        msg
+                    } else {
+                        format!("{prev}; {msg}")
+                    });
+                }
+                return;
             }
             Some(Effect::EditComment(d)) => self.run_comment_editor(d),
             Some(Effect::EditReviewComment { id, initial }) => {
@@ -383,10 +425,26 @@ impl App {
     }
 
     fn queue_launch(&mut self, l: &Launcher, target: Result<(PathBuf, u32), String>) {
-        match self.build_launch(l, target) {
-            Ok(cmd) => self.effect = Some(Effect::Launch(cmd)),
-            Err(msg) => self.set_status(msg),
-        }
+        let cmd = match self.build_launch(l, target) {
+            Ok(cmd) => cmd,
+            Err(msg) => return self.set_status(msg),
+        };
+        let pane = l
+            .follow
+            .then(|| debrief_follow::tmux_pane(&*self.env))
+            .flatten();
+        self.effect = Some(match pane {
+            Some(pane) => Effect::Split(LaunchCommand {
+                argv: debrief_follow::split_argv(&pane, &cmd.cwd, &cmd.argv),
+                ..cmd
+            }),
+            None => Effect::Launch(cmd),
+        });
+    }
+
+    /// Whether the queued effect needs the TUI suspended (a split doesn't).
+    pub fn effect_suspends(&self) -> bool {
+        !matches!(self.effect, None | Some(Effect::Split(_)))
     }
 
     /// Hand the working-copy markdown file `path` (repo-relative) at
@@ -538,6 +596,19 @@ mod tests {
         assert!(parse_key("<leader><C-x>").is_err());
         assert!(parse_key("x").is_err());
         assert!(parse_key("<leader>").is_err());
+    }
+
+    #[test]
+    fn a_later_launcher_takes_a_shared_key_with_a_warning() {
+        let l = |name: &str| Launcher {
+            name: name.into(),
+            key: Some("<leader>O".into()),
+            command: vec!["x".into()],
+            follow: false,
+        };
+        let (b, errors) = bindings(&[l("edit-follow"), l("mine")]);
+        assert_eq!(b, [(vec!['O'], 1)]);
+        assert_eq!(errors, ["launcher edit-follow: <leader>O is taken by mine"]);
     }
 
     #[test]

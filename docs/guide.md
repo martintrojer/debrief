@@ -87,6 +87,7 @@ many have loaded. The commit list pages the same way.
 | `zR` / `zM` | open every fold, nested ones too / close every fold |
 | `<leader>m` | merges as folds / the flat list |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
+| `<leader>O` | the same in a tmux split, followed (see [Following your editor](#following-your-editor)) |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `<leader>rs` | list the saved review sessions |
 | `q` | quit (asks first when there is unsaved review work) |
@@ -249,6 +250,7 @@ It is cut from the left when space runs short, and dropped first.
 | `C-h` / `C-l` (or `C-w h` / `C-w l`) | move between the file list and the diff |
 | `Enter` | in a `.md` file: open it in ramble at this line (the header: line 1) |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
+| `<leader>O` | the same in a tmux split beside debrief, followed (see [Following your editor](#following-your-editor)) |
 | `<leader>ss` | save this commit's review session |
 | `<leader>F` | clear the log's path and text filters |
 | `<leader>m` | merges as folds / the flat list (the open commit stays open) |
@@ -400,6 +402,72 @@ Add debrief to its pattern in `~/.tmux.conf`, before TPM's `run` line:
 
 ```tmux
 set -g @vim_navigator_pattern '(\S+/)?g?\.?(view|l?n?vim?x?|fzf|debrief|ramble)(diff)?(-wrapped)?'
+```
+
+## Following your editor
+
+`<leader>O` opens `$EDITOR` at the cursor's file and line in a tmux split
+beside debrief, without suspending it, and debrief starts following the
+editor's cursor. `debrief --follow` follows from the start, for an editor
+you opened yourself. Outside tmux, `<leader>O` runs the editor like
+`<leader>o` and nothing is followed.
+
+- The diff cursor moves to the editor's line in the open commit. A line
+  outside the hunks goes to the closest line shown in that file, and side
+  by side moves to the new side. The view scrolls only when the line is
+  off screen, and then centres it.
+- It's best effort. The editor's line numbers are the working copy's, so
+  on an older commit they can drift from the diff's. The working copy's
+  own diff matches exactly, and it reloads as you save.
+- Files not in the open commit, and anything on the log, are ignored.
+- Using debrief yourself (a key, a click or scroll, a paste) pauses
+  following for 2 seconds. It also waits while a prompt, picker, comment
+  box, visual mode or half-typed key sequence is open.
+- Inside tmux, debrief only follows editors in its own tmux window.
+
+The editor tells debrief with `debrief --goto FILE:LINE` (or
+`ramble --goto`, which reaches the same listeners). It finds the
+following debriefs and rambles (sockets in
+`$XDG_RUNTIME_DIR/debrief-follow-<uid>/`, else `$TMPDIR`, else `/tmp`),
+picks those in its own tmux window, and exits 0 even when none is
+listening. It takes a few milliseconds, so an editor can run it on every
+cursor move. Linux and macOS only.
+
+For nvim, put this in your config (e.g. `~/.config/nvim/plugin/follow.lua`):
+
+```lua
+local bin = vim.fn.executable("debrief") == 1 and "debrief"
+	or vim.fn.executable("ramble") == 1 and "ramble"
+if not bin then
+	return
+end
+
+local last, timer
+
+local function send()
+	if vim.bo.buftype ~= "" then
+		return
+	end
+	local path = vim.api.nvim_buf_get_name(0)
+	if path == "" then
+		return
+	end
+	local target = path .. ":" .. vim.api.nvim_win_get_cursor(0)[1]
+	if target == last then
+		return
+	end
+	last = target
+	vim.system({ bin, "--goto", target })
+end
+
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "BufEnter" }, {
+	group = vim.api.nvim_create_augroup("debrief_follow", {}),
+	callback = function()
+		timer = timer or vim.uv.new_timer()
+		timer:stop()
+		timer:start(50, 0, vim.schedule_wrap(send))
+	end,
+})
 ```
 
 ## Mouse
@@ -573,8 +641,9 @@ in another, and there debrief refuses to hand those `.md` files to ramble
 option commented out, and refuses to overwrite a file. An unknown key or a
 bad value stops debrief at start (exit 2) with one line naming the file,
 line, key and what it allows. Two exceptions start anyway with a warning
-on the status line: a launcher with a bad `key` is left unbound, and an
-empty or repeated `[review] kinds` id is dropped.
+on the status line: a launcher with a bad `key` is left unbound (of two
+on one key, the later one takes it), and an empty or repeated
+`[review] kinds` id is dropped.
 
 The sections are `[view]` (what shows at start), `[render]`
 (highlighting), `[theme]` (colours), `[keys]`, `[mouse]`, `[log]` (which commits load: `revset`, `limit`, and `trunk`,
@@ -654,8 +723,12 @@ session. The rows without a key are set only in the file.
 A launcher runs a command with the TUI suspended, then reloads. Arguments
 are not passed through a shell. Variables: `${file}` `${line}` `${root}`
 `${editor}` (`$VISUAL`, `$EDITOR` or `vi`). The defaults are `edit`
-(`<leader>o`, the editor) and `md` (`Enter` in a `.md` file's diff,
-ramble at that line; it needs ramble 0.3.2 or later for `--line`). A `key` is `<leader>` followed by plain characters. Entries
+(`<leader>o`, the editor), `edit-follow` (`<leader>O`, the editor in a
+tmux split, followed) and `md` (`Enter` in a `.md` file's diff,
+ramble at that line; it needs ramble 0.3.2 or later for `--line`).
+`follow = true` makes a launcher run in a tmux split beside debrief
+instead of suspending it, and starts [following your
+editor](#following-your-editor); outside tmux it runs as usual. A `key` is `<leader>` followed by plain characters. Entries
 merge into the defaults by name; `disabled = true` drops one. A launcher
 key wins over a built-in `<leader>` key it shares a
 prefix with.

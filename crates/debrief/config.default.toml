@@ -299,10 +299,14 @@
 # Arguments are not passed through a shell. Variables: ${file} ${line}
 # ${root} ${editor} (an argument that is exactly "${editor}" expands to
 # $VISUAL / $EDITOR / vi, split into words). `key` is <leader> followed
-# by plain characters; a bad key is skipped with a warning. A launcher
+# by plain characters; a bad key is skipped with a warning, and of two
+# launchers on one key the later takes it, with a warning. A launcher
 # key wins over a built-in <leader> key it shares a prefix with. An entry
 # with the same name replaces a default (keeping what it leaves out); new
-# names are added; `disabled = true` removes a default.
+# names are added; `disabled = true` removes a default. `follow = true`
+# runs the command in a tmux split beside debrief (no suspend) and makes
+# debrief follow the editor's cursor (see the guide's "Following your
+# editor"); outside tmux it runs like any launcher.
 # For example:
 #   [[launch]]
 #   name = "lazygit"
@@ -326,3 +330,11 @@
 # name = "edit"
 # key = "<leader>o"
 # command = ["${editor}", "+${line}", "${file}"]
+
+# The default "edit-follow" launcher, on <leader>O: the editor in a tmux
+# split, followed.
+# [[launch]]
+# name = "edit-follow"
+# key = "<leader>O"
+# command = ["${editor}", "+${line}", "${file}"]
+# follow = true

@@ -543,6 +543,8 @@ impl App {
             let Some(key) = &l.key else { continue };
             let desc = if l.name == super::config::EDIT {
                 "open $EDITOR at this file and line".to_string()
+            } else if l.name == super::config::EDIT_FOLLOW {
+                "open $EDITOR in a tmux split and follow it (tmux only)".to_string()
             } else {
                 format!("run launcher {}", l.name)
             };

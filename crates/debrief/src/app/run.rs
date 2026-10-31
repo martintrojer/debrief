@@ -90,9 +90,14 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, mouse: bool) -> any
     if let Err(e) = app.start_watcher() {
         app.set_status(format!("live reload off: {e:#}"));
     }
+    if app.opts_follow() {
+        app.editor_follow_start();
+    }
     while !app.should_quit() {
-        if app.pending_effect().is_some() {
+        if app.effect_suspends() {
             suspend_and_run(terminal, mouse, || app.run_pending_effect())?;
+        } else if app.pending_effect().is_some() {
+            app.run_pending_effect();
         }
         terminal.draw(|f| app.render(f))?;
         if event::poll(POLL)? {

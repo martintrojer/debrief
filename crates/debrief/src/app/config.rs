@@ -409,10 +409,15 @@ pub struct Launcher {
     /// Arguments, no shell. `${file}`, `${line}`, `${root}`, and `${editor}`
     /// (an argument that is exactly `${editor}` expands to its words).
     pub command: Vec<String>,
+    /// Inside tmux, run in a split beside debrief (no suspend) and follow
+    /// the editor's cursor; outside tmux, a plain launcher.
+    pub follow: bool,
 }
 
 /// The editor launcher's name; `<leader>o` by default.
 pub const EDIT: &str = "edit";
+/// The editor-in-a-split launcher's name; `<leader>O` by default.
+pub const EDIT_FOLLOW: &str = "edit-follow";
 /// The markdown hand-off launcher's name; Enter on a `.md` file header.
 pub const MD: &str = "md";
 
@@ -443,11 +448,19 @@ impl Config {
                     name: MD.into(),
                     key: None,
                     command: strings(&["ramble", "--line", "${line}", "${file}"]),
+                    follow: false,
                 },
                 Launcher {
                     name: EDIT.into(),
                     key: Some("<leader>o".into()),
                     command: strings(&["${editor}", "+${line}", "${file}"]),
+                    follow: false,
+                },
+                Launcher {
+                    name: EDIT_FOLLOW.into(),
+                    key: Some("<leader>O".into()),
+                    command: strings(&["${editor}", "+${line}", "${file}"]),
+                    follow: true,
                 },
             ],
         }
@@ -583,23 +596,26 @@ impl Config {
                 }
                 continue;
             }
-            let (key, command) = match pos {
+            let (key, command, follow) = match pos {
                 // Overriding a default keeps whatever the entry leaves out.
                 Some(i) => (
                     l.key.or_else(|| c.launch[i].key.clone()),
                     l.command.unwrap_or_else(|| c.launch[i].command.clone()),
+                    l.follow.unwrap_or(c.launch[i].follow),
                 ),
                 None => (
                     l.key,
                     l.command.ok_or_else(|| {
                         (None, format!("launcher `{}` is missing `command`", l.name))
                     })?,
+                    l.follow.unwrap_or(false),
                 ),
             };
             let new = Launcher {
                 name: l.name,
                 key: key.filter(|k| !k.is_empty()),
                 command,
+                follow,
             };
             match pos {
                 Some(i) => c.launch[i] = new,
@@ -898,6 +914,7 @@ struct RawLauncher {
     name: String,
     key: Option<String>,
     command: Option<Vec<String>>,
+    follow: Option<bool>,
     #[serde(default)]
     disabled: bool,
 }
@@ -913,6 +930,10 @@ mod tests {
         assert_eq!(c.launch[0].name, MD);
         assert_eq!(c.launch[0].key, None);
         assert_eq!(c.launch[1].key.as_deref(), Some("<leader>o"));
+        assert!(!c.launch[1].follow);
+        assert_eq!(c.launch[2].name, EDIT_FOLLOW);
+        assert_eq!(c.launch[2].key.as_deref(), Some("<leader>O"));
+        assert!(c.launch[2].follow);
         assert_eq!(Config::parse("").unwrap(), c);
     }
 
@@ -942,7 +963,7 @@ command = ["lazygit"]
         assert_eq!(c.send.command, ["debrief-send"]);
         assert_eq!(c.send.preamble.as_deref(), Some(""));
         let names: Vec<_> = c.launch.iter().map(|l| l.name.as_str()).collect();
-        assert_eq!(names, ["md", "lg"]);
+        assert_eq!(names, ["md", "edit-follow", "lg"]);
         assert_eq!(c.launch[0].command, ["glow", "${file}"]);
     }
 

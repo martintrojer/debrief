@@ -1,5 +1,6 @@
 //! Command line: `debrief [PATH] [--branch B | --revset R] [--limit N] [--cache-dir DIR]
-//! [--state-dir DIR] [--config PATH] [--no-snapshot]`, or `debrief --init-config [--config PATH]`.
+//! [--state-dir DIR] [--config PATH] [--no-snapshot] [--follow]`, `debrief --init-config
+//! [--config PATH]`, or `debrief --goto FILE:LINE`.
 
 use std::path::PathBuf;
 
@@ -50,8 +51,24 @@ pub struct Cli {
     pub no_snapshot: bool,
     /// Write the commented default config to the config path (or
     /// `--config`) and exit; an existing file is left alone (exit 1).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "goto")]
     pub init_config: bool,
+    /// Follow the editor's cursor: the open commit's diff moves to where
+    /// `--goto` (an editor hook) says it is. `<leader>O` starts it too.
+    #[arg(long)]
+    pub follow: bool,
+    /// Tell following debriefs and rambles that the editor's cursor is on
+    /// FILE:LINE, then exit (0 even when none listens).
+    #[arg(
+        long,
+        value_name = "FILE:LINE",
+        value_parser = debrief_follow::parse_goto,
+        conflicts_with_all = [
+            "path", "revset", "branch", "limit", "cache_dir", "state_dir",
+            "config", "no_snapshot", "follow",
+        ]
+    )]
+    pub goto: Option<(PathBuf, usize)>,
 }
 
 /// A startup failure: the message for stderr, and exit code 2.
@@ -108,6 +125,7 @@ impl Cli {
             path: None,
             limit: self.limit.unwrap_or(config.log.limit),
             config,
+            follow: self.follow,
         })
     }
 }
@@ -210,6 +228,30 @@ mod tests {
         let e = Cli::try_parse_from(["debrief", "--branch", "b", "--revset", "r"]).unwrap_err();
         assert_eq!(e.kind(), clap::error::ErrorKind::ArgumentConflict);
         assert_eq!(e.exit_code(), 2);
+    }
+
+    #[test]
+    fn follow_reaches_the_start_options_and_goto_stands_alone() {
+        let c = Cli::try_parse_from(["debrief", "--follow"]).unwrap();
+        let o = c
+            .start_options(Some("/c".into()), Some("/s".into()), None)
+            .unwrap();
+        assert!(o.follow);
+        let c = Cli::try_parse_from(["debrief", "--goto", "a:b.rs:12"]).unwrap();
+        assert_eq!(c.goto, Some(("a:b.rs".into(), 12)));
+        for argv in [
+            &["debrief", "--goto", "a.rs:1", "--follow"][..],
+            &["debrief", "--goto", "a.rs:1", "some/path"],
+            &["debrief", "--goto", "a.rs:1", "--init-config"],
+        ] {
+            let e = Cli::try_parse_from(argv).unwrap_err();
+            assert_eq!(
+                e.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{argv:?}"
+            );
+        }
+        assert!(Cli::try_parse_from(["debrief", "--goto", "a.rs:0"]).is_err());
     }
 
     #[test]

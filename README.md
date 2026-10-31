@@ -42,7 +42,8 @@ agent as one markdown review.
 - **A git client.** No staging, committing or rebasing.
 - **A forge or PR review tool.** It reviews local commits and hands the
   review to whoever made them.
-- **An editor.** `<leader>o` opens `$EDITOR` at the line.
+- **An editor.** `<leader>o` opens `$EDITOR` at the line; `<leader>O`
+  opens it in a tmux split and the diff follows its cursor.
 - **A markdown reader.** `.md` files open in ramble.
 
 ## Install

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/debrief-review", "crates/debrief"]
+members = ["crates/debrief-review", "crates/debrief-follow", "crates/debrief"]
 
 [workspace.package]
 edition = "2024"

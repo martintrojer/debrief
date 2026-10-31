@@ -476,6 +476,7 @@ dependencies = [
  "blake3",
  "clap",
  "crossterm",
+ "debrief-follow",
  "debrief-review",
  "dirs",
  "ignore",
@@ -489,6 +490,14 @@ dependencies = [
  "two-face",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "debrief-follow"
+version = "0.6.4"
+dependencies = [
+ "rustix",
+ "tempfile",
 ]
 
 [[package]]

@@ -41,6 +41,7 @@ crates/
 │   ├── store        Review: open / add / edit / remove / restore / clear, flock + rename
 │   ├── export       batch → markdown for an agent
 │   └── handback     [send] command on stdin, else OSC 52
+├── debrief-follow   editor-cursor sockets shared with ramble: listen, --goto, tmux scope, split argv
 └── debrief          the binary
     ├── cli          args → start options
     ├── vcs          Vcs trait; git.rs and jj.rs run the CLIs; diff.rs parses unified diffs
@@ -52,7 +53,9 @@ crates/
     └── ui           ratatui widgets only, no logic
 ```
 
-ramble depends on `debrief-review` for its comment mode.
+ramble depends on `debrief-review` for its comment mode, and on
+`debrief-follow` for `--follow` / `--goto`, so one editor hook reaches
+both tools.
 
 ## Data flow
 
@@ -166,7 +169,11 @@ from its root with the same options and jj operation pin. Workers load
 commit diffs, highlighting, git's working copy and its log row, and log
 stats (after the cursor rests; the most recent are cached per commit).
 Every request carries a number, and an answer for a request that is no
-longer current is dropped. The watchers debounce into one event. Unit
+longer current is dropped. The watchers debounce into one event. The editor-follow listener (a
+thread on a Unix socket, started by `--follow` or the first
+`follow = true` launcher run inside tmux) sends `AppEvent::EditorAt`; follow launchers
+run `tmux split-window` without suspending the TUI
+([spec](specs/2026-10-31-follow-editor.md)). Unit
 tests run without an event sender, so the same work runs inline in the
 action that starts it.
 

@@ -6,6 +6,20 @@ use debrief::cli::{Cli, StartError, init_config, open_error};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Some((file, line)) = &cli.goto {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        return match debrief_follow::goto(&debrief_follow::goto_path(&cwd, file), *line) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(msg) => {
+                eprintln!("debrief: {msg}");
+                ExitCode::from(2)
+            }
+        };
+    }
+    if cli.follow && cfg!(not(unix)) {
+        eprintln!("debrief: --follow needs Linux or macOS");
+        return ExitCode::from(2);
+    }
     if cli.init_config {
         return match init_config(&cli, debrief::app::config::Config::default_path()) {
             Ok(path) => {

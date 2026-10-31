@@ -127,8 +127,8 @@ fn uncommented_default_file_is_the_defaults() {
     }
     assert_eq!(
         uncommented.lines().filter(|l| *l == "[[launch]]").count(),
-        2,
-        "md and edit"
+        3,
+        "md, edit and edit-follow"
     );
     // The theme stays unresolved, and the file sets every key (explicitly,
     // even at the Mocha value): everything else equals the defaults, and the

@@ -24,7 +24,7 @@ pub fn run(mut app: App) -> anyhow::Result<()> {
     // `[view] tmux_zoom`: zoom before the terminal is set up, so the first
     // draw already has the whole window.
     let zoom = zoom::wanted(app.config().view.tmux_zoom, |k| std::env::var(k).ok())
-        .and_then(|pane| zoom::zoom_in(&mut zoom::tmux, &pane));
+        .and_then(|mux| zoom::zoom_in(&mut zoom::run, &mux));
     // Installs a panic hook that restores the terminal before unwinding.
     let mut terminal = match ratatui::try_init().context("initialising terminal") {
         Ok(t) => t,
@@ -51,7 +51,7 @@ pub fn run(mut app: App) -> anyhow::Result<()> {
 
 fn unzoom(zoom: Option<&zoom::Zoom>) {
     if let Some(z) = zoom {
-        z.zoom_out(&mut zoom::tmux);
+        z.zoom_out(&mut zoom::run);
     }
 }
 

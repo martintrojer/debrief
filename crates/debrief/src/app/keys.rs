@@ -122,7 +122,7 @@ pub enum Action {
     /// are panes).
     Window(super::pane_nav::Dir),
     /// `C-h/j/k/l` (`[keys] pane_nav`): as `C-w`, and at the edge the
-    /// tmux pane that way.
+    /// tmux or rex pane that way.
     PaneNav(super::pane_nav::Dir),
     /// File list: select the next / previous row, a file or a directory
     /// (a file jumps the diff).

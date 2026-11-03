@@ -497,6 +497,7 @@ name = "debrief-follow"
 version = "0.6.5"
 dependencies = [
  "rustix",
+ "serde_json",
  "tempfile",
 ]
 

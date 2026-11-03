@@ -483,26 +483,27 @@ const FOLD_TOGGLE: &str = "merges as folds / the flat list";
 /// `<leader>E`.
 const COMMIT_LIST_TOGGLE: &str = "show or hide the commit list under the files";
 
-/// `C-h/j/k/l` (`[keys] pane_nav`): the panes, then tmux's past the edge.
+/// `C-h/j/k/l` (`[keys] pane_nav`): the panes, then tmux's or rex's past
+/// the edge.
 const PANE_NAV: &[Binding] = {
     use Ctx::{Commit as C, Commits as CL, Files as F, Log as L};
     use Group as G;
     &[
-        b("C-h", C, G::Files, "as C-w h (at the edge: tmux)"),
-        b("C-l", C, G::Files, "as C-w l (at the edge: tmux)"),
-        b("C-j, C-k", C, G::Files, "the tmux pane below, above"),
-        b("C-h", F, G::Files, "as C-w h (at the edge: tmux)"),
-        b("C-l", F, G::Files, "as C-w l (at the edge: tmux)"),
-        b("C-j, C-k", F, G::Files, "the tmux pane below, above"),
-        b("C-h", CL, G::Commits, "as C-w h (at the edge: tmux)"),
-        b("C-l", CL, G::Commits, "as C-w l (at the edge: tmux)"),
-        b("C-j", CL, G::Commits, "the tmux pane below"),
-        b("C-k", CL, G::Commits, "to the file tree (none: tmux)"),
+        b("C-h", C, G::Files, "as C-w h (at the edge: tmux/rex)"),
+        b("C-l", C, G::Files, "as C-w l (at the edge: tmux/rex)"),
+        b("C-j, C-k", C, G::Files, "the tmux/rex pane below, above"),
+        b("C-h", F, G::Files, "as C-w h (at the edge: tmux/rex)"),
+        b("C-l", F, G::Files, "as C-w l (at the edge: tmux/rex)"),
+        b("C-j, C-k", F, G::Files, "the tmux/rex pane below, above"),
+        b("C-h", CL, G::Commits, "as C-w h (at the edge: tmux/rex)"),
+        b("C-l", CL, G::Commits, "as C-w l (at the edge: tmux/rex)"),
+        b("C-j", CL, G::Commits, "the tmux/rex pane below"),
+        b("C-k", CL, G::Commits, "to the file tree (none: tmux/rex)"),
         b(
             "C-h, C-j, C-k, C-l",
             L,
             G::General,
-            "the tmux pane left, below, above, right",
+            "the tmux/rex pane left, below, above, right",
         ),
     ]
 };
@@ -525,7 +526,9 @@ impl App {
             if self.commit_list.on {
                 for b in out.iter_mut().filter(|b| b.context == Ctx::Files) {
                     if b.keys == "C-j, C-k" {
-                        b.desc = Cow::Borrowed("C-j to the commit list (hidden: tmux); C-k tmux");
+                        b.desc = Cow::Borrowed(
+                            "C-j to the commit list (hidden: tmux/rex); C-k tmux/rex",
+                        );
                     }
                 }
             }
@@ -544,7 +547,7 @@ impl App {
             let desc = if l.name == super::config::EDIT {
                 "open $EDITOR at this file and line".to_string()
             } else if l.name == super::config::EDIT_FOLLOW {
-                "open $EDITOR in a tmux split and follow it (tmux only)".to_string()
+                "open $EDITOR in a tmux/rex split and follow it (tmux, rex only)".to_string()
             } else {
                 format!("run launcher {}", l.name)
             };

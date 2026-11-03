@@ -371,6 +371,50 @@ fn a_slow_tmux_is_not_an_error() {
 }
 
 #[test]
+fn leader_shift_o_in_rex_splits_beside_debriefs_block() {
+    let f = fixture();
+    let rex: &[(&str, &str)] = &[
+        ("REX_SESSION", "session:s"),
+        ("REX_BLOCK", "block:b"),
+        ("REX_BIN_DIR", "/Apps/Rex/MacOS"),
+        ("VISUAL", "nvim"),
+    ];
+    let mut app = f.app_with(Config::defaults(), rex);
+    keys(&mut app, "gg");
+    press(&mut app, KeyCode::Enter);
+    app.editor_at(&f.path("long.txt"), 10, later());
+    keys(&mut app, " O");
+    let Some(Effect::Split(cmd)) = app.pending_effect().cloned() else {
+        panic!("not a split: {:?} / {}", app.pending_effect(), app.status());
+    };
+    assert!(!app.effect_suspends());
+    let root = f.root.display().to_string();
+    let file = f.path("long.txt").display().to_string();
+    assert_eq!(
+        cmd.argv,
+        [
+            "/Apps/Rex/MacOS/rex",
+            "--autostart=false",
+            "split",
+            "-s",
+            "session:s",
+            "-b",
+            "block:b",
+            "--split=right",
+            "-c",
+            &root,
+            "--",
+            "nvim",
+            "+10",
+            &file
+        ]
+    );
+    let mut app = app.with_pane_runner(|_| Ok(Exit::Code(2)));
+    app.run_pending_effect();
+    assert_eq!(app.status(), "edit-follow: rex exited with status 2");
+}
+
+#[test]
 fn leader_shift_o_outside_tmux_is_a_plain_launch() {
     let f = fixture();
     let mut app = f.app_with(Config::defaults(), &[("VISUAL", "nvim")]);

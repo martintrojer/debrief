@@ -35,7 +35,7 @@ agent as one markdown review.
   `--no-snapshot` turns it off.
 - **Your fingers already know it.** Vim motions, search and visual mode;
   `g?` lists every key, and `C-h/j/k/l` move between panes and on into
-  tmux.
+  tmux or rex.
 
 ## What it isn't
 
@@ -43,7 +43,7 @@ agent as one markdown review.
 - **A forge or PR review tool.** It reviews local commits and hands the
   review to whoever made them.
 - **An editor.** `<leader>o` opens `$EDITOR` at the line; `<leader>O`
-  opens it in a tmux split and the diff follows its cursor.
+  opens it in a tmux or rex split and the diff follows its cursor.
 - **A markdown reader.** `.md` files open in ramble.
 
 ## Install
@@ -74,7 +74,7 @@ out.
 ## More
 
 - [Guide](docs/guide.md): the log, the commit view, keys, comments,
-  sessions, sending, tmux
+  sessions, sending, tmux and rex
 - [Default config](crates/debrief/config.default.toml): every option, with
   its default
 - [Design](docs/design.md): how it works and why

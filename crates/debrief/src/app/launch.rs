@@ -43,8 +43,9 @@ pub type EnvLookup = dyn Fn(&str) -> Option<String>;
 pub enum Effect {
     /// Run a launcher.
     Launch(LaunchCommand),
-    /// A `follow = true` launcher inside tmux: `tmux split-window` running
-    /// the command beside debrief. Runs without suspending the TUI.
+    /// A `follow = true` launcher inside tmux or rex: `tmux split-window`
+    /// or `rex split` running the command beside debrief. Runs without
+    /// suspending the TUI.
     Split(LaunchCommand),
     /// `C-e` in the comment prompt: edit the draft in the editor, then save.
     EditComment(super::comment::Draft),
@@ -63,6 +64,16 @@ pub struct LaunchVars {
     pub root: PathBuf,
     /// `$VISUAL`, else `$EDITOR`, else `vi`, split on whitespace.
     pub editor: Vec<String>,
+}
+
+/// The multiplexer a split runs, for its error: `tmux` or `rex` (the
+/// program's file name, as rex may run from `$REX_BIN_DIR`).
+fn mux_name(split: &LaunchCommand) -> &str {
+    split
+        .argv
+        .first()
+        .and_then(|p| std::path::Path::new(p).file_name()?.to_str())
+        .unwrap_or("multiplexer")
 }
 
 /// Substitute variables in each argument (no shell). An argument that is
@@ -250,7 +261,8 @@ impl App {
                 // The command may have changed files.
                 self.after_launch();
             }
-            // tmux returns once the pane is up; the watchers see saves.
+            // The multiplexer returns once the pane is up; the watchers see
+            // saves.
             // Listen first, so the editor's first `--goto` can't be
             // missed; then split through the pane runner (no terminal I/O
             // while the TUI is up).
@@ -261,15 +273,16 @@ impl App {
                 // first position (on opening the file) is wanted.
                 self.editor_quiet_until = None;
                 let ran = (self.pane_runner)(&cmd);
-                // A slow tmux still opens the split.
+                // A slow multiplexer still opens the split.
                 let ran = match ran {
                     Err(e) if e.is::<super::pane_nav::StillRunning>() => Ok(Exit::Code(0)),
                     r => r,
                 };
+                let mux = mux_name(&cmd);
                 if let Err(e) = ran.and_then(|x| match x {
                     Exit::Code(0) => Ok(()),
-                    Exit::Code(n) => anyhow::bail!("tmux exited with status {n}"),
-                    Exit::Signal(n) => anyhow::bail!("tmux killed by signal {n}"),
+                    Exit::Code(n) => anyhow::bail!("{mux} exited with status {n}"),
+                    Exit::Signal(n) => anyhow::bail!("{mux} killed by signal {n}"),
                 }) {
                     // Keep a "follow off" from the listener beside it.
                     let msg = format!("{}: {e:#}", cmd.name);
@@ -429,13 +442,13 @@ impl App {
             Ok(cmd) => cmd,
             Err(msg) => return self.set_status(msg),
         };
-        let pane = l
+        let mux = l
             .follow
-            .then(|| debrief_follow::tmux_pane(&*self.env))
+            .then(|| debrief_follow::Mux::detect(&*self.env))
             .flatten();
-        self.effect = Some(match pane {
-            Some(pane) => Effect::Split(LaunchCommand {
-                argv: debrief_follow::split_argv(&pane, &cmd.cwd, &cmd.argv),
+        self.effect = Some(match mux {
+            Some(mux) => Effect::Split(LaunchCommand {
+                argv: mux.split_argv(&cmd.cwd, &cmd.argv),
                 ..cmd
             }),
             None => Effect::Launch(cmd),

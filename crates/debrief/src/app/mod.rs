@@ -365,10 +365,12 @@ pub struct App {
     /// A side effect waiting for the suspended TUI.
     effect: Option<Effect>,
     runner: Box<launch::Runner>,
-    /// Runs `tmux select-pane` for a pane move at the edge
-    /// (`pane_nav::spawn_capped` by default: never blocks long).
+    /// Runs the multiplexer's focus move at a pane edge and a follow
+    /// launcher's split (`pane_nav::spawn_capped` by default: never
+    /// blocks long).
     pane_runner: Box<launch::Runner>,
-    /// Environment lookup for `${editor}` and `$TMUX`.
+    /// Environment lookup for `${editor}` and the multiplexer's
+    /// variables (`$TMUX`, `$REX_SESSION`, ...).
     env: Box<launch::EnvLookup>,
     /// The review batch for `vcs.root()`, shared with ramble.
     review: Option<debrief_review::Review>,

@@ -65,9 +65,9 @@
 # below it the view is unified.
 # split_min_width = 140
 
-# Inside tmux, zoom debrief's pane at start (as PREFIX z) for the room
-# full diffs need, and unzoom it on exit. A window already zoomed at
-# start, or unzoomed meanwhile, is left as it is.
+# Inside tmux or rex, zoom debrief's pane at start (as tmux's PREFIX z)
+# for the room full diffs need, and unzoom it on exit. A pane already
+# zoomed at start, or unzoomed meanwhile, is left as it is.
 # tmux_zoom = false
 
 # git: an open working-copy view reloads in place when files change, the
@@ -241,8 +241,8 @@
 
 # C-h/j/k/l move between panes (the file list, the diff and its halves
 # side by side), as C-w h / C-w l do; where there is no pane that way,
-# inside tmux they move to the tmux pane. false unbinds them (the C-w keys
-# stay).
+# inside tmux or rex they move to its pane there. false unbinds them (the
+# C-w keys stay).
 # pane_nav = true
 
 
@@ -304,9 +304,9 @@
 # key wins over a built-in <leader> key it shares a prefix with. An entry
 # with the same name replaces a default (keeping what it leaves out); new
 # names are added; `disabled = true` removes a default. `follow = true`
-# runs the command in a tmux split beside debrief (no suspend) and makes
-# debrief follow the editor's cursor (see the guide's "Following your
-# editor"); outside tmux it runs like any launcher.
+# runs the command in a tmux or rex split beside debrief (no suspend) and
+# makes debrief follow the editor's cursor (see the guide's "Following
+# your editor"); outside both it runs like any launcher.
 # For example:
 #   [[launch]]
 #   name = "lazygit"
@@ -332,7 +332,7 @@
 # command = ["${editor}", "+${line}", "${file}"]
 
 # The default "edit-follow" launcher, on <leader>O: the editor in a tmux
-# split, followed.
+# or rex split, followed.
 # [[launch]]
 # name = "edit-follow"
 # key = "<leader>O"

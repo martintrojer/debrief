@@ -99,8 +99,8 @@ pub struct KeysConfig {
     pub leader: char,
     /// After a pause in a key sequence, show the keys that can come next.
     pub clue: bool,
-    /// `C-h/j/k/l` move between panes, and on into tmux panes at the
-    /// edge; false leaves them unbound (the `C-w` keys stay).
+    /// `C-h/j/k/l` move between panes, and on into tmux or rex panes at
+    /// the edge; false leaves them unbound (the `C-w` keys stay).
     pub pane_nav: bool,
 }
 
@@ -199,8 +199,8 @@ pub struct ViewConfig {
     /// The narrowest diff pane (not counting the file list) side by side
     /// shows in; below it the view is unified.
     pub split_min_width: u16,
-    /// Inside tmux, zoom debrief's pane at start and unzoom it on exit
-    /// (off by default).
+    /// Inside tmux or rex, zoom debrief's pane at start and unzoom it on
+    /// exit (off by default).
     pub tmux_zoom: bool,
     /// git: an open working-copy view reloads in place when the tree
     /// changes, as `r` does (off by default: it waits for `r`).

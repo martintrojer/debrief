@@ -87,7 +87,7 @@ many have loaded. The commit list pages the same way.
 | `zR` / `zM` | open every fold, nested ones too / close every fold |
 | `<leader>m` | merges as folds / the flat list |
 | `<leader>o` | `$EDITOR` at the commit's first changed file still in the working copy, first hunk |
-| `<leader>O` | the same in a tmux split, followed (see [Following your editor](#following-your-editor)) |
+| `<leader>O` | the same in a tmux or rex split, followed (see [Following your editor](#following-your-editor)) |
 | `<leader>rl` `<leader>rr` | list / send the review |
 | `<leader>rs` | list the saved review sessions |
 | `q` | quit (asks first when there is unsaved review work) |
@@ -250,7 +250,7 @@ It is cut from the left when space runs short, and dropped first.
 | `C-h` / `C-l` (or `C-w h` / `C-w l`) | move between the file list and the diff |
 | `Enter` | in a `.md` file: open it in ramble at this line (the header: line 1) |
 | `<leader>o` | `$EDITOR` at this file and line in the working copy |
-| `<leader>O` | the same in a tmux split beside debrief, followed (see [Following your editor](#following-your-editor)) |
+| `<leader>O` | the same in a tmux or rex split beside debrief, followed (see [Following your editor](#following-your-editor)) |
 | `<leader>ss` | save this commit's review session |
 | `<leader>F` | clear the log's path and text filters |
 | `<leader>m` | merges as folds / the flat list (the open commit stays open) |
@@ -375,7 +375,7 @@ the open commit, the diff stays open, no row is marked as open, and `]]`
 / `[[` go to the nearest shown commit after / before it in the log. A
 miss while more history exists says `… more not loaded`.
 
-## Panes and tmux
+## Panes, tmux and rex
 
 `C-h` / `C-j` / `C-k` / `C-l` move to the pane left / below / above /
 right, as in nvim. On the commit screen the panes are the file list and
@@ -385,17 +385,24 @@ log's stats pane never takes the keys.
 
 With the commit list shown, `C-j` / `C-k` move between the tree and the
 list. Where there is no pane that way (the screen edge, `C-j` / `C-k`
-past the list or without it, the log) and debrief runs inside tmux, the move goes on to the tmux pane there, as
+past the list or without it, the log) and debrief runs inside tmux or
+[rex](https://www.superlogical.com/rex), the move goes on to the
+multiplexer's pane there, as
 [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator)
 does. In the comment box the keys stay text input: `C-j` is a new line.
 `[keys] pane_nav = false` unbinds them; the `C-w` keys stay.
 
-With `[view] tmux_zoom = true`, debrief zooms its tmux pane at start
-(as `PREFIX z`) and unzooms it when it exits, so full diffs get the whole
-window. A window that was already zoomed is left zoomed, and one you
-unzoomed meanwhile (`PREFIX z`, or a `C-h/j/k/l` move to another pane,
-which tmux unzooms on) is not zoomed back. A window with one pane has
-nothing to zoom.
+With `[view] tmux_zoom = true`, debrief zooms its tmux or rex pane at
+start (as tmux's `PREFIX z`) and unzooms it when it exits, so full diffs
+get the whole window. A pane that was already zoomed is left zoomed, and
+one you unzoomed meanwhile (`PREFIX z`, or a `C-h/j/k/l` move to another
+pane, which both unzoom on) is not zoomed back. A tmux window with one
+pane has nothing to zoom.
+
+Which multiplexer: tmux when `$TMUX` and `$TMUX_PANE` are set, rex when
+`$REX_SESSION` and `$REX_BLOCK` are (rex runs from `$REX_BIN_DIR` when
+set, else `$PATH`). With both, as when one runs inside the other,
+`$TERM_PROGRAM` picks the inner one.
 
 vim-tmux-navigator only forwards these keys to panes it thinks run vim.
 Add debrief to its pattern in `~/.tmux.conf`, before TPM's `run` line:
@@ -406,10 +413,10 @@ set -g @vim_navigator_pattern '(\S+/)?g?\.?(view|l?n?vim?x?|fzf|debrief|ramble)(
 
 ## Following your editor
 
-`<leader>O` opens `$EDITOR` at the cursor's file and line in a tmux split
-beside debrief, without suspending it, and debrief starts following the
+`<leader>O` opens `$EDITOR` at the cursor's file and line in a tmux or
+rex split beside debrief, without suspending it, and debrief starts following the
 editor's cursor. `debrief --follow` follows from the start, for an editor
-you opened yourself. Outside tmux, `<leader>O` runs the editor like
+you opened yourself. Outside tmux and rex, `<leader>O` runs the editor like
 `<leader>o` and nothing is followed.
 
 - The diff cursor moves to the editor's line in the open commit. A line
@@ -423,13 +430,14 @@ you opened yourself. Outside tmux, `<leader>O` runs the editor like
 - Using debrief yourself (a key, a click or scroll, a paste) pauses
   following for 2 seconds. It also waits while a prompt, picker, comment
   box, visual mode or half-typed key sequence is open.
-- Inside tmux, debrief only follows editors in its own tmux window.
+- Inside tmux or rex, debrief only follows editors in its own window
+  (a rex tab).
 
 The editor tells debrief with `debrief --goto FILE:LINE` (or
 `ramble --goto`, which reaches the same listeners). It finds the
 following debriefs and rambles (sockets in
 `$XDG_RUNTIME_DIR/debrief-follow-<uid>/`, else `$TMPDIR`, else `/tmp`),
-picks those in its own tmux window, and exits 0 even when none is
+picks those in its own tmux or rex window, and exits 0 even when none is
 listening. It takes a few milliseconds, so an editor can run it on every
 cursor move. Linux and macOS only.
 
@@ -700,7 +708,7 @@ session. The rows without a key are set only in the file.
 | narrowest auto file list | — | `view.sidebar_min_width` | `16` |
 | widest auto file list (also ≤ 35%) | — | `view.sidebar_max_width` | `48` |
 | commit list under the file list | `<leader>E` | `view.sidebar_commits` | `false` |
-| `C-h/j/k/l` move between panes (and tmux panes) | — | `keys.pane_nav` | `true` |
+| `C-h/j/k/l` move between panes (and tmux or rex panes) | — | `keys.pane_nav` | `true` |
 | stats pane on the log | `<leader>e` | `view.stats` | `true` |
 | hunks / the full file | `T` | `view.context` | `"hunks"` (or `"full"`) |
 | unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
@@ -710,7 +718,7 @@ session. The rows without a key are set only in the file.
 | the log lists the first-parent spine, merges as folds | `<leader>m` | `view.fold_merges` | `true` |
 | a scrollbar on a long list's right edge for a second after it scrolls | — | `view.scrollbars` | `true` |
 | git: the open working-copy view follows file changes | `r` | `view.follow_working` | `false` |
-| zoom the tmux pane while debrief runs (see [Panes and tmux](#panes-and-tmux)) | — | `view.tmux_zoom` | `false` |
+| zoom the tmux or rex pane while debrief runs (see [Panes, tmux and rex](#panes-tmux-and-rex)) | — | `view.tmux_zoom` | `false` |
 | syntax highlighting | — | `render.highlight` | `true` |
 | key clue after a pause in a sequence | — | `keys.clue` | `true` |
 | the `<leader>` key | — | `keys.leader` | `" "` |
@@ -724,11 +732,11 @@ A launcher runs a command with the TUI suspended, then reloads. Arguments
 are not passed through a shell. Variables: `${file}` `${line}` `${root}`
 `${editor}` (`$VISUAL`, `$EDITOR` or `vi`). The defaults are `edit`
 (`<leader>o`, the editor), `edit-follow` (`<leader>O`, the editor in a
-tmux split, followed) and `md` (`Enter` in a `.md` file's diff,
+tmux or rex split, followed) and `md` (`Enter` in a `.md` file's diff,
 ramble at that line; it needs ramble 0.3.2 or later for `--line`).
-`follow = true` makes a launcher run in a tmux split beside debrief
-instead of suspending it, and starts [following your
-editor](#following-your-editor); outside tmux it runs as usual. A `key` is `<leader>` followed by plain characters. Entries
+`follow = true` makes a launcher run in a tmux or rex split beside
+debrief instead of suspending it, and starts [following your
+editor](#following-your-editor); outside both it runs as usual. A `key` is `<leader>` followed by plain characters. Entries
 merge into the defaults by name; `disabled = true` drops one. A launcher
 key wins over a built-in `<leader>` key it shares a
 prefix with.

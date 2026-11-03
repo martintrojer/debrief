@@ -4,7 +4,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::{ANY, DIR_PREFIX};
+use crate::{ANY, DIR_PREFIX, Mux};
 
 fn euid() -> u32 {
     rustix::process::geteuid().as_raw()
@@ -79,23 +79,24 @@ pub fn scope_from(tmux: Option<&str>, window_id: Option<&str>) -> String {
     }
 }
 
-/// This process's scope: asks tmux for the window of `$TMUX_PANE` when
-/// inside tmux (both `$TMUX` and `$TMUX_PANE` set).
+/// This process's scope: asks its multiplexer ([`Mux::current`]) for the
+/// window of its pane.
 pub fn current_scope() -> String {
-    // Without the pane, tmux would answer for the most recent client's
-    // window, which may not be ours.
-    let (Ok(tmux), Ok(pane)) = (std::env::var("TMUX"), std::env::var("TMUX_PANE")) else {
+    let Some(mux) = Mux::current() else {
         return ANY.into();
     };
-    let win = std::process::Command::new("tmux")
-        .args(["display-message", "-p", "-t", &pane, "#{window_id}"])
+    // tmux needs the pane: without it, it would answer for the most
+    // recent client's window, which may not be ours.
+    let argv = mux.window_argv();
+    let out = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-    scope_from(Some(&tmux), win.as_deref())
+    mux.scope(std::env::var("TMUX").ok().as_deref(), out.as_deref())
 }
 
 /// One message line: `<line> <path>`, line 1-based, path absolute and
@@ -222,9 +223,13 @@ fn read_client(conn: UnixStream) -> Option<(usize, PathBuf)> {
     let mut buf = Vec::new();
     loop {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
-        if left.is_zero() || conn.set_read_timeout(Some(left)).is_err() {
+        if left.is_zero() {
             break;
         }
+        // macOS refuses the timeout (EINVAL) once the client has closed,
+        // as `--goto` does right after writing; its reads then can't
+        // block, so go on without one.
+        let _ = conn.set_read_timeout(Some(left));
         buf.clear();
         match reader.read_until(b'\n', &mut buf) {
             Ok(0) => break,
@@ -299,7 +304,14 @@ mod tests {
         assert!(in_scope("t1w2", &s(ANY, 5)));
         assert!(!in_scope("t1w2", &s("t1w3", 5)));
         assert!(!in_scope("t1w2", &s("t9w2", 5)));
-        assert!(in_scope(ANY, &s("t1w3", 5)), "outside tmux: everyone");
+        assert!(
+            in_scope(ANY, &s("t1w3", 5)),
+            "outside a multiplexer: everyone"
+        );
+        assert!(
+            !in_scope("t1w2", &s("r0123456789ab", 5)),
+            "tmux and rex apart"
+        );
         assert!(!in_scope(ANY, "notes.txt"));
     }
 }

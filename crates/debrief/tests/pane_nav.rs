@@ -1,5 +1,6 @@
 //! `C-h/j/k/l`: file list <-> diff, file list -> old -> new
-//! side by side, the tmux hand-off at an edge only inside tmux, the
+//! side by side, the multiplexer hand-off at an edge only inside tmux or
+//! rex, the
 //! comment box keeping its keys, and `[keys] pane_nav = false`.
 
 mod common;
@@ -42,7 +43,7 @@ fn fixture() -> Fixture {
     }
 }
 
-/// The tmux commands the app ran.
+/// The multiplexer commands the app ran.
 type Ran = Rc<RefCell<Vec<String>>>;
 
 impl Fixture {
@@ -57,7 +58,11 @@ impl Fixture {
             opts,
         )
         .unwrap()
-        .with_env(move |k| (k == "TMUX" && tmux).then(|| "/tmp/tmux-1/default,1,0".into()))
+        .with_env(move |k| match k {
+            "TMUX" if tmux => Some("/tmp/tmux-1/default,1,0".into()),
+            "TMUX_PANE" if tmux => Some("%1".into()),
+            _ => None,
+        })
         .with_pane_runner(move |c| {
             r.borrow_mut().push(c.argv.join(" "));
             Ok(Exit::Code(0))
@@ -196,7 +201,11 @@ fn without_tmux_an_edge_does_nothing() {
     assert!(ran(&r).is_empty());
     // An empty $TMUX is no tmux.
     let (app, r) = f.open("", false);
-    let mut app = app.with_env(|k| (k == "TMUX").then(String::new));
+    let mut app = app.with_env(|k| match k {
+        "TMUX" => Some(String::new()),
+        "TMUX_PANE" => Some("%1".into()),
+        _ => None,
+    });
     ctrl(&mut app, 'l');
     assert!(ran(&r).is_empty());
 }
@@ -288,4 +297,26 @@ fn help_lists_the_keys_while_bound() {
     let (mut app, _) = f.open("[keys]\npane_nav = false\n", false);
     assert!(!help_has(&mut app, "C-h"));
     assert!(help_has(&mut app, "C-w h"));
+}
+
+#[test]
+fn inside_rex_edges_move_the_rex_focus() {
+    let f = fixture();
+    let (app, r) = f.open("", false);
+    let mut app = app.with_env(|k| match k {
+        "REX_SESSION" => Some("session:s".into()),
+        "REX_BLOCK" => Some("block:b".into()),
+        _ => None,
+    });
+    ctrl(&mut app, 'h');
+    assert!(ran(&r).is_empty(), "the list is a pane");
+    for (c, dir) in [('h', "left"), ('j', "down"), ('k', "up")] {
+        ctrl(&mut app, c);
+        assert_eq!(
+            ran(&r),
+            [format!("rex --autostart=false focus -s session:s {dir}")],
+            "C-{c}"
+        );
+    }
+    assert_eq!(app.focus(), Focus::Files, "focus stays");
 }

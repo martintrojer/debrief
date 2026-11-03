@@ -63,7 +63,7 @@ fn fixture() -> Fixture {
     fixture_n(5)
 }
 
-/// The tmux commands the app ran.
+/// The multiplexer commands the app ran.
 type Ran = Rc<RefCell<Vec<String>>>;
 
 fn ran(r: &Ran) -> Vec<String> {
@@ -83,7 +83,11 @@ impl Fixture {
             opts,
         )
         .unwrap()
-        .with_env(|k| (k == "TMUX").then(|| "/tmp/tmux-1/default,1,0".into()))
+        .with_env(|k| match k {
+            "TMUX" => Some("/tmp/tmux-1/default,1,0".into()),
+            "TMUX_PANE" => Some("%1".into()),
+            _ => None,
+        })
         .with_pane_runner(move |c| {
             r.borrow_mut().push(c.argv.join(" "));
             Ok(Exit::Code(0))

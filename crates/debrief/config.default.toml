@@ -57,6 +57,10 @@
 # unified | split: the commit view in one column or side by side (t).
 # layout = "unified"
 
+# Long rows of the unified diff wrap at the pane's edge instead of
+# scrolling sideways (<leader>w). Side by side never wraps.
+# wrap = false
+
 # tree | flat: the commit view's file list as a directory tree or whole
 # paths in git's order (` in the list).
 # files = "tree"

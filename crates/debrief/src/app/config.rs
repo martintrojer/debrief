@@ -193,6 +193,9 @@ pub struct ViewConfig {
     /// The commit view's layout at start: `"unified"` (the default) or
     /// `"split"` (side by side); `t` toggles.
     pub layout: Layout,
+    /// Long rows of the unified diff wrap at the pane's edge (off by
+    /// default; `<leader>w` toggles). Side by side never wraps.
+    pub wrap: bool,
     /// The commit view's file list at start: `"tree"` (the default) or
     /// `"flat"` (whole paths in git's order); `` ` `` toggles.
     pub files: FilesLayout,
@@ -379,6 +382,7 @@ impl Default for ViewConfig {
             stats: true,
             context: DiffContext::Default,
             layout: Layout::Unified,
+            wrap: false,
             files: FilesLayout::Tree,
             split_min_width: SPLIT_MIN_WIDTH,
             tmux_zoom: false,
@@ -572,6 +576,7 @@ impl Config {
                 None => {}
             }
             set(&mut c.view.layout, v.layout);
+            set(&mut c.view.wrap, v.wrap);
             set(&mut c.view.files, v.files);
             set(&mut c.view.split_min_width, v.split_min_width);
             set(&mut c.view.tmux_zoom, v.tmux_zoom);
@@ -857,6 +862,7 @@ struct RawView {
     stats: Option<bool>,
     context: Option<RawContext>,
     layout: Option<Layout>,
+    wrap: Option<bool>,
     files: Option<FilesLayout>,
     split_min_width: Option<u16>,
     tmux_zoom: Option<bool>,
@@ -1284,6 +1290,12 @@ kinds = [
                 .view
                 .follow_working
         );
+    }
+
+    #[test]
+    fn view_wrap_defaults_off() {
+        assert!(!Config::defaults().view.wrap);
+        assert!(Config::parse("[view]\nwrap = true\n").unwrap().view.wrap);
     }
 
     #[test]

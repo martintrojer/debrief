@@ -1,7 +1,7 @@
 //! Cursor motions and scrolling in the commit view, over grapheme cells of
 //! each row's untruncated text (copied from ramble's motion.rs and
 //! scroll.rs). The view follows the cursor both ways: rows scroll
-//! vertically, columns horizontally (no wrapping).
+//! vertically, columns horizontally (unless rows wrap; see `wrap.rs`).
 
 use super::commit::{CommitView, RowKind};
 use super::display::{self, Glyph};
@@ -362,27 +362,29 @@ impl CommitView {
         moved
     }
 
-    // Scrolling (ramble's scroll.rs).
+    // Scrolling (ramble's scroll.rs), in screen lines: `scroll` is the
+    // first one drawn and the view is `view_h` of them. A wrapped row
+    // takes several (see `wrap.rs`); without wrapping a row is a line.
 
     pub(super) fn max_scroll(&self) -> usize {
-        (self.rows.len() + self.overscroll).saturating_sub(self.view_h)
+        (self.total_lines() + self.overscroll).saturating_sub(self.view_h)
     }
 
-    /// `C-d` (down) / `C-u` (up).
+    /// `C-d` (down) / `C-u` (up): the view and the cursor half a page.
     pub(super) fn half_page(&mut self, down: bool) {
         let half = (self.view_h / 2).max(1);
-        let max = self.max_scroll();
-        let row = if down {
-            (self.cur.row + half).min(self.last_row())
+        let cur = self.cursor_line();
+        let target = if down {
+            (cur + half).min(self.total_lines().saturating_sub(1))
         } else {
-            self.cur.row.saturating_sub(half)
+            cur.saturating_sub(half)
         };
         self.scroll = if down {
-            (self.scroll + half).min(max)
+            (self.scroll + half).min(self.max_scroll())
         } else {
             self.scroll.saturating_sub(half)
         };
-        self.move_to_row(row);
+        self.move_to_line(target);
     }
 
     /// `C-f`.
@@ -392,7 +394,7 @@ impl CommitView {
             self.move_to_row(self.last_row());
         } else {
             self.scroll = new;
-            self.move_to_row(self.cur.row.max(new));
+            self.move_into_view();
         }
     }
 
@@ -404,74 +406,134 @@ impl CommitView {
             self.move_to_row(0);
         } else {
             self.scroll = new;
-            self.move_to_row(self.cur.row.min(new + vh - 1));
+            self.move_into_view();
         }
     }
 
     /// `C-e`.
     pub(super) fn line_down(&mut self) {
         self.scroll = (self.scroll + 1).min(self.max_scroll());
-        if self.cur.row < self.scroll {
-            self.move_to_row(self.scroll);
-        }
+        self.move_into_view();
     }
 
     /// `C-y`.
     pub(super) fn line_up(&mut self) {
         self.scroll = self.scroll.saturating_sub(1);
-        if self.cur.row >= self.scroll + self.view_h {
-            self.move_to_row(self.scroll + self.view_h - 1);
+        self.move_into_view();
+    }
+
+    /// After the view scrolled, the cursor to the nearest place on screen
+    /// [`Self::keep_visible`] accepts, so the view does not scroll back.
+    pub(super) fn move_into_view(&mut self) {
+        if self.cursor_shown() {
+            return;
         }
+        let cur = self.cursor_line();
+        if let Some(p) = self.nearest_place(cur, None) {
+            return self.go_to_place(p);
+        }
+        // No row fits on screen whole here: the next row the way the view
+        // went, which `keep_visible` then shows, so the view still moves
+        // on (a jump past the rows that cannot be shown whole).
+        let (top, vh) = (self.scroll, self.view_h.max(1));
+        let down = self.line(self.cur.row) < top;
+        let row = self
+            .row_at(if down { top } else { top + vh - 1 })
+            .min(self.last_row());
+        let row = if down && self.line(row) < top {
+            (row + 1).min(self.last_row())
+        } else if !down && self.line(row) + self.height_of(row) > top + vh {
+            row.saturating_sub(1)
+        } else {
+            row
+        };
+        self.move_to_row(row);
     }
 
-    /// `zz`.
+    /// The cursor row's first line and its height.
+    fn cursor_row_lines(&self) -> (usize, usize) {
+        (self.line(self.cur.row), self.height_of(self.cur.row))
+    }
+
+    /// `zz`: the cursor's row in the middle; a row taller than the view,
+    /// the cursor's line.
     pub(super) fn center_cursor(&mut self) {
-        let half = (self.view_h - 1) / 2;
-        self.scroll = self.cur.row.saturating_sub(half).min(self.max_scroll());
+        let (start, h) = self.cursor_row_lines();
+        let top = if h <= self.view_h {
+            start.saturating_sub((self.view_h - h) / 2)
+        } else {
+            self.cursor_line()
+                .saturating_sub((self.view_h.max(1) - 1) / 2)
+        };
+        self.scroll = top.min(self.max_scroll());
     }
 
-    /// `zt`.
+    /// `zt`: the cursor's row at the top (a taller row: the cursor's line).
     pub(super) fn cursor_to_top(&mut self) {
-        self.scroll = self.cur.row.min(self.max_scroll());
+        let (start, h) = self.cursor_row_lines();
+        let top = if h <= self.view_h {
+            start
+        } else {
+            self.cursor_line()
+        };
+        self.scroll = top.min(self.max_scroll());
     }
 
-    /// `zb`.
+    /// `zb`: the cursor's row at the bottom (a taller row: the cursor's
+    /// line).
     pub(super) fn cursor_to_bottom(&mut self) {
-        self.scroll = (self.cur.row + 1).saturating_sub(self.view_h);
+        let (start, h) = self.cursor_row_lines();
+        let end = if h <= self.view_h {
+            start + h
+        } else {
+            self.cursor_line() + 1
+        };
+        self.scroll = end.saturating_sub(self.view_h);
     }
 
-    fn visible_bottom(&self) -> usize {
-        (self.scroll + self.view_h - 1).min(self.last_row())
-    }
-
-    /// `H`: row `n` from the top of the view.
+    /// `H`: line `n` from the top of the view.
     pub(super) fn screen_top(&mut self, n: usize) {
-        let bottom = self.visible_bottom();
-        self.goto_row((self.scroll + n - 1).min(bottom));
+        let l = (self.scroll + n - 1).min(self.last_visible_line());
+        self.goto_screen_line(l);
     }
 
-    /// `L`: row `n` from the bottom of the view.
+    /// `L`: line `n` from the bottom of the view.
     pub(super) fn screen_bottom(&mut self, n: usize) {
-        let bottom = self.visible_bottom();
-        self.goto_row(bottom.saturating_sub(n - 1).max(self.scroll));
+        let l = self
+            .last_visible_line()
+            .saturating_sub(n - 1)
+            .max(self.scroll);
+        self.goto_screen_line(l);
     }
 
     /// `M`: middle of the view.
     pub(super) fn screen_middle(&mut self) {
-        let mid = self.scroll + (self.visible_bottom() - self.scroll) / 2;
-        self.goto_row(mid);
+        let last = self.last_visible_line().max(self.scroll);
+        self.goto_screen_line(self.scroll + (last - self.scroll) / 2);
     }
 
-    /// Scroll just enough to show the cursor: its row, and the whole
-    /// grapheme under it within the text columns.
+    /// Scroll just enough to show the cursor: its whole row when it fits,
+    /// else the cursor's line; and unless wrapping, the whole grapheme
+    /// under it within the text columns.
     pub(super) fn keep_visible(&mut self) {
         let vh = self.view_h.max(1);
-        if self.cur.row < self.scroll {
-            self.scroll = self.cur.row;
-        } else if self.cur.row >= self.scroll + vh {
-            self.scroll = self.cur.row + 1 - vh;
+        let (start, h) = self.cursor_row_lines();
+        let (lo, hi) = if h <= vh {
+            (start, start + h)
+        } else {
+            let l = self.cursor_line();
+            (l, l + 1)
+        };
+        if lo < self.scroll {
+            self.scroll = lo;
+        } else if hi > self.scroll + vh {
+            self.scroll = hi - vh;
         }
         self.scroll = self.scroll.min(self.max_scroll());
+        if self.wrapping() {
+            self.hscroll = 0;
+            return;
+        }
         let w = self.text_w.max(1);
         let cell_w = self
             .cells(self.cur.row)

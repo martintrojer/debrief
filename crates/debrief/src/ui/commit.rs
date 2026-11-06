@@ -1,7 +1,8 @@
 //! The commit view's diff pane: a `●` review gutter (while the commit has
 //! comments), a `oooo nnnn ±` gutter, then the row text laid out by
 //! [`display::cells`], cut at the pane's width and scrolled horizontally
-//! with the cursor. Added, removed, hunk-header, cursor and selected rows
+//! with the cursor, or with `[view] wrap` broken into screen lines (each
+//! after a blank gutter). Added, removed, hunk-header, cursor and selected rows
 //! are coloured across the whole pane; a file header's rule runs to the
 //! right edge. Syntax colours, once they arrive, set the foreground of a
 //! line's cells (an expanded tab takes its span's colour); the row
@@ -62,19 +63,26 @@ fn gutter(app: &App, r: &DiffRow, w: usize) -> (String, Option<(char, Color)>) {
     }
 }
 
-/// The display cells of `text` within columns `[from, from + width)`,
-/// each with the columns `[start, end)` it shows there. An expanded tab cut
-/// by an edge shows its remaining columns; any other cut cell is dropped.
-fn visible(text: &str, from: usize, width: usize) -> Vec<(DisplayCell<'_>, usize, usize)> {
+/// The display `cells` of a row (in column order) within columns
+/// `[from, from + width)`, each with the columns `[start, end)` it shows
+/// there. An expanded tab cut by an edge shows its remaining columns; any
+/// other cut cell is dropped. Only the cells near the window are looked at,
+/// so the many screen lines of a long wrapped row cost one pass in all.
+fn visible<'c, 'a>(
+    cells: &'c [DisplayCell<'a>],
+    from: usize,
+    width: usize,
+) -> impl Iterator<Item = (&'c DisplayCell<'a>, usize, usize)> {
     let to = from + width;
-    display::cells(text)
-        .into_iter()
-        .filter_map(|c| {
+    let first = cells.partition_point(|c| c.col + c.width <= from);
+    cells[first..]
+        .iter()
+        .take_while(move |c| c.col < to)
+        .filter_map(move |c| {
             let (start, end) = (c.col.max(from), (c.col + c.width).min(to));
             let whole = start == c.col && end == c.col + c.width;
             (start < end && (whole || c.glyph == Glyph::Tab)).then_some((c, start, end))
         })
-        .collect()
 }
 
 /// The empty pane: loading, or nothing to show.
@@ -113,18 +121,33 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         gutter_w: gutter_width(num_w),
         side: None,
     };
-    let scroll = app.commit_scroll().0;
-    for (y, (i, r)) in rows
-        .iter()
-        .enumerate()
-        .skip(scroll)
-        .take(area.height as usize)
-        .enumerate()
-    {
-        let rect = Rect::new(area.x, area.y + y as u16, area.width, 1);
-        draw_row(frame, app, &pane, i, r, rect);
+    // Wrapping, the view may start inside its first row.
+    let (top, mut skip) = app.commit_top();
+    let wrap = app.commit_wraps();
+    let mut y = 0;
+    'rows: for (i, r) in rows.iter().enumerate().skip(top) {
+        let starts = if wrap {
+            app.commit_segments(i)
+        } else {
+            vec![pane.hscroll]
+        };
+        let cells = display::cells(&r.text);
+        for (k, &from) in starts.iter().enumerate().skip(std::mem::take(&mut skip)) {
+            if y >= area.height {
+                break 'rows;
+            }
+            let rect = Rect::new(area.x, area.y + y, area.width, 1);
+            let seg = Seg {
+                from,
+                to: starts.get(k + 1).copied(),
+                first: k == 0,
+            };
+            draw_row(frame, app, &pane, (i, r, &cells), rect, seg);
+            y += 1;
+        }
     }
-    super::scrollbar::draw(frame, app, "diff", area, rows.len(), scroll);
+    let (total, scroll) = (app.commit_total_lines(), app.commit_scroll().0);
+    super::scrollbar::draw(frame, app, "diff", area, total, scroll);
 }
 
 /// The diff line a row shows, if it is one.
@@ -170,10 +193,40 @@ pub(super) struct Pane<'a> {
     pub side: Option<debrief_review::Side>,
 }
 
-/// Draw row `i` of `p` in the one-row `rect`.
-pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &DiffRow, rect: Rect) {
+/// The part of a row one screen line shows: its text columns from `from`
+/// (to `to`, the next line's start, when it wraps on), and whether it is
+/// the row's first line (the only one with the marker and the gutter).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Seg {
+    pub from: usize,
+    pub to: Option<usize>,
+    pub first: bool,
+}
+
+impl Seg {
+    /// A whole row scrolled to column `hscroll`.
+    pub(super) fn whole(hscroll: usize) -> Self {
+        Seg {
+            from: hscroll,
+            to: None,
+            first: true,
+        }
+    }
+}
+
+/// Draw screen line `seg` of row `i` of `p` (`r`, laid out as `cells`) in
+/// the one-row `rect`.
+pub(super) fn draw_row(
+    frame: &mut Frame,
+    app: &App,
+    p: &Pane,
+    (i, r, cells): (usize, &DiffRow, &[DisplayCell]),
+    rect: Rect,
+    seg: Seg,
+) {
     let pal = &app.theme().palette;
     let text_w = (rect.width as usize).saturating_sub(p.gutter_w + p.marks);
+    let shown_w = seg.to.map_or(text_w, |to| (to - seg.from).min(text_w));
     let selected = p.sel.is_some_and(|(lo, hi)| (lo..=hi).contains(&i));
     let bg = if selected {
         Some(pal.selection_bg)
@@ -194,17 +247,21 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
     let caret = p.caret.filter(|c| c.row == i && p.sel.is_none());
     let mut spans = Vec::new();
     if p.marks > 0 {
-        let m = if p.marked.binary_search(&i).is_ok() {
+        let m = if seg.first && p.marked.binary_search(&i).is_ok() {
             MARKER.to_string()
         } else {
             " ".to_string()
         };
         spans.push(Span::styled(m, base.fg(pal.yellow)));
     }
-    let (nums, sign) = (p.gutter)(r);
-    spans.push(Span::styled(nums, base.fg(pal.muted)));
-    if let Some((c, fg)) = sign {
-        spans.push(Span::styled(format!("{c} "), base.fg(fg)));
+    if seg.first {
+        let (nums, sign) = (p.gutter)(r);
+        spans.push(Span::styled(nums, base.fg(pal.muted)));
+        if let Some((c, fg)) = sign {
+            spans.push(Span::styled(format!("{c} "), base.fg(fg)));
+        }
+    } else {
+        spans.push(Span::styled(" ".repeat(p.gutter_w), base));
     }
     if r.kind == RowKind::Filler {
         // The shorter side of a change block: a dim hatch.
@@ -219,8 +276,8 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
         return;
     }
     let syntax = app.side_spans(r, p.side);
-    let mut col = p.hscroll;
-    for (c, start, end) in visible(&r.text, p.hscroll, text_w) {
+    let mut col = seg.from;
+    for (c, start, end) in visible(cells, seg.from, shown_w) {
         if start > col {
             spans.push(Span::styled(" ".repeat(start - col), base));
         }
@@ -252,16 +309,16 @@ pub(super) fn draw_row(frame: &mut Frame, app: &App, p: &Pane, i: usize, r: &Dif
         }
         col = end;
     }
-    if r.kind == RowKind::FileHeader {
+    if r.kind == RowKind::FileHeader && seg.to.is_none() {
         // The header's rule runs to the right edge.
-        let end = p.hscroll + text_w;
+        let end = seg.from + text_w;
         if end > col {
             spans.push(Span::styled("─".repeat(end - col), base));
         }
     }
     // A row with no cells (empty, or only a hidden trailing CR) still
     // shows the cursor.
-    if caret.is_some() && display::cells(&r.text).is_empty() {
+    if caret.is_some() && cells.is_empty() {
         spans.push(Span::styled(" ", base.add_modifier(Modifier::REVERSED)));
     }
     frame.render_widget(Paragraph::new(Line::from(spans).style(base)), rect);
@@ -272,9 +329,9 @@ mod tests {
     use super::visible;
 
     fn cols(text: &str, from: usize, width: usize) -> Vec<usize> {
-        visible(text, from, width)
-            .iter()
-            .map(|&(_, start, _)| start)
+        let cells = crate::app::display::cells(text);
+        visible(&cells, from, width)
+            .map(|(_, start, _)| start)
             .collect()
     }
 

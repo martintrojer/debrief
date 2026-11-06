@@ -256,6 +256,19 @@ impl App {
     fn hit_diff(&self, d: Rect, p: Position) -> Hit {
         let (scroll, hscroll) = self.commit_scroll();
         let row = scroll + (p.y - d.y) as usize;
+        if let Some(v) = self.commit.as_ref().filter(|v| v.wrapping()) {
+            // A wrapped row: the screen line's row, from its first column.
+            // Past the line's end (it broke early before a wide grapheme
+            // or a tab): its last column, not the next line's first.
+            let (row, from, next) = v.screen_hit((p.y - d.y) as usize);
+            let text = d.x as usize + self.review_gutter() + gutter_width(v.num_w);
+            let col = from + (p.x as usize).saturating_sub(text);
+            return Hit::Diff {
+                row,
+                col: next.map_or(col, |n| col.min(n - 1)),
+                side: None,
+            };
+        }
         let marks = self.review_gutter();
         let num_w = self.commit_num_width();
         let text_col = |start: u16, gutter: usize, hscroll: usize| {
@@ -465,8 +478,9 @@ impl App {
 
     /// The pointer dragged to screen row `row` after a press in the diff:
     /// select the lines from the pressed row to it. On or above the
-    /// diff's top row, or below its bottom, the view scrolls a row and
-    /// the selection follows.
+    /// diff's top row, or below its bottom, the view scrolls a line and
+    /// the selection follows to the first (last) row wholly on screen; in
+    /// a row taller than the view, to the pointer's line.
     fn mouse_drag(&mut self, row: u16) {
         let Some(mut d) = self.mouse.drag else { return };
         if !matches!(self.mode, Mode::Normal | Mode::Visual) {
@@ -477,14 +491,15 @@ impl App {
         let Some(v) = self.commit.as_mut().filter(|v| !v.rows.is_empty()) else {
             return;
         };
-        let target = if row <= diff.y {
+        let (target, line) = if row <= diff.y {
             v.line_up();
-            v.scroll
+            v.edge_place(true)
         } else if row >= diff.bottom() {
             v.line_down();
-            v.scroll + v.view_h - 1
+            v.edge_place(false)
         } else {
-            v.scroll + (row - diff.y) as usize
+            let l = v.scroll + (row - diff.y) as usize;
+            (v.row_at(l), l)
         };
         let target = target.min(v.last_row());
         if !d.moved && target == d.anchor {
@@ -493,6 +508,7 @@ impl App {
         v.anchor = d.anchor;
         v.cur.row = target;
         v.clamp_cursor();
+        v.onto_line(line);
         v.keep_visible();
         self.mode = Mode::Visual;
         d.moved = true;

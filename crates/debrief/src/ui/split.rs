@@ -13,8 +13,9 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 
-use super::commit::{Pane, diff_line, draw_row, sign_of};
+use super::commit::{Pane, Seg, diff_line, draw_row, sign_of};
 use crate::app::commit::side_gutter_width;
+use crate::app::display;
 use crate::app::split::spans_both;
 use crate::app::{App, DiffRow, Focus, Mode};
 
@@ -67,25 +68,35 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         let r = &left.rows[i];
         if spans_both(r.kind) {
             let rect = Rect::new(area.x, y, area.width, 1);
-            draw_row(frame, app, across, i, r, rect);
+            let cells = display::cells(&r.text);
+            draw_row(
+                frame,
+                app,
+                across,
+                (i, r, &cells),
+                rect,
+                Seg::whole(across.hscroll),
+            );
             continue;
         }
+        let cells = display::cells(&r.text);
         draw_row(
             frame,
             app,
             &left,
-            i,
-            r,
+            (i, r, &cells),
             Rect::new(lrect.x, y, lrect.width, 1),
+            Seg::whole(left.hscroll),
         );
         if let Some(r) = right.rows.get(i) {
+            let cells = display::cells(&r.text);
             draw_row(
                 frame,
                 app,
                 &right,
-                i,
-                r,
+                (i, r, &cells),
                 Rect::new(rrect.x, y, rrect.width, 1),
+                Seg::whole(right.hscroll),
             );
         }
         if rrect.x > lrect.right() {

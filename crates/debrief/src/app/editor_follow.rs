@@ -136,7 +136,7 @@ impl App {
         let Some(row) = follow_row(diff, &v.rows, file, line) else {
             return;
         };
-        let visible = row >= v.scroll && row < v.scroll + v.view_h.max(1);
+        let visible = v.row_shown(row);
         v.goto_row(row);
         if !visible {
             v.center_cursor();

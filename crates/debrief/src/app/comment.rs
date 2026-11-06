@@ -365,8 +365,7 @@ impl App {
         let wrap = wrap_width(w);
         let rows = d.text.rows(wrap);
         let want = box_height(d, pane.width);
-        let scroll = self.commit_scroll().0 as i64;
-        let (lo, hi) = (d.rows.0 as i64 - scroll, d.rows.1 as i64 - scroll);
+        let (lo, hi) = self.commit_screen_span(d.rows.0, d.rows.1);
         let (y, h) = place(lo, hi, want, pane.height);
         let vis = (h as usize).saturating_sub(2).max(1);
         let (row, col) = d.text.cursor_cell(wrap);
@@ -431,22 +430,18 @@ impl App {
             return;
         }
         let (h, ph) = (box_height(d, pane.width), pane.height);
-        let ((lo, hi), max) = (d.rows, v.max_scroll());
+        // In screen lines: a wrapped row takes several.
+        let ((lo, hi), max) = ((v.line(d.rows.0), v.line(d.rows.1 + 1) - 1), v.max_scroll());
         let dir = v.scroll.cmp(&d.view) as i8;
         let s = if d.scrolled {
-            user_scroll(lo, hi, h, ph, v.scroll, max, dir, v.rows.len())
+            user_scroll(lo, hi, h, ph, v.scroll, max, dir, v.total_lines())
         } else {
             fit_scroll(lo, hi, h, ph, v.scroll, max, dir)
         };
         v.scroll = s;
         d.view = s;
         let (y, bh) = place(lo as i64 - s as i64, hi as i64 - s as i64, h, ph);
-        let on = v.cur.row.clamp(s, s + v.view_h.max(1) - 1) - s;
-        let shown = usize::from(ph).min(v.rows.len().saturating_sub(s));
-        let row = s + off_the_box(on, y, bh, shown).unwrap_or(on);
-        if row != v.cur.row {
-            v.move_to_row(row);
-        }
+        v.keep_off_box(s + usize::from(y), s + usize::from(y) + usize::from(bh));
     }
 
     /// `[review] kinds` lists some (Tab cycles them).

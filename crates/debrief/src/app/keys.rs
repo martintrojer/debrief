@@ -32,6 +32,7 @@ pub const TOGGLES: &[(Action, &str, &str)] = &[
     (Action::ToggleCommits, "<leader>E", "view.sidebar_commits"),
     (Action::ToggleContext, "T", "view.context"),
     (Action::ToggleLayout, "t", "view.layout"),
+    (Action::ToggleWrap, "<leader>w", "view.wrap"),
     (Action::ToggleFiles, "`", "view.files"),
     (Action::ToggleFolds, "<leader>m", "view.fold_merges"),
 ];
@@ -97,6 +98,8 @@ pub enum Action {
     ToggleContext,
     /// `t`: unified / side by side.
     ToggleLayout,
+    /// `<leader>w`: long rows wrap / scroll sideways (unified).
+    ToggleWrap,
     /// `Tab` side by side: the cursor to the other side.
     SwitchSide,
     /// `]]` / `[[`: the next (older) / previous commit of the log.
@@ -380,7 +383,7 @@ impl App {
     /// screen, `E`, `F`, `b`, `m`, `rl`, `rr`, `rs`, `ss`), as in ramble. `e` toggles the file list on
     /// the commit screen and the stats pane on the log; `E` the commit
     /// list under the file list's tree; `m` merge folding, on every
-    /// screen.
+    /// screen; `w` line wrapping, on the commit screen.
     pub(super) fn leader_keymap(&self, after: &[KeyEvent]) -> KeyResult {
         let Some(typed) = after.iter().map(plain).collect::<Option<Vec<char>>>() else {
             return KeyResult::None;
@@ -396,6 +399,9 @@ impl App {
                 ['F'] => KeyResult::Action(Action::FiltersClear),
                 ['b'] => KeyResult::Action(Action::BranchList),
                 ['m'] => KeyResult::Action(Action::ToggleFolds),
+                ['w'] if matches!(self.screen, Screen::Commit(_)) => {
+                    KeyResult::Action(Action::ToggleWrap)
+                }
                 ['r', 'l'] => KeyResult::Action(Action::ReviewList),
                 ['r', 'r'] => KeyResult::Action(Action::ReviewSend),
                 ['r', 's'] => KeyResult::Action(Action::SessionList),
@@ -792,6 +798,7 @@ impl App {
             A::Reload => return self.reload_view(),
             A::ToggleContext => return self.toggle_context(),
             A::ToggleLayout => return self.toggle_layout(),
+            A::ToggleWrap => return self.toggle_wrap(),
             A::SwitchSide => return self.switch_side(),
             A::Commit(forward) => return self.step_commit(forward),
             A::SearchStart(f) => return self.search_start(f),
@@ -916,6 +923,7 @@ fn visual_ok(a: Action) -> bool {
             | A::Commit(_)
             | A::ToggleContext
             | A::ToggleLayout
+            | A::ToggleWrap
             | A::SwitchSide
             | A::ToggleSidebar
             | A::ToggleFiles

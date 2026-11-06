@@ -319,7 +319,7 @@ impl CommitView {
         let Some(diff) = self.diff.take() else {
             return;
         };
-        let on_screen = self.cur.row.saturating_sub(self.scroll);
+        let on_screen = self.screen_offset();
         self.build_entries(&diff);
         self.build_rows(&diff);
         self.diff = Some(diff);
@@ -331,11 +331,7 @@ impl CommitView {
                 .saturating_sub(usize::from(blank))
                 .min(self.last_row());
             self.clamp_cursor();
-            self.scroll = self
-                .cur
-                .row
-                .saturating_sub(on_screen)
-                .min(self.max_scroll());
+            self.set_screen_offset(on_screen);
         }
         self.side_sel = sel.and_then(|f| self.entry_of(f)).unwrap_or(0);
     }

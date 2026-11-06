@@ -260,6 +260,7 @@ pub struct CommitView {
     pub(super) cells: Vec<Vec<Cell>>,
     pub(super) cur: Cursor,
     pub(super) want_col: usize,
+    /// First screen line drawn: a row unless rows wrap (`wrap.rs`).
     pub(super) scroll: usize,
     /// First text column drawn.
     pub(super) hscroll: usize,
@@ -270,6 +271,14 @@ pub struct CommitView {
     pub(super) overscroll: usize,
     /// Text columns on screen (after the gutter), from the layout.
     pub(super) text_w: usize,
+    /// `[view] wrap` / `<leader>w`: long rows wrap (unified only; see
+    /// [`super::wrap`]).
+    pub(super) wrap: bool,
+    /// Each row's first screen line, then the total; empty when not
+    /// wrapping.
+    pub(super) lines: Vec<usize>,
+    /// The text width `lines` was built for.
+    pub(super) lines_w: Option<usize>,
     pub(super) search: Search,
     /// Visual mode's anchor row.
     pub(super) anchor: usize,
@@ -343,6 +352,9 @@ impl CommitView {
             view_h: 20,
             overscroll: 0,
             text_w: 60,
+            wrap: false,
+            lines: Vec::new(),
+            lines_w: None,
             search: Search::default(),
             anchor: 0,
             side_sel: 0,
@@ -847,7 +859,7 @@ impl App {
         else {
             return false;
         };
-        let anchor = v.anchor().map(|a| (a, v.cur.row.saturating_sub(v.scroll)));
+        let anchor = v.anchor().map(|a| (a, v.screen_offset()));
         let row = v.cur.row;
         self.next_request += 1;
         let request = self.next_request;
@@ -890,7 +902,7 @@ impl App {
             Context::Default => "hunks",
         });
         let Some(v) = &self.commit else { return };
-        let anchor = v.anchor().map(|a| (a, v.cur.row.saturating_sub(v.scroll)));
+        let anchor = v.anchor().map(|a| (a, v.screen_offset()));
         let working = v.working;
         self.next_request += 1;
         let request = self.next_request;
@@ -950,7 +962,7 @@ impl App {
                     anchor.and_then(|(a, y)| Some((v.anchor_row(&a)?, y)))
                 {
                     v.goto_row(row.min(v.rows.len().saturating_sub(1)));
-                    v.scroll = v.cur.row.saturating_sub(on_screen).min(v.max_scroll());
+                    v.set_screen_offset(on_screen);
                 }
                 let pick = v.goto_comment.take();
                 let restore = v.restore.take();
@@ -1139,7 +1151,8 @@ impl App {
         self.commit.as_ref().map_or(Cursor::default(), |v| v.cur)
     }
 
-    /// First row and first text column drawn.
+    /// First screen line and first text column drawn (the line is a row
+    /// unless rows wrap; see [`App::commit_top`]).
     pub fn commit_scroll(&self) -> (usize, usize) {
         self.commit
             .as_ref()
@@ -1172,6 +1185,7 @@ impl App {
         let marks = self.review_gutter();
         let over = self.comment_overscroll();
         let side_w = self.side_pane(diff).width as usize;
+        let wrap = self.wrap;
         if let Some(v) = &mut self.commit {
             v.view_h = (diff.height as usize).max(1);
             v.overscroll = over;
@@ -1181,6 +1195,8 @@ impl App {
                 gutter_width(v.num_w)
             };
             v.text_w = side_w.saturating_sub(gutter + marks).max(1);
+            v.wrap = wrap;
+            v.relines();
             v.keep_visible();
         }
         self.comment_fit();

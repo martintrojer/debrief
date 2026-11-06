@@ -235,6 +235,9 @@ pub(crate) const BINDINGS: &[Binding] = {
         ),
         b("T", C, G::Commit, "hunks / full file"),
         b("t", C, G::Commit, "unified / side by side"),
+        b("<leader>w", C, G::Commit, WRAP_TOGGLE),
+        b("<leader>w", F, G::Files, WRAP_TOGGLE),
+        b("<leader>w", CL, G::Commits, WRAP_TOGGLE),
         b("Tab", C, G::Commit, "side by side: the other side"),
         b("r", C, G::Commit, "refresh the working-copy diff in place"),
         b("]]", C, G::Commit, "open the next commit"),
@@ -480,6 +483,8 @@ const FILTERS_CLEAR: &str = "clear the path and text filters";
 const BRANCH_LIST: &str = "pick the branch the log lists";
 /// `<leader>m`.
 const FOLD_TOGGLE: &str = "merges as folds / the flat list";
+/// `<leader>w`.
+const WRAP_TOGGLE: &str = "wrap long rows / scroll sideways (unified)";
 /// `<leader>E`.
 const COMMIT_LIST_TOGGLE: &str = "show or hide the commit list under the files";
 

@@ -224,6 +224,8 @@ impl CommitView {
             self.split = None;
         }
         self.cells = self.rows.iter().map(|r| row_cells(&r.text)).collect();
+        self.lines_w = None;
+        self.relines();
     }
 
     /// Put the cursor on the other side (same row), its rows, cells,
@@ -307,7 +309,7 @@ impl CommitView {
             .iter()
             .map(|&r| row_ref(&self.rows, r, self.split_side()))
             .collect();
-        let on_screen = self.cur.row.saturating_sub(self.scroll);
+        let on_screen = self.screen_offset();
         self.split_on = split;
         self.side = Side::New;
         let Some(diff) = self.diff.take() else {
@@ -326,11 +328,7 @@ impl CommitView {
             *k = self.find_ref(r).0.min(self.last_row());
         }
         self.goto_row(row);
-        self.scroll = self
-            .cur
-            .row
-            .saturating_sub(on_screen)
-            .min(self.max_scroll());
+        self.set_screen_offset(on_screen);
     }
 
     /// The row (and side) of `want` in the current layout.

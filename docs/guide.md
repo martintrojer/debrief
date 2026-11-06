@@ -240,6 +240,7 @@ It is cut from the left when space runs short, and dropped first.
 | `]f` `[f` / `]c` `[c` | next / previous file / hunk (full file: change) |
 | `T` | hunks / full file |
 | `t` | unified / side by side |
+| `<leader>w` | wrap long rows / scroll them sideways (unified) |
 | `Tab` | side by side: move the cursor to the other side |
 | `]]` `[[` | open the next / previous commit |
 | `r` | on the working copy: reload its diff in place |
@@ -257,8 +258,8 @@ It is cut from the left when space runs short, and dropped first.
 | `<leader>rs` | list the saved review sessions |
 | `q` `Esc` | back to the log |
 
-`T` and `t` last for the rest of the session; `[view] context` and
-`[view] layout` set them at start.
+`T`, `t` and `<leader>w` last for the rest of the session; `[view]
+context`, `[view] layout` and `[view] wrap` set them at start.
 
 **Full file** (`T`) reloads the diff with unlimited context, so every row
 is still a diff line and comments, markers, `<leader>o`, search and copy
@@ -275,6 +276,14 @@ grows back. The cursor is on one side (the new side to start with); `Tab`
 moves it across, and each side scrolls sideways on its own. Selections,
 `cc`, markers, `]r` `[r`, `K` and `<leader>o` act on the cursor's side.
 Search matches both sides and lands on the side of the match.
+
+**Wrap** (`<leader>w`) breaks a row longer than the pane into screen
+lines instead of scrolling sideways; continuation lines have a blank
+gutter. `j` `k` still move a diff row at a time; the view scrolls by
+screen lines and keeps the cursor's row whole on screen. A row taller
+than the pane scrolls like the rest: `$`, `w`, `C-d` and `C-e` move
+through it. Side by side never wraps: it keeps scrolling sideways, and
+wraps again back in unified.
 
 **Highlighting** (catppuccin-mocha) colours each hunk on its own, the old
 and new side apart. Files over 10k diff lines and lines over 2k bytes stay
@@ -712,6 +721,7 @@ session. The rows without a key are set only in the file.
 | stats pane on the log | `<leader>e` | `view.stats` | `true` |
 | hunks / the full file | `T` | `view.context` | `"hunks"` (or `"full"`) |
 | unified / side by side | `t` | `view.layout` | `"unified"` (or `"split"`) |
+| long rows wrap (unified) | `<leader>w` | `view.wrap` | `false` |
 | the file list as a tree / flat paths | `` ` `` | `view.files` | `"tree"` (or `"flat"`) |
 | narrowest diff pane shown side by side | — | `view.split_min_width` | `140` |
 | header row (short ID and subject) on the commit screen | — | `view.header` | `true` |

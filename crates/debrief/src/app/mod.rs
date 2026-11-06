@@ -33,6 +33,7 @@ pub mod stat;
 pub mod textbox;
 mod visual;
 pub mod watch;
+mod wrap;
 pub mod zoom;
 
 use std::path::PathBuf;
@@ -353,6 +354,9 @@ pub struct App {
     /// `` ` ``: the file list as a tree (else flat), for every commit
     /// opened this session.
     files_tree: bool,
+    /// `<leader>w`: long diff rows wrap (unified only), for every commit
+    /// opened this session.
+    wrap: bool,
     /// Bytes for the terminal (OSC 52).
     output: Vec<u8>,
     config: config::Config,
@@ -473,6 +477,7 @@ impl App {
             context: crate::vcs::Context::Default,
             split: false,
             files_tree: true,
+            wrap: false,
             output: Vec::new(),
             config: config::Config::default(),
             theme,
@@ -504,6 +509,7 @@ impl App {
         app.context = app.config.view.context;
         app.split = app.config.view.layout == config::Layout::Split;
         app.files_tree = app.config.view.files == config::FilesLayout::Tree;
+        app.wrap = app.config.view.wrap;
         app.folds.on = app.config.view.fold_merges;
         let (keys, mut errors) = launch::bindings(&app.config.launch);
         app.launch_keys = keys;

@@ -196,8 +196,18 @@ action that starts it.
   accepted: per hunk is cheap and the diff shows before the colours.
   Highlighting yields foreground colours only; row backgrounds stay the
   renderer's.
-- **No wrapping.** Long lines scroll horizontally by display width.
-  Wrapping would break the cell-column cursor model.
+- **Wrapping keeps the cell-column cursor.** Long lines scroll
+  horizontally by display width, unless `[view] wrap` is on in the
+  unified layout. A wrapped row breaks at grapheme starts into screen
+  lines, so the cursor stays (row, display column) and search hits,
+  syntax colours and the caret need no mapping: each line draws the
+  row's columns from its start. `scroll` is the first screen line drawn,
+  so the view can start inside a row taller than the pane and follow the
+  cursor through it; a prefix sum of each row's line count maps rows to
+  lines, and is the identity when not wrapping, so one code path serves
+  both. Rebuilding the lines (a resize, the toggle) keeps the top row.
+  Side by side does not wrap: its two sides would need one shared row
+  height.
 - **The file list drives the diff's order.** `app/file_tree` builds the
   list from the diff's paths, as lazygit's commit files panel does: a
   tree of directories, each level directories first and then files,

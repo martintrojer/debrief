@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "debrief"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "anyhow",
  "blake3",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "debrief-follow"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "rustix",
  "serde_json",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "debrief-review"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "blake3",
  "dirs",
